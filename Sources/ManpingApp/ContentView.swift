@@ -118,6 +118,7 @@ private struct ShellContent: View {
       .onChange(of: immersive) { _, value in if value && shell.peeking { shell.peeking = false } }
     }.ignoresSafeArea(.container, edges: .top)
     .environment(\.cardActions, CardActions(model: model))
+    .environment(\.watchHistory, model.watchHistory)
       .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) {
         _ in
         if DebugUIFixtures.usesLiveSceneMemory {

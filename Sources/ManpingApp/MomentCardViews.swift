@@ -9,6 +9,7 @@ struct MomentVideoCard: View {
   let showComments: () -> Void
   @State private var showingDescription = false
   @Environment(\.colorScheme) private var scheme
+  @Environment(\.watchHistory) private var watchHistory
   private var media: MomentMedia? { MomentMedia.find(item.content) }
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -28,7 +29,15 @@ struct MomentVideoCard: View {
           CachedImage(url: media.cover).aspectRatio(16 / 9, contentMode: .fit).clipped()
             .overlay(alignment: .bottomTrailing) {
               if let duration = media.duration { MediaBadge(text: Self.duration(duration)).padding(8) }
-            }.clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
+            }
+            .overlay(alignment: .bottomLeading) {
+              if let watchHistory, let bvid = media.bvid { WatchedBadge(store: watchHistory, bvid: bvid) }
+            }
+            .overlay(alignment: .bottom) {
+              if let watchHistory, let bvid = media.bvid { WatchProgressBar(store: watchHistory, bvid: bvid) }
+            }
+            .onAppear { if let bvid = media.bvid { watchHistory?.request(bvid) } }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
         }.buttonStyle(CardPressStyle())
         Button { media.open(model: model) } label: {
           Text(media.title).font(Theme.Font.headline).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
@@ -126,6 +135,8 @@ private enum MomentMedia {
   var title: String { switch self { case .video(let video): video.title; case .episode(let episode): episode.title } }
   var cover: URL? { switch self { case .video(let video): video.cover; case .episode(let episode): episode.cover } }
   var duration: Int64? { if case .video(let video) = self { return Int64(video.duration) }; return nil }
+  /// PGC episodes have no bvid, so bili-history only tracks ordinary videos here.
+  var bvid: String? { if case .video(let video) = self { return video.bvid }; return nil }
   @MainActor func open(model: AppModel) {
     switch self {
     case .video(let video): model.open(video)
@@ -140,6 +151,7 @@ private struct MomentContent: View {
   let content: RPCDynamicContent
   @ObservedObject var model: AppModel
   @Environment(\.colorScheme) private var scheme
+  @Environment(\.watchHistory) private var watchHistory
   var body: some View { rendered(content, depth: 0) }
   // Type erasure bounds recursive forwards without recursively expanding the SwiftUI body type.
   private func rendered(_ content: RPCDynamicContent, depth: Int) -> AnyView {
@@ -150,6 +162,13 @@ private struct MomentContent: View {
       return AnyView(Button { media.open(model: model) } label: {
         HStack(spacing: 12) {
           CachedImage(url: media.cover).frame(width: 160, height: 90).clipped()
+            .overlay(alignment: .bottomLeading) {
+              if let watchHistory, let bvid = media.bvid { WatchedBadge(store: watchHistory, bvid: bvid, compact: true) }
+            }
+            .overlay(alignment: .bottom) {
+              if let watchHistory, let bvid = media.bvid { WatchProgressBar(store: watchHistory, bvid: bvid) }
+            }
+            .onAppear { if let bvid = media.bvid { watchHistory?.request(bvid) } }
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
           Text(media.title).font(Theme.Font.body).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
           Image(systemName: "play.circle").font(.system(size: 22)).foregroundStyle(Theme.secondaryText(scheme))

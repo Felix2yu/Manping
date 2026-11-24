@@ -255,6 +255,7 @@ private struct SettingsCategoryView: View {
 
   @ViewBuilder private func trailingRows(_ section: String) -> some View {
     if group == .danmaku, section == "外观" { DanmakuAreaRow(model: model) }
+    if group == .privacy, section == "bili-history" { WatchHistoryTokenRow(store: model.watchHistory) }
     if group == .download, section == "截图" {
       LabeledContent {
         Button("截取画面") { settings.takeScreenshot() }.disabled(!model.canTakeScreenshot)
@@ -286,6 +287,37 @@ private struct SettingsCategoryView: View {
     if group == .danmaku, section == "外观" { DanmakuShieldSection() }
     if group == .network, section == "缓冲" {
       Section("代理") { ProxySettingsCard(model: model.proxySettingsModel) }
+    }
+  }
+}
+
+/// 设置 › 隐私 › bili-history: the credential never enters the preferences store.
+private struct WatchHistoryTokenRow: View {
+  @ObservedObject var store: WatchHistoryStore
+  @Environment(\.colorScheme) private var scheme
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      LabeledContent {
+        HStack(spacing: 8) {
+          SecureField("可选", text: Binding(get: { store.tokenDraft }, set: { store.setTokenDraft($0) }))
+            .textFieldStyle(.roundedBorder).frame(width: 200).labelsHidden()
+          Button { Task { await store.testConnection() } } label: { Text("测试连接") }
+            .disabled(!store.canConnect)
+        }
+      } label: {
+        SettingLabel(title: "访问令牌", detail: "服务器设置了 api_token 时填写；只保存在本机加密存储。")
+      }
+      if let status = store.serverStatus {
+        Text(status).font(Theme.Font.caption).foregroundStyle(.secondary)
+      }
+      if let status = store.testStatus {
+        Text(status).font(Theme.Font.caption).foregroundStyle(.secondary)
+      }
+      LabeledContent {
+        Button("清除缓存") { store.clearCache() }
+      } label: {
+        SettingLabel(title: "本机观看状态缓存", detail: "清除后，再看列表时会重新从服务器读取观看状态和进度。")
+      }
     }
   }
 }
@@ -364,6 +396,14 @@ private struct SettingRow: View {
             Stepper("", value: value, in: range.lowerBound * unit.scale...range.upperBound * unit.scale,
               step: step * unit.scale).labelsHidden()
           }
+        } label: { label }
+      case .text:
+        LabeledContent {
+          TextField("http://192.168.1.10:8899", text: Binding(
+            get: { settings.values.text(key) },
+            set: { settings.set(key, .text($0)) }))
+            .textFieldStyle(.roundedBorder).frame(width: 260, alignment: .trailing)
+            .multilineTextAlignment(.trailing).labelsHidden()
         } label: { label }
       case .directory, .executable:
         LabeledContent {

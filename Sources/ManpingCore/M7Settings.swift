@@ -14,6 +14,7 @@ public enum MacSettingKey: String, CaseIterable, Sendable {
   case stepForward = "Manping.stepForward", stepBackward = "Manping.stepBackward", temporarySpeed = "Manping.temporarySpeed"
   case globalSpeed = "Manping.globalSpeed", bottomProgress = "Manping.bottomProgress", speed = "Manping.playbackSpeed"
   case reportProgress = "Manping.reportProgress", spotlightIndex = "Manping.spotlightIndex", autoSkipClips = "Manping.autoSkipClips"
+  case historySync = "Manping.historySync", historyServer = "Manping.historyServer"
   case liveText = "Manping.liveText"
   case liveAllowPaidGifts = "Manping.liveAllowPaidGifts", livePaidConfirmThreshold = "Manping.livePaidConfirmThreshold"
   case liveHideGifting = "Manping.liveHideGifting", livePureMode = "Manping.livePureMode"
@@ -48,7 +49,7 @@ public enum MacSettingKey: String, CaseIterable, Sendable {
 }
 public enum MacSettingValue: Sendable, Equatable { case bool(Bool), number(Double), text(String) }
 public enum MacSettingControl: Sendable {
-  case toggle, choice([MacSettingChoice]), number(ClosedRange<Double>, step: Double), directory, executable
+  case toggle, choice([MacSettingChoice]), number(ClosedRange<Double>, step: Double), text, directory, executable
 }
 public struct MacSettingChoice: Sendable {
   public let value: MacSettingValue
@@ -207,6 +208,8 @@ public enum MacSettingsCatalog {
     .init(.dockBadge, .notifications, "Dock 角标", "在 Dock 图标上显示未读数", "回复、@、赞和私信的未读总数，每 2 分钟更新。", .toggle, .bool(true)),
     // 隐私
     .init(.reportProgress, .privacy, "同步观看进度", "同步观看进度", "把播放进度写入哔哩哔哩历史记录，在其他设备上接着看。", .toggle, .bool(true)),
+    .init(.historySync, .privacy, "bili-history", "在封面上显示观看状态", "从自己的 bili-history 读取已看标记和进度，播放后把进度写回去。", .toggle, .bool(false)),
+    .init(.historyServer, .privacy, "bili-history", "服务器地址", "填写 bili-history 的根地址，例如 http://192.168.1.10:8899；留空则不连接。", .text, .text("")),
     .init(.spotlightIndex, .privacy, "聚焦搜索与接力", "聚焦搜索与接力", "看过的内容可在聚焦中搜到（仅本机，90 天后过期），正在看的页面可接力到同一 Apple 账户的其他设备；关闭或退出登录时清除。", .toggle, .bool(true)),
     .init(.liveText, .privacy, "画面文字", "暂停时识别画面文字", "暂停后可直接选中画面中的文字拷贝、查询或翻译，识别在本机完成。", .toggle, .bool(true)),
     // 高级
@@ -281,6 +284,10 @@ public struct MacSettings: Sendable, Equatable {
     case (.choice(let choices), _): return choices.contains { $0.value == value } ? value : nil
     case (.number(let range, _), .number(let number)):
       guard number.isFinite else { return nil }; return .number(min(range.upperBound, max(range.lowerBound, number)))
+    case (.text, .text(let value)):
+      let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard trimmed.count <= 512, !trimmed.contains("\0"), !trimmed.contains(where: \.isNewline) else { return nil }
+      return .text(trimmed)
     case (.directory, .text(let path)), (.executable, .text(let path)):
       guard path.count <= 4096, !path.contains("\0"), !path.contains("\n"), !path.contains("\r") else { return nil }
       if case .directory = descriptor.control, !path.isEmpty, !path.hasPrefix("/") { return nil }

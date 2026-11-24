@@ -11,23 +11,32 @@ import Foundation
     let cid: Int64
     var episode: Int64?
     var season: Int64?
+    /// Metadata for bili-history. Empty for PGC episodes, which have no bvid.
+    var bvid: String = ""
+    var title: String = ""
+    var author: String = ""
+    var authorID: Int64 = 0
+    var cover: String = ""
+    var duration: Int = 0
   }
 
   private let service: BiliService
   private let enabled: () -> Bool
+  private let onReport: @MainActor (Item, Int) -> Void
   private weak var player: PlayerModel?
   private var item: Item?
   private var identity: AuthSnapshot?
   private var timer: Timer?
   private var lastSent: (item: Item, seconds: Int)?
 
-  init(service: BiliService, enabled: @escaping () -> Bool) {
-    self.service = service; self.enabled = enabled
+  init(service: BiliService, enabled: @escaping () -> Bool,
+    onReport: @escaping @MainActor (Item, Int) -> Void = { _, _ in }) {
+    self.service = service; self.enabled = enabled; self.onReport = onReport
   }
 
   /// Starts reporting for the media now loaded in `player`, closing out the previous one.
   func begin(_ next: Item, player: PlayerModel, identity: AuthSnapshot?) {
-    if item != next { flush() }
+    if item != next { flush(); lastSent = nil }
     item = next; self.player = player; self.identity = identity
     timer?.invalidate()
     timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -54,12 +63,17 @@ import Foundation
   }
 
   private func send(requirePlaying: Bool) {
-    guard let item, let player, let identity, identity.state != .needsLogin, enabled() else { return }
+    guard let item, let player else { return }
     let position = player.time
     guard position.isFinite, position >= 1, !requirePlaying || !player.paused else { return }
     let seconds = Int(position)
     if let lastSent, lastSent.item == item, lastSent.seconds == seconds { return }
     lastSent = (item, seconds)
+
+    // bili-history is independent of Bilibili sign-in and of the account-history toggle.
+    onReport(item, seconds)
+
+    guard let identity, identity.state != .needsLogin, enabled() else { return }
     let service = self.service
     let episode = item.episode.flatMap { id in item.season.map { (id: id, season: $0) } }
     Task {

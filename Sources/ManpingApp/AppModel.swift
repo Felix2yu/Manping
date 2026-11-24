@@ -328,10 +328,31 @@ import WebKit
   let proxySettingsModel = ProxySettingsModel()
   /// Debug playback reports exercise real playback but must never write to the account.
   private static let writesHistory = !ProcessInfo.processInfo.arguments.contains("--ui-playback-report")
-  private(set) lazy var progressReporter = WatchProgressReporter(service: service) { [weak self] in
-    guard let self else { return false }
-    return Self.writesHistory && !self.usesUIFixtures && self.appSettings.bool(.reportProgress)
+  private(set) lazy var watchHistory: WatchHistoryStore = {
+    let store = WatchHistoryStore(fetchOfficial: { [weak self] in
+      guard let self, !self.usesUIFixtures else { return [:] }
+      return await self.officialWatchRecords()
+    })
+    store.configure(enabled: appSettings.bool(.historySync), baseURL: appSettings.text(.historyServer),
+      token: BiliHistoryConfig.readToken())
+    return store
+  }()
+  /// One page of the account's own history: bili-history only crawls hourly, this fills the gap.
+  private func officialWatchRecords() async -> [String: WatchRecord] {
+    guard let rpc = try? standardRPCService() else { return [:] }
+    do {
+      let page = try await rpc.history(business: "archive", max: 0)
+      return OfficialWatchHistory.records(from: page)
+    } catch { return [:] }
   }
+  private(set) lazy var progressReporter = WatchProgressReporter(service: service,
+    enabled: { [weak self] in
+      guard let self else { return false }
+      return Self.writesHistory && !self.usesUIFixtures && self.appSettings.bool(.reportProgress)
+    }, onReport: { [weak self] item, seconds in
+      guard let self, !self.usesUIFixtures else { return }
+      self.watchHistory.report(item, seconds: seconds)
+    })
   @Published var account = "登录"
   @Published private(set) var fixtureReady = false
   @Published var accountAvatar: URL?
@@ -607,6 +628,7 @@ import WebKit
     if previous.bool(.dockBadge) != settings.bool(.dockBadge) { updateDockBadge() }
     watchActivity.indexesSpotlight = settings.bool(.spotlightIndex)
     if previous.bool(.spotlightIndex), !settings.bool(.spotlightIndex) { watchActivity.end(); watchActivity.clearSpotlight() }
+    watchHistory.configure(enabled: settings.bool(.historySync), baseURL: settings.text(.historyServer))
     theme = AppTheme(rawValue: settings.text(.theme)) ?? .system
     playbackPreferences.codec = PlaybackCodec(rawValue: settings.text(.codec)) ?? .h264
     playbackPreferences.quality = settings.number(.quality) > 0 ? Int(settings.number(.quality)) : nil
@@ -1690,6 +1712,7 @@ import WebKit
         // the current identity rather than mixing it with the event's possibly older values.
         let displaySnapshot = await service.authSnapshot()
         progressReporter.identityChanged(to: displaySnapshot)
+        watchHistory.refreshOfficial(force: true)
         if let record = pausedBrowsing.suspension,
           record.binding.epoch != displaySnapshot.epoch || record.binding.revision != displaySnapshot.identityRevision {
           pausedBrowsing.invalidate()
@@ -1779,8 +1802,10 @@ import WebKit
     let target = pgcPlayback?.player ?? player
     if let episode = pgcPlayback?.episode, let aid = episode.aid, let cid = episode.cid {
       progressReporter.begin(.init(aid: aid, cid: cid, episode: episode.id, season: episode.seasonID), player: target, identity: identity)
-    } else if pgcPlayback == nil, let aid = selected?.aid, let cid = selected?.cid {
-      progressReporter.begin(.init(aid: aid, cid: cid), player: target, identity: identity)
+    } else if pgcPlayback == nil, let video = selected, let aid = video.aid, let cid = video.cid {
+      progressReporter.begin(.init(aid: aid, cid: cid, bvid: video.bvid, title: video.title,
+        author: video.author, authorID: video.authorID ?? 0,
+        cover: video.cover?.absoluteString ?? "", duration: video.duration), player: target, identity: identity)
     }
     let title = pgcPlayback?.episode?.title ?? selected?.title ?? ""
     let author = pgcPlayback?.details?.season.title ?? selected?.author ?? ""

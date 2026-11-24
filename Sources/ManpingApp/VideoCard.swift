@@ -70,6 +70,7 @@ struct VideoCard: View {
   /// Page-specific items appended to the context menu.
   var menuExtra: AnyView? = nil
   @Environment(\.colorScheme) private var scheme
+  @Environment(\.watchHistory) private var watchHistory
   var body: some View {
     // Cover and title play; the UP 主 name opens their space, as on Bilibili.
     VStack(alignment: .leading, spacing: 4) {
@@ -85,6 +86,12 @@ struct VideoCard: View {
             .overlay(alignment: .bottomTrailing) {
               MediaBadge(text: String(format: "%02d:%02d", video.duration / 60, video.duration % 60)).padding(8)
             }
+            .overlay(alignment: .bottomLeading) {
+              if let watchHistory { WatchedBadge(store: watchHistory, bvid: video.bvid) }
+            }
+            .overlay(alignment: .bottom) {
+              if let watchHistory { WatchProgressBar(store: watchHistory, bvid: video.bvid) }
+            }
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
           Text(video.title).font(Theme.Font.headline).foregroundStyle(Theme.text(scheme))
             .lineLimit(2, reservesSpace: true).multilineTextAlignment(.leading)
@@ -94,6 +101,7 @@ struct VideoCard: View {
         .demoAnchor("card.\(video.title)")
       CardMetadataLine(author: video.author, authorID: video.authorID, rest: metadata, action: action)
     }.cardHover()
+      .onAppear { watchHistory?.request(video.bvid) }
       .contextMenu { VideoContextMenu(video: video, extra: menuExtra) }
   }
 
@@ -120,6 +128,48 @@ struct VideoCard: View {
     formatter.unitsStyle = .short
     return formatter
   }()
+}
+
+/// 已看 marker on a cover. Follows the store so a video marked after playback updates
+/// when the user returns to the list, without reloading the page.
+struct WatchedBadge: View {
+  @ObservedObject var store: WatchHistoryStore
+  let bvid: String
+  /// The small thumbnails in the moments feed only have room for the checkmark.
+  var compact = false
+  var body: some View {
+    if let record = store.record(bvid), record.watched {
+      Group {
+        if compact {
+          Image(systemName: "checkmark.circle.fill").font(.system(size: 11, weight: .semibold))
+            .padding(4).background(.black.opacity(0.58), in: Circle()).padding(6)
+        } else {
+          HStack(spacing: 3) {
+            Image(systemName: "checkmark.circle.fill").font(.system(size: 9, weight: .semibold))
+            Text("已看").font(.system(size: 10, weight: .medium))
+          }.padding(.horizontal, 6).padding(.vertical, 3)
+            .background(.black.opacity(0.58), in: Capsule()).padding(8)
+        }
+      }.foregroundStyle(.white).accessibilityLabel("已看")
+    }
+  }
+}
+
+/// The thin bar a half-watched video leaves at the bottom of its cover. Completed
+/// videos are covered by the 已看 marker alone.
+struct WatchProgressBar: View {
+  @ObservedObject var store: WatchHistoryStore
+  let bvid: String
+  var body: some View {
+    if let record = store.record(bvid), record.watched, !record.finished, record.fraction > 0 {
+      GeometryReader { proxy in
+        ZStack(alignment: .leading) {
+          Color.white.opacity(0.3)
+          Rectangle().fill(Theme.accent).frame(width: proxy.size.width * record.fraction)
+        }
+      }.frame(height: 3).accessibilityLabel("观看进度 \(Int(record.fraction * 100))%")
+    }
+  }
 }
 
 /// A card's 「UP 主 · 播放 · 时间」 line. The name opens the UP 主's space (when the card knows
