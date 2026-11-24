@@ -39,4 +39,32 @@ final class PlaybackNodePolicyTests: XCTestCase {
     XCTAssertFalse(PlaybackNodePolicy.sameAuthority(URL(string: "file:///fixture/a")!, URL(string: "file:///fixture/b")!))
     XCTAssertFalse(PlaybackNodePolicy.sameAuthority(URL(string: "ftp://example.invalid/a")!, https))
   }
+
+  func testAvoidP2PSelectsLowerRegularQualityInsteadOfFallingBack() throws {
+    let p2p = URL(string: "https://mcdn.bilivideo.cn/high")!
+    let regular = URL(string: "https://cdn.example/low")!
+    let audio = URL(string: "https://cdn.example/audio")!
+    let manifest = PlaybackManifest(video: [
+      MediaStream(quality: 116, codec: "avc1", url: p2p, bandwidth: 500, label: "1080P60"),
+      MediaStream(quality: 80, codec: "avc1", url: regular, bandwidth: 200, label: "1080P"),
+    ], audio: [MediaStream(quality: 30280, codec: "mp4a", url: audio, bandwidth: 50, label: "Audio")], duration: 30)
+    let selected = try PlaybackSelector.select(manifest, preferences: .init(avoidP2P: true))
+    XCTAssertEqual(selected.video.quality, 80)
+    XCTAssertEqual(selected.videoURL, regular)
+    let allowed = try PlaybackSelector.select(manifest)
+    XCTAssertEqual(allowed.video.quality, 116)
+    XCTAssertEqual(allowed.videoURL, p2p)
+  }
+
+  func testAvoidP2PThrowsWhenVideoOrAudioHasOnlyPeerNodes() {
+    let p2p = URL(string: "https://mcdn.bilivideo.cn/media")!
+    let regular = URL(string: "https://cdn.example/media")!
+    func stream(_ url: URL, quality: Int = 80, codec: String = "avc1") -> MediaStream {
+      MediaStream(quality: quality, codec: codec, url: url, bandwidth: 100, label: "Stream")
+    }
+    let peerVideo = PlaybackManifest(video: [stream(p2p)], audio: [stream(regular, codec: "mp4a")], duration: 30)
+    XCTAssertThrowsError(try PlaybackSelector.select(peerVideo, preferences: .init(avoidP2P: true)))
+    let peerAudio = PlaybackManifest(video: [stream(regular)], audio: [stream(p2p, codec: "mp4a")], duration: 30)
+    XCTAssertThrowsError(try PlaybackSelector.select(peerAudio, preferences: .init(avoidP2P: true)))
+  }
 }

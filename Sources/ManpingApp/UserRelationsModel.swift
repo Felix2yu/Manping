@@ -50,7 +50,6 @@ import SwiftUI
   }
   func canToggle(_ mid: Int64) -> Bool {
     mid > 0 && mid != selfID && !busy.contains(mid)
-      && relations[mid]?.isFollowing != nil && snapshots[mid] != nil
   }
   func load(mid: Int64) async {
     guard mid > 0 else { return }
@@ -90,29 +89,49 @@ import SwiftUI
     }
   }
   func toggle(mid: Int64, requiresLogin: @escaping () -> Void) async {
-    guard canToggle(mid), let previous = relations[mid]?.isFollowing,
-      let expected = snapshots[mid] else { return }
-    let revision = generation; let target = !previous
+    if let read = reads[mid] { await read.value }
+    guard canToggle(mid) else { return }
+    tracked.insert(mid)
+    let previous = relations[mid]?.isFollowing
+    let expected = snapshots[mid]
+    let revision = generation
     busy.insert(mid); errors[mid] = nil
     let task = Task { [weak self, service] in
       do {
-        let snapshot = try await service.authorizeAppInteraction(expectedIdentity: expected)
+        let initial = expected ?? await service.authSnapshot()
+        let snapshot = try await service.authorizeAppInteraction(expectedIdentity: initial)
         try Task.checkCancellation()
-        guard let self, self.generation == revision, mid != snapshot.token?.mid,
-          self.matches(expected, snapshot) else { throw CancellationError() }
+        guard let self, self.generation == revision else { throw CancellationError() }
+        self.selfID = snapshot.token?.mid
+        guard mid != snapshot.token?.mid else {
+          self.relations[mid] = .unknown; self.snapshots[mid] = nil
+          return
+        }
+        if previous == nil || expected == nil {
+          let value = try await service.libraryRelationship(mid: mid, expectedIdentity: snapshot)
+          let current = await service.authSnapshot()
+          try Task.checkCancellation()
+          guard self.generation == revision, self.matches(snapshot, current) else { return }
+          self.relations[mid] = value; self.snapshots[mid] = snapshot
+          return
+        }
+        guard let previous, let expected, self.matches(expected, snapshot) else { throw CancellationError() }
+        let target = !previous
         try await service.setFollowing(mid: mid, following: target, expectedIdentity: snapshot)
         let current = await service.authSnapshot()
         try Task.checkCancellation()
         guard self.generation == revision, self.matches(snapshot, current) else { return }
         self.relations[mid] = target ? .following : .unfollowed
         self.snapshots[mid] = snapshot
-        self.busy.remove(mid); self.writes[mid] = nil
       } catch {
-        guard let self, self.generation == revision else { return }
-        self.busy.remove(mid); self.writes[mid] = nil
-        if let auth = error as? AuthFailure, case .needsLogin = auth { requiresLogin() }
-        else if !(error is CancellationError) { self.errors[mid] = error.localizedDescription }
+        guard let self, self.generation == revision, !Task.isCancelled else { return }
+        if let auth = error as? AuthFailure, case .needsLogin = auth {
+          self.relations[mid] = .unknown; self.snapshots[mid] = nil
+          requiresLogin()
+        } else if !(error is CancellationError) { self.errors[mid] = error.localizedDescription }
       }
+      guard let self, self.generation == revision else { return }
+      self.busy.remove(mid); self.writes[mid] = nil
     }
     writes[mid] = task
     await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }

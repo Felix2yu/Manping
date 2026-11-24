@@ -138,13 +138,15 @@ struct AITimelineMarks: Equatable {
     }
     let panel = AIPanelModel(source: source, runtime: self)
     panels[key] = panel; panelOrder.append(key)
-    while panelOrder.count > 5 {
-      let dropped = panelOrder.removeFirst()
-      // A panel still generating keeps running; the oldest idle one goes.
-      if let old = panels[dropped], old.pending == nil { old.shutdown(); panels.removeValue(forKey: dropped) }
-      else { panelOrder.append(dropped); break }
-    }
+    trimPanels(protecting: key)
     return panel
+  }
+  func trimPanels(protecting key: String? = nil) {
+    while panelOrder.count > 5 {
+      guard let index = panelOrder.firstIndex(where: { $0 != key && panels[$0]?.pending == nil }) else { break }
+      let dropped = panelOrder.remove(at: index)
+      panels[dropped]?.shutdown(); panels.removeValue(forKey: dropped)
+    }
   }
   func markIntroShown() {
     guard !introShown else { return }

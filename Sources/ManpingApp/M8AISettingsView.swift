@@ -21,7 +21,7 @@ struct M8AISettingsView: View {
             .font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(scheme))
         }
         Spacer()
-        Button("查看说明") { NSWorkspace.shared.open(URL(string: "https://agent.richasy.net/chat-config")!) }
+        Button("查看说明") { ExternalWebLink.open(URL(string: "https://agent.richasy.net/chat-config")!) }
           .buttonStyle(AppButtonStyle(size: .small))
       }.padding(14).background(Theme.selectedFill(scheme).opacity(0.6), in: RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
         .padding(.bottom, 4)
@@ -88,9 +88,9 @@ private struct M8ChatGPTPlanCard: View {
           }
           AIServiceSettingsRow("用量", detail: "在 ChatGPT 设置中查看或管理满屏使用的额度。") {
             HStack(spacing: 12) {
-              Button("了解更多") { NSWorkspace.shared.open(URL(string: "https://help.openai.com")!) }
+              Button("了解更多") { ExternalWebLink.open(URL(string: "https://help.openai.com")!) }
                 .foregroundStyle(Theme.accentText(scheme)).buttonStyle(AppButtonStyle(role: .plain, size: .small))
-              Button("管理用量") { NSWorkspace.shared.open(M8AISettingsModel.manageUsageURL) }
+              Button("管理用量") { ExternalWebLink.open(M8AISettingsModel.manageUsageURL) }
                 .buttonStyle(AppButtonStyle(size: .small))
             }
           }

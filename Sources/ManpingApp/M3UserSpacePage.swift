@@ -469,7 +469,7 @@ private struct M3DynamicCard: View {
     case .images(let images):
       LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: min(3, max(1, images.count))), spacing: 8) {
         ForEach(Array(images.enumerated()), id: \.offset) { _, url in
-          Button { NSWorkspace.shared.open(url) } label: {
+          Button { ExternalWebLink.open(url) } label: {
             Color.clear.aspectRatio(1, contentMode: .fit)
               .overlay { CachedImage(url: url) }
               .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
@@ -487,7 +487,7 @@ private struct M3DynamicCard: View {
         Text(original.author.map { "@\($0.name)" } ?? "转发动态").font(Theme.Font.headline)
         MomentRichText(text: original.text, emotes: original.emotes)
         Button("查看原动态") {
-          if let url = URL(string: "https://t.bilibili.com/\(original.id)") { NSWorkspace.shared.open(url) }
+          if let url = URL(string: "https://t.bilibili.com/\(original.id)") { ExternalWebLink.open(url) }
         }.buttonStyle(ChromeButtonStyle())
       }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Theme.fill(scheme), in: RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
     case .unsupported: Text("此类动态可在网页查看").font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(scheme))
@@ -505,6 +505,6 @@ private struct M3DynamicCard: View {
     }.buttonStyle(.plain)
   }
   private func openDynamic() {
-    if let url = URL(string: "https://t.bilibili.com/\(item.id)") { NSWorkspace.shared.open(url) }
+    if let url = URL(string: "https://t.bilibili.com/\(item.id)") { ExternalWebLink.open(url) }
   }
 }

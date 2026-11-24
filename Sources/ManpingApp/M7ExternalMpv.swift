@@ -32,6 +32,7 @@ final class M7ExternalMpv: @unchecked Sendable {
   private var sequence = 0
   private var stopped = false
   private var awaitingLoad = false
+  private var loadRequestID: Int?
   private var epoch = UUID()
   init(update: @escaping @Sendable (M7ExternalMpvState) -> Void) { self.update = update }
 
@@ -88,13 +89,15 @@ final class M7ExternalMpv: @unchecked Sendable {
   func load(video: URL, audio: URL?, start: Double, paused: Bool) {
     queue.async { [self] in
       guard !stopped else { return }
-      state.eof = false; state.idle = true
+      state.time = 0; state.duration = 0; state.chapters = []
+      state.eof = false; state.idle = true; state.error = nil
       awaitingLoad = true
       send(["set_property", "pause", paused ? "yes" : "no"])
       var options: [String: String] = ["start": String(max(0, start.isFinite ? start : 0))]
       if let audio { options["audio-file"] = audio.absoluteString }
       // mpv >= 0.38: playlist insertion index precedes per-file options.
-      sendObject(["loadfile", video.absoluteString, "replace", -1, options])
+      loadRequestID = sendObject(["loadfile", video.absoluteString, "replace", -1, options])
+      update(state)
     }
   }
   func command(_ command: [String]) { queue.async { [self] in send(command) } }
@@ -122,14 +125,16 @@ final class M7ExternalMpv: @unchecked Sendable {
     catch { fail("外部 mpv 命令无效") }
     flush()
   }
-  private func sendObject(_ command: [Any]) {
-    guard !stopped else { return }
+  @discardableResult private func sendObject(_ command: [Any]) -> Int? {
+    guard !stopped else { return nil }
     sequence += 1
+    let requestID = sequence
     do {
-      var data = try JSONSerialization.data(withJSONObject: ["command": command, "request_id": sequence])
-      guard data.count <= 1_048_576 else { fail("外部 mpv 命令过长"); return }
+      var data = try JSONSerialization.data(withJSONObject: ["command": command, "request_id": requestID])
+      guard data.count <= 1_048_576 else { fail("外部 mpv 命令过长"); return nil }
       data.append(10); outgoing.append(data); flush()
-    } catch { fail("外部 mpv 命令无效") }
+      return requestID
+    } catch { fail("外部 mpv 命令无效"); return nil }
   }
   private func connectSocket() {
     guard descriptor < 0, !stopped else { return }
@@ -197,12 +202,22 @@ final class M7ExternalMpv: @unchecked Sendable {
       fail("外部 mpv 的响应无效"); return
     }
     if object["event"] as? String == "file-loaded" {
-      awaitingLoad = false; state.idle = false; state.eof = false
+      awaitingLoad = false; loadRequestID = nil; state.idle = false; state.eof = false
+      update(state); return
+    }
+    if object["event"] as? String == "end-file" {
+      awaitingLoad = false; loadRequestID = nil
+      if object["reason"] as? String == "error", state.error == nil {
+        state.error = "外部 mpv 播放失败，请重试或切换内置播放器。"
+      }
       update(state); return
     }
     guard object["event"] as? String == "property-change", let name = object["name"] as? String else {
-      if let error = object["error"] as? String, error != "success" {
-        state.error = "外部 mpv 命令失败：" + String(error.prefix(120)); update(state)
+      if let error = object["error"] as? String, error != "success", awaitingLoad,
+        let loadRequestID, (object["request_id"] as? NSNumber)?.intValue == loadRequestID {
+        state.error = "外部 mpv 无法加载视频：" + String(error.prefix(120))
+        awaitingLoad = false; loadRequestID = nil
+        update(state)
       }
       return
     }
@@ -235,7 +250,9 @@ final class M7ExternalMpv: @unchecked Sendable {
   }
   private func disconnected() {
     guard !stopped else { return }
-    state.exited = true; update(state)
+    state.exited = true
+    if state.error == nil { state.error = "外部 mpv 连接已断开" }
+    update(state)
     stopped = true
     // Closing the IPC socket does not prove that the owned process exited.
     // Retain both owners until the bounded termination sequence completes.

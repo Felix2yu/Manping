@@ -15,7 +15,8 @@ import SwiftUI
   func application(_ application: NSApplication, open urls: [URL]) {
     var opened = false
     for url in urls.prefix(1) where model.openLink(url.absoluteString) { opened = true }
-    if opened { NSApp.activate(); window?.makeKeyAndOrderFront(nil) }
+    if !opened { model.error = "无法识别这个链接，请检查是否为有效的 B 站或满屏链接。" }
+    NSApp.activate(); window?.makeKeyAndOrderFront(nil)
   }
   /// Dock menu: what is playing, pinned live rooms and the usual destinations.
   func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
@@ -939,8 +940,8 @@ import SwiftUI
   @objc private func goForward() { model.goForward() }
   @objc private func openSettings() { model.openSettings() }
   @objc private func refreshPage() { Task { await model.refresh() } }
-  @objc private func openHelp() { NSWorkspace.shared.open(URL(string: "https://github.com/PIDEAN/Manping#readme")!) }
-  @objc private func openIssues() { NSWorkspace.shared.open(URL(string: "https://github.com/PIDEAN/Manping/issues")!) }
+  @objc private func openHelp() { ExternalWebLink.open(URL(string: "https://github.com/PIDEAN/Manping#readme")!) }
+  @objc private func openIssues() { ExternalWebLink.open(URL(string: "https://github.com/PIDEAN/Manping/issues")!) }
   /// 关于满屏: the standard panel with the app icon, name and version, plus credits to the
   /// upstream projects.
   @objc private func showAbout() {

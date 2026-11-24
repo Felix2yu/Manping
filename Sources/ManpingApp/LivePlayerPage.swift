@@ -77,7 +77,7 @@ struct LivePlayerPage: View {
       leading: chatUnavailable ? nil : AnyView(LiveBadge(status: displayStatus))) {
       ToolbarIconGroup {
         if let url = webURL {
-          Button { NSWorkspace.shared.open(url) } label: { ToolbarGroupIcon("safari") }
+          Button { model.openWebURL(url) } label: { ToolbarGroupIcon("safari") }
             .help("在浏览器中打开").accessibilityLabel("在浏览器中打开")
           ToolbarShareButton(url: url)
         }
@@ -172,7 +172,7 @@ struct LivePlayerPage: View {
       HStack(spacing: 8) {
         Button(action.0, action: action.1).buttonStyle(AppButtonStyle(role: .primary, size: .small))
         if let url = webURL {
-          Button("在浏览器中打开") { NSWorkspace.shared.open(url) }.buttonStyle(AppButtonStyle(size: .small))
+          Button("在浏览器中打开") { model.openWebURL(url) }.buttonStyle(AppButtonStyle(size: .small))
         }
       }
     }.padding(18).environment(\.colorScheme, .dark).floatingGlassPanel(readingTint: .black.opacity(0.4))
@@ -214,7 +214,7 @@ struct LivePlayerPage: View {
                 }
                 Button("点赞") { interaction.like() }
               }
-              if let url = webURL { Button("在浏览器中打开") { NSWorkspace.shared.open(url) } }
+              if let url = webURL { Button("在浏览器中打开") { model.openWebURL(url) } }
           })
         }) {
         PlayerPlayButton(paused: player.paused) { player.togglePause() }

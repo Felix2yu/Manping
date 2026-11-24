@@ -31,6 +31,11 @@ extension BiliService {
       total: JSONValue.int((data["info"] as? [String: Any])?["media_count"]))
   }
 
+  public func addViewLater(aid: Int64, expectedIdentity: AuthSnapshot) async throws {
+    try positiveIdentifier(aid)
+    _ = try await appREST(.laterAdd, fields: ["aid": String(aid)], expectedIdentity: expectedIdentity)
+  }
+
   public func removeViewLater(aids: [Int64], expectedIdentity: AuthSnapshot) async throws {
     let ids = try collectionIdentifiers(aids)
     _ = try await appREST(.laterDelete, fields: ["aid": ids.map(String.init).joined(separator: ",")],

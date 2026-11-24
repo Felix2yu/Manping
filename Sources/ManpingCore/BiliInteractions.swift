@@ -18,7 +18,7 @@ enum BiliAppRoute {
   case followGroups, followGroupUsers, followers, libraryGallery, libraryFolders
   case libraryContents, librarySeasonContents, viewLater, favoriteBangumi, favoriteCinema
   case relationship, searchTrending, searchRecommend, spaceArchiveCursor
-  case laterDelete, laterClear, favoriteRemove, pgcFavoriteRemove
+  case laterDelete, laterClear, laterAdd, favoriteRemove, pgcFavoriteRemove
   case replyLike, replyAdd, danmakuSend
   case pgcTimeline, pgcConditions, pgcIndex, pgcDetails, pgcPlayback
   case pgcOperationState, pgcFollowAdd, pgcFollowDelete, pgcLike, pgcCoin, pgcTriple, pgcFavorite
@@ -86,6 +86,7 @@ enum BiliAppRoute {
     case .searchRecommend: "https://app.bilibili.com/x/v2/search/recommend"
     case .laterDelete: "https://api.bilibili.com/x/v2/history/toview/del"
     case .laterClear: "https://api.bilibili.com/x/v2/history/toview/clear"
+    case .laterAdd: "https://api.bilibili.com/x/v2/history/toview/add"
     case .favoriteRemove: "https://api.bilibili.com/x/v3/fav/resource/batch-del"
     case .pgcFavoriteRemove: "https://api.bilibili.com/pgc/app/follow/del"
     case .like: "https://app.bilibili.com/x/v2/view/like"
@@ -100,7 +101,7 @@ enum BiliAppRoute {
     switch self {
     case .pgcFollowAdd, .pgcFollowDelete, .pgcLike, .pgcCoin, .pgcTriple, .pgcFavorite,
       .like, .coin, .triple, .favorite, .following,
-      .laterDelete, .laterClear, .favoriteRemove, .pgcFavoriteRemove, .replyLike, .replyAdd, .danmakuSend, .articleLike, .articleFavoriteAdd, .articleFavoriteDelete,
+      .laterDelete, .laterClear, .laterAdd, .favoriteRemove, .pgcFavoriteRemove, .replyLike, .replyAdd, .danmakuSend, .articleLike, .articleFavoriteAdd, .articleFavoriteDelete,
       .historyReport: true
     default: false
     }

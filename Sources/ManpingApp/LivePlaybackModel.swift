@@ -96,6 +96,8 @@ import Foundation
   private var interactionSettingsObservation: AnyCancellable?
   private var errorObservation: AnyCancellable?
   private var endObservation: AnyCancellable?
+  private var observedPlaybackError: String?
+  private var observedEOF = false
   private var generation = 0
   private var active = true
   static let qualityKey = "Manping.lastLiveQuality"
@@ -300,7 +302,10 @@ import Foundation
         self.playback = playback
         let candidates = LiveStreamSelector.ranked(playback, preferHEVC: self.preferHEVC, requested: quality,
           avoidPeerAssisted: self.avoidPeerAssisted)
-        guard playback.status == .live, !candidates.isEmpty else { self.markEnded(); return }
+        guard playback.status == .live else { self.markEnded(); return }
+        guard !candidates.isEmpty else {
+          throw BiliError.invalidResponse("当前直播没有可用的普通节点，请关闭「不使用 P2P」后重试。")
+        }
         // Same quality only: a fallback format must not silently change what the user picked.
         let sameQuality = candidates.filter { $0.currentQuality == candidates[0].currentQuality }
         guard let (stream, line) = await LiveStreamSelector.fastestLine(sameQuality.prefix(4), fetcher: self.probe) else {
@@ -321,6 +326,8 @@ import Foundation
 
   private func play(_ stream: LiveStream) {
     guard active, !ended, !stream.urls.isEmpty else { isLoading = false; return }
+    let previousError = player.error
+    let previousEOF = player.eofReached
     let url = stream.urls[lineIndex % stream.urls.count]
     // ffmpeg's HTTP layer reconnects short network drops by itself before mpv sees an error.
     // Set before loadfile (both run on the player's serial queue) so the open uses it.
@@ -335,6 +342,7 @@ import Foundation
     // A fresh stream restarts the media clock; start a new chat timeline with it.
     player.timeline = DanmakuTimeline(comments: [])
     loadedAt = Date(); lastClock = -1; stalledSince = nil; playedSinceLoad = false
+    observedPlaybackError = previousError; observedEOF = previousEOF
     isLoading = false
     startWatchdog()
   }
@@ -359,7 +367,10 @@ import Foundation
     // Callbacks belong to this load; a later load or the end of the room retires them.
     let current = generation
     errorObservation = player.$error.removeDuplicates().sink { [weak self] value in
-      guard value != nil else { return }
+      guard let self else { return }
+      if value == nil { self.observedPlaybackError = nil; return }
+      guard value != self.observedPlaybackError else { return }
+      self.observedPlaybackError = value
       Task { @MainActor [weak self] in
         guard let self, current == self.generation else { return }
         self.scheduleReconnect(reason: "直播流中断")
@@ -367,6 +378,9 @@ import Foundation
     }
     // A live stream that reaches its end was cut upstream (or the room ended; reload tells).
     endObservation = player.$eofReached.removeDuplicates().sink { [weak self] ended in
+      guard let self else { return }
+      if ended == self.observedEOF { return }
+      self.observedEOF = ended
       guard ended else { return }
       Task { @MainActor [weak self] in
         guard let self, current == self.generation else { return }

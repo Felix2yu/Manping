@@ -51,6 +51,16 @@ private struct AppDialogs: ViewModifier {
       } message: {
         Text(model.error ?? "")
       }
+      .alert("截图完成", isPresented: Binding(get: { active && model.screenshotNotice != nil }, set: { if !$0 { model.screenshotNotice = nil } })) {
+        Button("好") { model.screenshotNotice = nil }
+      } message: {
+        Text(model.screenshotNotice ?? "")
+      }
+      .alert("下载命令", isPresented: Binding(get: { active && model.actionNotice != nil }, set: { if !$0 { model.actionNotice = nil } })) {
+        Button("好") { model.actionNotice = nil }
+      } message: {
+        Text(model.actionNotice ?? "")
+      }
   }
 }
 /// The main window: a floating glass sidebar (发现 / 我的 / account) and the content column with
@@ -119,6 +129,7 @@ private struct ShellContent: View {
     }.ignoresSafeArea(.container, edges: .top)
     .environment(\.cardActions, CardActions(model: model))
     .environment(\.watchHistory, model.watchHistory)
+    .environment(\.viewLaterActions, model.viewLaterActions)
       .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) {
         _ in
         if DebugUIFixtures.usesLiveSceneMemory {
@@ -407,6 +418,8 @@ private struct ShellContent: View {
       case .moment: M4MomentPage(model: model)
       case .video:
         VideoPartitionPage(service: model.service, open: model.open, refreshToken: model.refreshToken,
+          request: model.partitionRequest,
+          onRequestHandled: { model.partitionRequest = nil },
           ranking: { [model] region in try await RPCBrowseSource(rpc: model.standardRPCService()).rankingFeed(region: region) })
       case .anime: AnimePage(model: model, onOpen: model.openPGC) { model.openPGCFavorites(cinema: false) }
       case .cinema: CinemaPage(model: model, onOpen: model.openPGC) { model.openPGCFavorites(cinema: true) }
@@ -461,6 +474,8 @@ struct DetachedPlaybackContent: View {
     DetachedPlaybackLayout(model: model)
       .preferredColorScheme(model.theme.colorScheme).tint(Theme.accent)
       .environment(\.cardActions, CardActions(model: model))
+      .environment(\.watchHistory, model.watchHistory)
+      .environment(\.viewLaterActions, model.viewLaterActions)
       .persistentAppStorage()
       .appDialogs(model: model, inDetachedWindow: true)
   }

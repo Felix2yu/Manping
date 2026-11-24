@@ -75,6 +75,57 @@ final class WatchHistoryTests: XCTestCase {
     XCTAssertEqual(records["BV1"]?.viewAt, 123)
   }
 
+  func testContinueWatchingUsesLatestValidPartAndSortsByViewingTime() {
+    let card = RPCVideoCard(aid: 1, bvid: "BV1", cid: 2, title: "标题", cover: nil,
+      author: RPCUser(mid: 3, name: "UP", avatar: nil), duration: 100, views: 0, uri: "")
+    let older = RPCHistoryItem(id: 1, oid: 1, business: "archive", title: "标题", uri: "",
+      viewedAt: 100, content: .video(card, progress: 80))
+    let latest = RPCHistoryItem(id: 2, oid: 1, business: "archive", title: "标题", uri: "",
+      viewedAt: 200, content: .video(card, progress: 25))
+    let otherCard = RPCVideoCard(aid: 4, bvid: "BV2", cid: 5, title: "另一个", cover: nil,
+      author: nil, duration: 200, views: 0, uri: "")
+    let other = RPCHistoryItem(id: 3, oid: 4, business: "archive", title: "另一个", uri: "",
+      viewedAt: 150, content: .video(otherCard, progress: 60))
+    let items = ContinueWatchingItem.entries(from: [older, other, latest])
+    XCTAssertEqual(items.map(\.id), ["BV1", "BV2"])
+    XCTAssertEqual(items[0].progress, 25)
+    XCTAssertEqual(items[0].video.cid, 2)
+    XCTAssertEqual(items[0].video.subtitle, "看到 00:25")
+    XCTAssertEqual(items[1].fraction, 0.3, accuracy: 0.0001)
+    XCTAssertEqual(ContinueWatchingItem.entries(from: [older, other, latest], limit: 1).map(\.id), ["BV1"])
+  }
+
+  func testContinueWatchingExcludesCompletedInvalidAndNonVideoHistory() {
+    let card = RPCVideoCard(aid: 1, bvid: "BV1", cid: 2, title: "标题", cover: nil,
+      author: nil, duration: 100, views: 0, uri: "")
+    func item(_ id: Int64, _ progress: Int64, viewedAt: Int64 = 100) -> RPCHistoryItem {
+      RPCHistoryItem(id: id, oid: 1, business: "archive", title: "标题", uri: "",
+        viewedAt: viewedAt, content: .video(card, progress: progress))
+    }
+    let finished = item(9, 100, viewedAt: 300)
+    XCTAssertTrue(ContinueWatchingItem.entries(from: [item(1, 40), finished]).isEmpty)
+    for progress in [0, -1, 101] { XCTAssertTrue(ContinueWatchingItem.entries(from: [item(1, progress)]).isEmpty) }
+    let episode = RPCHistoryItem(id: 2, oid: 2, business: "archive", title: "剧集", uri: "",
+      viewedAt: 400, content: .episode(cover: nil, progress: 10, duration: 100, subtitle: ""))
+    let live = RPCHistoryItem(id: 3, oid: 3, business: "live", title: "直播", uri: "",
+      viewedAt: 500, content: .video(card, progress: 10))
+    let invalidCard = RPCVideoCard(aid: 0, bvid: "BV2", cid: 0, title: "无效", cover: nil,
+      author: nil, duration: 100, views: 0, uri: "")
+    let invalid = RPCHistoryItem(id: 4, oid: 0, business: "archive", title: "无效", uri: "",
+      viewedAt: 600, content: .video(invalidCard, progress: 10))
+    XCTAssertTrue(ContinueWatchingItem.entries(from: [episode, live, invalid]).isEmpty)
+    XCTAssertTrue(ContinueWatchingItem.entries(from: [item(1, 10)], limit: 0).isEmpty)
+  }
+
+  func testContinueWatchingStartPositionRequiresTheSameUnfinishedPart() {
+    XCTAssertEqual(ContinueWatchingItem.validStart(25, duration: 100, cid: 2, expectedCID: 2), 25)
+    XCTAssertEqual(ContinueWatchingItem.validStart(25, duration: 100, cid: 2, expectedCID: 3), 0)
+    for position in [0.0, -1, 100, 101, .infinity, .nan] {
+      XCTAssertEqual(ContinueWatchingItem.validStart(position, duration: 100, cid: 2, expectedCID: 2), 0)
+    }
+    XCTAssertEqual(ContinueWatchingItem.validStart(25, duration: 0, cid: 2, expectedCID: 2), 0)
+  }
+
   func testDiskCacheRoundTripKeepsEveryEntry() {
     let url = URL(fileURLWithPath: NSTemporaryDirectory())
       .appendingPathComponent("manping-watch-cache-\(UUID().uuidString).json")
@@ -91,6 +142,19 @@ final class WatchHistoryTests: XCTestCase {
     XCTAssertEqual(loaded.count, 5000)
     XCTAssertEqual(loaded["BV00000"]?.progress, 0)
     XCTAssertEqual(loaded["BV04999"]?.progress, 4999)
+  }
+
+  func testCacheFilesAreSeparatedByAccountAndAppVariant() {
+    let first = WatchHistoryCache.cacheFileURL("watch-history", accountID: 1, variant: "-debug")
+    let second = WatchHistoryCache.cacheFileURL("watch-history", accountID: 2, variant: "-debug")
+    let guest = WatchHistoryCache.cacheFileURL("watch-history", accountID: nil, variant: "-debug")
+    let release = WatchHistoryCache.cacheFileURL("watch-history", accountID: 1, variant: "")
+    XCTAssertEqual(first?.lastPathComponent, "watch-history-1-debug.json")
+    XCTAssertEqual(second?.lastPathComponent, "watch-history-2-debug.json")
+    XCTAssertEqual(guest?.lastPathComponent, "watch-history-guest-debug.json")
+    XCTAssertEqual(release?.lastPathComponent, "watch-history-1.json")
+    XCTAssertNotEqual(first, second)
+    XCTAssertNotEqual(first, guest)
   }
 
   func testTokenRoundTrip() {

@@ -456,6 +456,8 @@ struct PlayerBarPage {
   /// Bar widths that differ from `PlayerBarLayout.Metrics`.
   var widths: [PlayerBarItem: Double] = [:]
   var downloadEnabled = true
+  var bookmarkTime: (() -> Double)?
+  var bookmarkSeek: ((Double) -> Void)?
 
   /// Live rooms: no speed, subtitles, shaders, audio-only or downloads.
   static let liveSupported = Set(PlayerBarItem.allCases).subtracting([.speed, .subtitle, .enhance, .audioOnly, .download])
@@ -512,6 +514,8 @@ struct PlayerBarRow<Leading: View>: View {
   @ObservedObject private var store = PlayerBarStore.shared
   @State private var leadingWidth: CGFloat = 220
   @State private var fullScreen = false
+  @State private var bookmarksShown = false
+  @State private var bookmarkDraft: PlaybackBookmarkDraft?
   private var metrics: PlayerBarLayout.Metrics {
     var value = PlayerBarLayout.Metrics()
     value.inputWidth = inputWidth
@@ -535,9 +539,17 @@ struct PlayerBarRow<Leading: View>: View {
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { PlayerBarDebug.openMoreMenu(at: $0) }
         #endif
     }
+    PlaybackBookmarkNotice(model: model)
     .onAppear(perform: refreshFullScreen)
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in refreshFullScreen() }
     .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in refreshFullScreen() }
+    .sheet(item: $bookmarkDraft) { draft in
+      PlaybackBookmarkEditor(
+        model: model, draft: draft, time: draft.time, delete: nil,
+        dismiss: { bookmarkDraft = nil },
+        currentTime: { page.bookmarkTime?() ?? model.currentBookmarkTime }
+      )
+    }
   }
 
   private func refreshFullScreen() {
@@ -633,10 +645,48 @@ struct PlayerBarRow<Leading: View>: View {
   /// are not on the bar, then 「自定义控制条…」. Popovers whose button is not on the bar open here.
   private func moreMenu(fit: PlayerBarFit, onBar: Set<PlayerBarItem>) -> some View {
     let offBar = PlayerBarItem.allCases.filter { page.supported.contains($0) && !onBar.contains($0) }
+    let supportsBookmarks = livePlayback == nil && model.playbackBookmarkMediaKey != nil
     let visible = Set(fit.visible)
     let folded = fit.hidden.count
     return Menu {
       PowerSavingStatusItem()
+      Button {
+        do { _ = try model.addPlaybackBookmark(at: page.bookmarkTime?() ?? model.currentBookmarkTime) }
+        catch { model.bookmarkNotice = error.localizedDescription }
+      } label: { Label("添加书签", systemImage: "bookmark.badge.plus") }
+        .disabled(!supportsBookmarks)
+      Button {
+        do {
+          let bookmarkTime = page.bookmarkTime?() ?? model.currentBookmarkTime
+          let bookmark = try model.addPlaybackBookmark(at: bookmarkTime)
+          bookmarkDraft = bookmark.map {
+            PlaybackBookmarkDraft(
+              mode: .edit($0.id), mediaKey: $0.mediaKey, time: $0.time, note: $0.note)
+          }
+        } catch { model.bookmarkNotice = error.localizedDescription }
+      } label: { Label("添加书签并编辑笔记…", systemImage: "square.and.pencil") }
+        .disabled(!supportsBookmarks)
+      Menu {
+        if model.bookmarksForCurrentMedia.isEmpty {
+          Text("当前媒体还没有书签").foregroundStyle(.secondary)
+        } else {
+          ForEach(model.bookmarksForCurrentMedia) { bookmark in
+            Button {
+              if let seek = page.bookmarkSeek { seek(bookmark.time) }
+              else { model.seekToPlaybackBookmark(bookmark) }
+            } label: {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(PlaybackTimeline.format(bookmark.time)).monospacedDigit()
+                if !bookmark.note.isEmpty { Text(bookmark.note).lineLimit(2).font(.caption) }
+              }
+            }
+          }
+        }
+        Divider()
+        Button { bookmarksShown.toggle() } label: { Label("管理书签与笔记…", systemImage: "list.bullet") }
+      } label: { Label("书签与笔记", systemImage: "bookmark") }
+        .disabled(!supportsBookmarks)
+      Divider()
       if !fit.hidden.isEmpty {
         Section("已收起") {
           ForEach(fit.hidden, id: \.self) { menuEntry($0) }
@@ -666,6 +716,17 @@ struct PlayerBarRow<Leading: View>: View {
     .help(folded > 0 ? "更多（已收起 \(folded) 项）" : "更多")
     .accessibilityLabel("更多").accessibilityValue(folded > 0 ? "已收起 \(folded) 项" : "")
     .animation(.snappy(duration: 0.2), value: folded)
+    .popover(isPresented: $bookmarksShown, arrowEdge: .top) {
+      ScrollView {
+        PlaybackBookmarkList(
+          model: model, clock: player.clock, override: page.bookmarkTime?(),
+          seek: { position in
+            if let seek = page.bookmarkSeek { seek(position) }
+            else { model.seekToPlaybackTime(position) }
+          }
+        ).padding(14)
+      }.frame(width: 360).frame(maxHeight: 440)
+    }
     .popover(isPresented: Self.gated($danmakuShown, !visible.contains(.danmakuSettings)), arrowEdge: .top) { danmakuPopover }
     .background {
       if cdn != nil {

@@ -2,13 +2,15 @@ import Foundation
 
 /// A Bilibili destination recognised from a pasted, dropped or opened link.
 public enum BiliLink: Equatable, Sendable {
-  case video(bvid: String)
+  case video(bvid: String, part: Int? = nil, startAt: Double? = nil)
   case archive(aid: Int64)
   case episode(Int64)
   case season(Int64)
   case live(Int64)
   case article(Int64)
   case space(Int64)
+  case search(String)
+  case region(Int64)
   /// b23.tv short link: resolve its redirect, then parse the result.
   case short(URL)
 }
@@ -34,18 +36,20 @@ public enum BiliLinkParser {
 
   public static func parse(_ url: URL) -> BiliLink? {
     guard url.user == nil, url.password == nil, let scheme = url.scheme?.lowercased() else { return nil }
-    if scheme == "manping" {
-      // manping://video/BV…, manping://live/123, manping://episode/123 …
+    if scheme == "manping" || scheme == "bilibili" {
+      // manping://video/BV…, bilibili://live/123, manping://search?keyword=…
       let parts = ([url.host ?? ""] + url.pathComponents.filter { $0 != "/" }).filter { !$0.isEmpty }
-      guard parts.count == 2 else { return nil }
-      let (kind, value) = (parts[0].lowercased(), parts[1])
+      guard !parts.isEmpty else { return nil }
+      let (kind, value) = (parts[0].lowercased(), parts.count >= 2 ? parts[1] : "")
       switch kind {
-      case "video": return identifier(value).flatMap { if case .video = $0 { $0 } else if case .archive = $0 { $0 } else { nil } }
+      case "video": return identifier(value).flatMap { videoLink($0, url: url) }
       case "episode": return number(value).map(BiliLink.episode)
       case "season": return number(value).map(BiliLink.season)
       case "live": return number(value).map(BiliLink.live)
       case "article": return number(value.hasPrefix("cv") ? String(value.dropFirst(2)) : value).map(BiliLink.article)
       case "space": return number(value).map(BiliLink.space)
+      case "region": return number(value).map(BiliLink.region)
+      case "search": return searchQuery(url).map(BiliLink.search)
       default: return nil
       }
     }
@@ -56,11 +60,13 @@ public enum BiliLinkParser {
       if parts.first == "h5", parts.count >= 2 { return number(parts[1]).map(BiliLink.live) }
       return parts.first.flatMap(number).map(BiliLink.live)
     }
+    if host == "search.bilibili.com" { return searchQuery(url).map(BiliLink.search) }
     if host == "space.bilibili.com" { return parts.first.flatMap(number).map(BiliLink.space) }
     guard webHosts.contains(host), parts.count >= 2 else { return nil }
     switch parts[0] {
-    case "video": return identifier(parts[1]).flatMap { link in
-      switch link { case .video, .archive: link; default: nil } }
+    case "video": return identifier(parts[1]).flatMap { videoLink($0, url: url) }
+    case "v" where parts.count >= 3 && parts[1] == "channel":
+      return number(parts[2]).map(BiliLink.region)
     case "bangumi" where parts.count >= 3 && parts[1] == "play":
       return identifier(parts[2]).flatMap { link in
         switch link { case .episode, .season: link; default: nil } }
@@ -81,6 +87,26 @@ public enum BiliLinkParser {
       return number(String(lower.dropFirst(2))).map(make)
     }
     return nil
+  }
+
+  private static func videoLink(_ link: BiliLink, url: URL) -> BiliLink? {
+    switch link {
+    case .archive: return link
+    case .video(let bvid, _, _):
+      let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+      let part = items.first(where: { $0.name == "p" })?.value.flatMap(Int.init).flatMap { $0 > 0 ? $0 : nil }
+      let startAt = items.first(where: { $0.name == "t" })?.value.flatMap(Double.init).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      return .video(bvid: bvid, part: part, startAt: startAt)
+    default: return nil
+    }
+  }
+
+  private static func searchQuery(_ url: URL) -> String? {
+    guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+      let raw = components.queryItems?.first(where: { $0.name == "keyword" })?.value else { return nil }
+    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !value.isEmpty, value.count <= 200 else { return nil }
+    return value
   }
 
   private static func number(_ text: String) -> Int64? {

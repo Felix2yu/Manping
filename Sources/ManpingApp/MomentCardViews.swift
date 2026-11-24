@@ -283,7 +283,7 @@ private struct MomentMenu: View {
   }
 }
 private func openMomentInBrowser(_ item: RPCDynamic) {
-  if let url = URL(string: "https://t.bilibili.com/\(item.id)") { NSWorkspace.shared.open(url) }
+  if let url = URL(string: "https://t.bilibili.com/\(item.id)") { ExternalWebLink.open(url) }
 }
 private func copyMomentURL(_ item: RPCDynamic) {
   NSPasteboard.general.clearContents()

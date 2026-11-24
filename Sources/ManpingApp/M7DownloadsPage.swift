@@ -15,7 +15,7 @@ struct M7DownloadsPage: View {
       switch filter {
       case "进行中": return ["queued", "downloading", "merging"].contains(record.state)
       case "已完成": return record.state == "complete"
-      case "待恢复": return ["cancelled", "failed", "interrupted"].contains(record.state)
+      case "待恢复": return ["cancelled", "failed", "interrupted", "attachment_failed"].contains(record.state)
       default: return true
       }
     }
@@ -58,8 +58,8 @@ struct M7DownloadsPage: View {
           .foregroundStyle(Theme.secondaryText(scheme))
         if ["queued", "downloading", "merging"].contains(record.state) {
           action("取消", icon: "xmark") { model.cancelDownload(record.id) }
-        } else if ["cancelled", "failed", "interrupted"].contains(record.state) {
-          action("恢复", icon: "arrow.clockwise") { model.retryDownload(record) }
+        } else if ["cancelled", "failed", "interrupted", "attachment_failed"].contains(record.state) {
+          action(record.state == "attachment_failed" ? "补弹幕" : "恢复", icon: "arrow.clockwise") { model.retryDownload(record) }
             .disabled(record.options == nil)
             .help(record.options == nil ? "此旧任务没有保存下载选项，请回到播放页重新下载。" : "重新获取下载地址并继续已有数据。")
         } else if record.state == "complete" {
@@ -79,7 +79,7 @@ struct M7DownloadsPage: View {
       if record.state == "complete", !record.output.isEmpty {
         Text(record.output).font(Theme.Font.caption).foregroundStyle(Theme.tertiaryText(scheme))
           .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-      } else if ["cancelled", "failed", "interrupted"].contains(record.state), record.options == nil {
+      } else if ["cancelled", "failed", "interrupted", "attachment_failed"].contains(record.state), record.options == nil {
         Text("此旧任务无法自动恢复，请从播放页重新选择下载。").font(Theme.Font.caption)
           .foregroundStyle(Theme.secondaryText(scheme))
       }
@@ -101,6 +101,7 @@ struct M7DownloadsPage: View {
     case "failed": "下载失败"
     case "interrupted": "上次运行中断"
     case "complete": "已完成"
+    case "attachment_failed": "媒体已保存 · 弹幕待补"
     default: "状态未知"
     }
   }

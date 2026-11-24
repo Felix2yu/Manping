@@ -21,6 +21,7 @@ import VideoToolbox
   private var flight: Task<Void, Never>?
   private var identityTask: Task<Void, Never>?
   private var eofObservation: AnyCancellable?
+  private var endPrompted = false
   var onPlaybackEnd: (() -> Void)?
   var onEpisodeChange: (() -> Void)?
   var onMediaReady: (() -> Void)?
@@ -161,24 +162,29 @@ import VideoToolbox
     fixturePosition = start
     if usesFixtures { player.status = "本地样本 · 未加载在线媒体" }
     else if let cdn {
-      let prepared = await cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: preferences.avoidP2P,
+      let result = await cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: preferences.avoidP2P,
         reportFailureTo: player)
       try await check(revision, expected: expected)
-      // nil: a quality change made during startup already loaded the newer stream.
-      if let prepared {
+      switch result {
+      case .prepared(let prepared):
         player.load(video: prepared.video, audio: prepared.audio, start: start); AppModel.configurePlayerPreferences(player)
         attachCDN(ticket: prepared.ticket)
+      case .superseded:
+        break
+      case .failed:
+        return
       }
     } else { player.load(video: choice.videoURL, audio: choice.audioURL, start: start); AppModel.configurePlayerPreferences(player) }
     isLoading = false
     onMediaReady?()
     observeSkips(revision: revision)
-    var prompted = false
+    endPrompted = false
     eofObservation = player.clock.$time.combineLatest(player.$duration, player.$eofReached).sink { [weak self] position, duration, ended in
-      guard let self, !prompted, self.generation == revision, self.canPlayNext else { return }
-      let threshold = skipNextPrompt() ? 0.1 : 2
-      guard ended || (duration > 5 && abs(position - duration) < threshold) else { return }
-      prompted = true
+      guard let self, self.generation == revision, self.canPlayNext else { return }
+      let atEnd = ended || (duration > 5 && abs(position - duration) < (skipNextPrompt() ? 0.1 : 2))
+      if !atEnd { self.endPrompted = false; return }
+      guard !self.endPrompted else { return }
+      self.endPrompted = true
       self.player.endTemporarySpeed()
       // Dispatch after publication completes, avoiding reentrant reset of the same @Published flag.
       Task { @MainActor [weak self] in
@@ -242,12 +248,22 @@ import VideoToolbox
       guard !usesFixtures else { return }
       if let cdn {
         let time = player.time, paused = player.paused
-        guard let prepared = await cdn.prepare(video: stream, audio: audio, avoidP2P: preferences.avoidP2P, allowProbe: false, preserveRecovery: recovering),
-          (try? await check(revision, expected: expected)) != nil, selectedStream?.id == stream.id else { return }
-        player.load(video: prepared.video, audio: prepared.audio, start: time, paused: paused)
-        attachCDN(ticket: prepared.ticket)
+        let result = await cdn.prepare(video: stream, audio: audio, avoidP2P: preferences.avoidP2P,
+          allowProbe: false, preserveRecovery: recovering, reportFailureTo: player)
+        guard (try? await check(revision, expected: expected)) != nil, selectedStream?.id == stream.id else { return }
+        switch result {
+        case .prepared(let prepared):
+          player.load(video: prepared.video, audio: prepared.audio, start: time, paused: paused)
+          attachCDN(ticket: prepared.ticket)
+        case .superseded, .failed:
+          return
+        }
       } else {
-        player.load(video: preferredURL(stream), audio: preferredURL(audio), start: player.time, paused: player.paused)
+        guard let videoURL = preferredURL(stream), let audioURL = preferredURL(audio) else {
+          player.failPlayback("当前画质没有可用的非 P2P 节点，请关闭「不使用 P2P」或选择其他画质。")
+          return
+        }
+        player.load(video: videoURL, audio: audioURL, start: player.time, paused: player.paused)
       }
     }
   }
@@ -279,8 +295,8 @@ import VideoToolbox
       return (selected, choice.audio)
     })
   }
-  private func preferredURL(_ stream: MediaStream) -> URL {
-    if preferences.avoidP2P { return ([stream.url] + stream.backupURLs).first { !PlaybackSelector.isP2P($0) } ?? stream.url }
+  private func preferredURL(_ stream: MediaStream) -> URL? {
+    if preferences.avoidP2P { return ([stream.url] + stream.backupURLs).first { !PlaybackSelector.isP2P($0) } }
     return stream.url
   }
   private static func supportsHardware(_ codec: PlaybackCodec) -> Bool {

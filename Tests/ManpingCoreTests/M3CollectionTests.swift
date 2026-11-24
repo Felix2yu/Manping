@@ -119,18 +119,20 @@ final class M3CollectionTests: XCTestCase, @unchecked Sendable {
   func testMutationsUseExactSignedTokenOnlyPostFields() async throws {
     let transport = CollectionTransport(); let service = try await collectionService(transport)
     let identity = await service.authSnapshot()
+    try await service.addViewLater(aid: 8, expectedIdentity: identity)
     try await service.removeViewLater(aids: [8, 3, 8], expectedIdentity: identity)
     try await service.clearViewLater(expectedIdentity: identity)
     try await service.removeFavoriteVideos(folderID: 11, aids: [8, 3, 8], expectedIdentity: identity)
     try await service.removeFavoritePGC(seasonID: 99, expectedIdentity: identity)
     let requests = await transport.requests
-    XCTAssertEqual(requests.map { $0.url!.path }, ["/x/v2/history/toview/del", "/x/v2/history/toview/clear",
+    XCTAssertEqual(requests.map { $0.url!.path }, ["/x/v2/history/toview/add", "/x/v2/history/toview/del", "/x/v2/history/toview/clear",
       "/x/v3/fav/resource/batch-del", "/pgc/app/follow/del"])
-    XCTAssertEqual(collectionFields(requests[0])["aid"], "3,8")
-    XCTAssertEqual(collectionFields(requests[1])["clean_type"], "0")
-    XCTAssertEqual(collectionFields(requests[2])["resources"], "3:2,8:2")
-    XCTAssertEqual(collectionFields(requests[2])["media_id"], "11")
-    XCTAssertEqual(collectionFields(requests[3])["season_id"], "99")
+    XCTAssertEqual(collectionFields(requests[0])["aid"], "8")
+    XCTAssertEqual(collectionFields(requests[1])["aid"], "3,8")
+    XCTAssertEqual(collectionFields(requests[2])["clean_type"], "0")
+    XCTAssertEqual(collectionFields(requests[3])["resources"], "3:2,8:2")
+    XCTAssertEqual(collectionFields(requests[3])["media_id"], "11")
+    XCTAssertEqual(collectionFields(requests[4])["season_id"], "99")
     for request in requests {
       XCTAssertEqual(request.httpMethod, "POST"); XCTAssertNil(request.url?.query)
       XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
@@ -146,6 +148,7 @@ final class M3CollectionTests: XCTestCase, @unchecked Sendable {
     let transport = CollectionTransport(); let service = try await collectionService(transport)
     let identity = await service.authSnapshot()
     let operations: [@Sendable () async throws -> Void] = [
+      { try await service.addViewLater(aid: 0, expectedIdentity: identity) },
       { try await service.removeViewLater(aids: [], expectedIdentity: identity) },
       { try await service.removeViewLater(aids: [1, 0], expectedIdentity: identity) },
       { try await service.removeFavoriteVideos(folderID: 0, aids: [1], expectedIdentity: identity) },
@@ -164,12 +167,15 @@ final class M3CollectionTests: XCTestCase, @unchecked Sendable {
     let identity = await service.authSnapshot()
     do { try await service.clearViewLater(expectedIdentity: identity); XCTFail("Expected login requirement") }
     catch AuthFailure.needsLogin {}
+    do { try await service.addViewLater(aid: 8, expectedIdentity: identity); XCTFail("Expected login requirement") }
+    catch AuthFailure.needsLogin {}
     let requests = await transport.requests; XCTAssertTrue(requests.isEmpty)
   }
   func testStaleExpectedIdentityNeverSends() async throws {
     let transport = CollectionTransport(); let service = try await collectionService(transport)
     let identity = await service.authSnapshot(); try await service.logout()
     let operations: [@Sendable () async throws -> Void] = [
+      { try await service.addViewLater(aid: 8, expectedIdentity: identity) },
       { try await service.removeViewLater(aids: [1], expectedIdentity: identity) },
       { try await service.clearViewLater(expectedIdentity: identity) },
       { try await service.removeFavoriteVideos(folderID: 11, aids: [1], expectedIdentity: identity) },
@@ -184,13 +190,15 @@ final class M3CollectionTests: XCTestCase, @unchecked Sendable {
     let transport = CollectionTransport(); let service = try await collectionService(transport, expiresAt: 999)
     let identity = await service.authSnapshot()
     try await service.removeViewLater(aids: [3], expectedIdentity: identity)
+    try await service.addViewLater(aid: 8, expectedIdentity: identity)
     let requests = await transport.requests
-    XCTAssertEqual(requests.count, 2)
+    XCTAssertEqual(requests.count, 3)
     XCTAssertEqual(requests[0].url?.host, "passport.bilibili.com")
     XCTAssertEqual(requests[0].url?.path, "/api/oauth2/refreshToken")
     XCTAssertEqual(requests[1].url?.path, "/x/v2/history/toview/del")
-    XCTAssertEqual(collectionFields(requests[1])["access_key"], "collection-fixture-renewed")
-    XCTAssertNil(requests[1].value(forHTTPHeaderField: "Cookie"))
+    XCTAssertEqual(requests[2].url?.path, "/x/v2/history/toview/add")
+    XCTAssertEqual(collectionFields(requests[2])["access_key"], "collection-fixture-renewed")
+    XCTAssertNil(requests[2].value(forHTTPHeaderField: "Cookie"))
     let refreshed = await service.authSnapshot()
     XCTAssertEqual(refreshed.epoch, identity.epoch)
     XCTAssertEqual(refreshed.identityRevision, identity.identityRevision)
@@ -200,7 +208,9 @@ final class M3CollectionTests: XCTestCase, @unchecked Sendable {
     let identity = await service.authSnapshot()
     do { try await service.removeViewLater(aids: [3], expectedIdentity: identity); XCTFail("Expected API rejection") }
     catch BiliError.api(let code, _) { XCTAssertEqual(code, -400) }
-    let requests = await transport.requests; XCTAssertEqual(requests.count, 1)
+    do { try await service.addViewLater(aid: 3, expectedIdentity: identity); XCTFail("Expected API rejection") }
+    catch BiliError.api(let code, _) { XCTAssertEqual(code, -400) }
+    let requests = await transport.requests; XCTAssertEqual(requests.count, 2)
   }
   func testLogoutDiscardsLateMutationSuccess() async throws {
     let transport = CollectionTransport(held: true); let service = try await collectionService(transport)
@@ -209,6 +219,16 @@ final class M3CollectionTests: XCTestCase, @unchecked Sendable {
     await transport.waitForRequest(); try await service.logout(); await transport.release()
     do { try await task.value; XCTFail("Expected late response cancellation") } catch is CancellationError {}
     let requests = await transport.requests; XCTAssertEqual(requests.count, 1)
+  }
+  func testLogoutDiscardsLateViewLaterAddition() async throws {
+    let transport = CollectionTransport(held: true); let service = try await collectionService(transport)
+    let identity = await service.authSnapshot()
+    let task = Task { try await service.addViewLater(aid: 8, expectedIdentity: identity) }
+    await transport.waitForRequest(); try await service.logout(); await transport.release()
+    do { try await task.value; XCTFail("Expected late response cancellation") } catch is CancellationError {}
+    let requests = await transport.requests
+    XCTAssertEqual(requests.count, 1)
+    XCTAssertEqual(requests.first?.url?.path, "/x/v2/history/toview/add")
   }
   func testCancellationDiscardsLateMutationSuccess() async throws {
     let transport = CollectionTransport(held: true); let service = try await collectionService(transport)

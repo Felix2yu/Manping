@@ -5,13 +5,21 @@ import SwiftUI
 struct PopularPage: View {
   @ObservedObject var model: AppModel
   @StateObject private var feed: BrowseFeedModel
+  @StateObject private var history: HistoryPageModel
+  @State private var continueAccountID: Int64?
   private var requestKey: String { String(describing: model.popularTab) }
+  private var continueItems: [ContinueWatchingItem] { ContinueWatchingItem.entries(from: history.records.map(\.item)) }
   init(model: AppModel) {
     self.model = model
     _feed = StateObject(wrappedValue: BrowseFeedModel(service: model.service))
+    _history = StateObject(wrappedValue: HistoryPageModel(service: model.service,
+      rpc: try? model.standardRPCService()))
   }
   var body: some View {
-    BrowseVideoResults(feed: feed, open: model.open, filtersRecommendations: model.popularTab == .recommended)
+    VStack(spacing: 0) {
+      continueWatching
+      BrowseVideoResults(feed: feed, open: model.open, filtersRecommendations: model.popularTab == .recommended)
+    }
       .pageToolbar(title: "首页", refreshing: feed.state.isLoading && !feed.state.items.isEmpty, refresh: { feed.refresh() }) {
         Button { model.playCuratedList() } label: {
           Label("播放精选", systemImage: "play.square.stack")
@@ -36,7 +44,40 @@ struct PopularPage: View {
             return try await RPCBrowseSource(rpc: model.standardRPCService()).rankingFeed(region: 0)
           }
         }
-      }.onDisappear { feed.deactivate() }
+      }
+      .task(id: "continue:\(model.accountMID ?? 0):\(model.refreshToken)") {
+        continueAccountID = model.accountMID
+        guard model.accountMID != nil else { return }
+        await history.load(business: .archive)
+      }
+      .onDisappear { feed.deactivate(); history.cancelRequests() }
+  }
+  @ViewBuilder private var continueWatching: some View {
+    if model.accountMID != nil, continueAccountID == model.accountMID,
+      history.isLoading || !continueItems.isEmpty || history.error != nil {
+      VStack(alignment: .leading, spacing: 10) {
+        HStack {
+          Text("继续观看").font(Theme.Font.headline)
+          Spacer()
+          if let error = history.error {
+            InlineErrorText(message: error)
+            Button("重试") { Task { await history.refresh() } }.buttonStyle(AppButtonStyle(size: .small))
+          } else if history.isLoading {
+            ProgressView().controlSize(.small)
+          }
+        }
+        if !continueItems.isEmpty {
+          ScrollView(.horizontal) {
+            HStack(spacing: 14) {
+              ForEach(continueItems) { item in
+                VideoCard(video: item.video, action: { model.open(item.video, startAt: Double(item.progress)) })
+                  .frame(width: 240)
+              }
+            }.padding(.vertical, 4)
+          }.scrollIndicators(.hidden)
+        }
+      }.padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 8)
+    }
   }
 }
 

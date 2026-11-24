@@ -64,6 +64,11 @@ struct ProxyHealthFetcher: CDNRangeFetching {
     let audio: URL?
     let ticket: Int
   }
+  enum PreparationResult {
+    case prepared(Prepared)
+    case superseded
+    case failed(String)
+  }
 
   @Published private(set) var settings = Settings()
   @Published private(set) var manualHost: String?
@@ -172,10 +177,10 @@ struct ProxyHealthFetcher: CDNRangeFetching {
   /// `allowProbe: false` (quality changes) reuses existing results instead of waiting for a benchmark.
   /// Streams of the previous load stay registered until `attach`, so the old picture keeps
   /// playing while the new one starts.
-  /// Returns nil when superseded or when the manual node cannot serve this stream. The latter
-  /// stops `reportFailureTo` (or the attached player) with a fixed error; callers must not load.
+  /// A superseded preparation must not publish media-ready. A failed preparation stops
+  /// `reportFailureTo` (or the attached player) and callers must not load.
   func prepare(video: MediaStream, audio: MediaStream?, avoidP2P: Bool, allowProbe: Bool = true,
-    preserveRecovery: Bool = false, reportFailureTo: PlayerModel? = nil) async -> Prepared? {
+    preserveRecovery: Bool = false, reportFailureTo: PlayerModel? = nil) async -> PreparationResult {
     generation += 1
     recoveryTask?.cancel(); recoveryTask = nil
     monitor?.invalidate(); monitor = nil
@@ -189,6 +194,10 @@ struct ProxyHealthFetcher: CDNRangeFetching {
     provisionalProxied = []
     let issuedVideo = Self.issued(video, avoidP2P: avoidP2P)
     let issuedAudio = audio.map { Self.issued($0, avoidP2P: avoidP2P) } ?? []
+    guard !issuedVideo.isEmpty, audio == nil || !issuedAudio.isEmpty else {
+      return .failed(rejectPlayback(reportFailureTo,
+        "当前播放地址只有 P2P 节点，已按设置停止加载。请关闭「不使用 P2P」或选择其他画质。"))
+    }
     let sample = issuedVideo.first(where: CDNCatalog.isSwappable)
     let observed = sample?.host.flatMap(CDNHost.init)
     let issuedHosts = (issuedVideo + issuedAudio).compactMap { $0.host.flatMap(CDNHost.init) }
@@ -205,22 +214,21 @@ struct ProxyHealthFetcher: CDNRangeFetching {
       results = cached.results; resultsAt = cached.at
     }
     // A newer prepare started while this one waited: touch nothing.
-    guard current == generation else { return nil }
+    guard current == generation else { return .superseded }
     relay.setManualHost(manualHost)
     let relayVideo = manualHost == nil ? issuedVideo
       : PlaybackNodePolicy.restrictedURLs(issuedVideo, current: nil, manualHost: manualHost)
     let relayAudio = manualHost == nil ? issuedAudio
       : PlaybackNodePolicy.restrictedURLs(issuedAudio, current: nil, manualHost: manualHost)
     guard !relayVideo.isEmpty, issuedAudio.isEmpty || !relayAudio.isEmpty else {
-      rejectManualNode(reportFailureTo)
-      return nil
+      return .failed(rejectManualNode(reportFailureTo))
     }
     let pool = currentPool(bitsPerSecond: video.bandwidth + (audio?.bandwidth ?? 0))
     poolHosts = pool.map(\.name)
     activeHost = manualHost ?? bestKey() ?? issuedVideo.first?.host
 
     if settings.multiSource, await startRelay() {
-      guard current == generation else { return nil }
+      guard current == generation else { return .superseded }
       relay.setHosts(pool, seedMbps: Dictionary(results.filter(\.ok).map { ($0.host, $0.mbps) }, uniquingKeysWith: max))
       if proxyActive {
         provisionalProxied = Array(pool.prefix(2))
@@ -239,19 +247,18 @@ struct ProxyHealthFetcher: CDNRangeFetching {
           downgrade: { false }, relayed: true, urls: [videoURL] + (audioURL.map { [$0] } ?? []))
         pendingGeneration = current
         log("多节点缓冲：\(pool.isEmpty ? "使用接口签发节点" : pool.map { CDNCatalog.label(for: $0) }.joined(separator: "、"))")
-        return Prepared(video: videoURL, audio: issuedAudio.isEmpty ? nil : audioURL, ticket: current)
+        return .prepared(Prepared(video: videoURL, audio: issuedAudio.isEmpty ? nil : audioURL, ticket: current))
       }
     }
     guard let direct = directURLs(issuedVideo: issuedVideo, issuedAudio: issuedAudio) else {
-      rejectManualNode(reportFailureTo)
-      return nil
+      return .failed(rejectManualNode(reportFailureTo))
     }
     session = Session(player: nil, video: video, audio: audio, sample: sample, issuedVideo: issuedVideo,
       issuedAudio: issuedAudio, avoidP2P: avoidP2P, bitsPerSecond: video.bandwidth + (audio?.bandwidth ?? 0), reload: { _, _ in },
       downgrade: { false }, relayed: false, urls: [direct.video] + (direct.audio.map { [$0] } ?? []))
     pendingGeneration = current
     if let host = direct.video.host { log("单节点播放：\(CDNHost(host).map(CDNCatalog.label(for:)) ?? host)") }
-    return Prepared(video: direct.video, audio: direct.audio, ticket: current)
+    return .prepared(Prepared(video: direct.video, audio: direct.audio, ticket: current))
   }
 
   /// Starts health monitoring for the player that just loaded the prepared URLs.
@@ -663,14 +670,20 @@ struct ProxyHealthFetcher: CDNRangeFetching {
     return true
   }
 
-  private func rejectManualNode(_ target: PlayerModel?) {
+  @discardableResult private func rejectManualNode(_ target: PlayerModel?) -> String {
+    let message = "当前播放地址不支持所选节点，请选择其他节点或恢复自动优选后重试。"
+    return rejectPlayback(target, message)
+  }
+
+  @discardableResult private func rejectPlayback(_ target: PlayerModel?, _ message: String) -> String {
     recovery.cancel()
     recoveryTask?.cancel(); recoveryTask = nil
     backgroundProbe?.cancel(); backgroundProbe = nil
     proxyProbe?.cancel(); proxyProbe = nil
     relay.unregisterAll()
-    log("当前播放地址不支持所选节点，已停止加载")
-    (target ?? session?.player)?.failPlayback("当前播放地址不支持所选节点，请选择其他节点或恢复自动优选后重试。")
+    log(message)
+    (target ?? session?.player)?.failPlayback(message)
+    return message
   }
 
   // MARK: Health monitoring

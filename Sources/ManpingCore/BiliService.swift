@@ -826,7 +826,8 @@ public actor BiliService {
     if let expectedIdentity { try checkRESTIdentity(expectedIdentity) }
     let body = try await data(URL(string: "https://api.bilibili.com/x/v1/dm/list.so?oid=\(cid)")!)
     if let expectedIdentity { try checkRESTIdentity(expectedIdentity) }
-    return try DanmakuParser.parse(body)
+    guard body.count <= 64 * 1024 * 1024 else { throw BiliError.invalidResponse("Invalid danmaku XML") }
+    return try DanmakuParser.parse(body, limit: 20_000)
   }
   private func appPost(
     _ path: String, fields: [String: String], epoch: UInt64,

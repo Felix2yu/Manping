@@ -12,6 +12,7 @@ struct M5LiveCard: View {
   /// Always plays in the app, whatever the browser setting says. Falls back to `play`.
   var watch: ((Int64) -> Void)?
   let openUser: (Int64) -> Void
+  @Environment(\.cardActions) private var actions
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     VStack(alignment: .leading, spacing: Theme.cardTitleGap) {
@@ -53,7 +54,9 @@ struct M5LiveCard: View {
     if let play { play(room.id) } else { openWeb() }
   }
   private func openWeb() {
-    if let url = room.webURL { NSWorkspace.shared.open(url) }
+    if let url = room.webURL {
+      if let actions { actions.openWeb(url) } else { ExternalWebLink.open(url) }
+    }
   }
 }
 
@@ -69,8 +72,17 @@ private struct LiveRoomMenu: View {
     Button("进入直播间") { play?(room.id) }.disabled(play == nil)
     if let actions { Button("小窗播放") { actions.playLiveCompact(room.id) } }
     Divider()
-    Button("拷贝链接") { if let url = room.webURL { CardActions.copy(url) } }.disabled(room.webURL == nil)
-    Button("在浏览器中打开") { if let url = room.webURL { NSWorkspace.shared.open(url) } }.disabled(room.webURL == nil)
+    Button("拷贝链接") {
+      if let url = room.webURL {
+        if let actions { actions.copyWebLink(url) }
+        else { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string) }
+      }
+    }.disabled(room.webURL == nil)
+    Button("在浏览器中打开") {
+      if let url = room.webURL {
+        if let actions { actions.openWeb(url) } else { ExternalWebLink.open(url) }
+      }
+    }.disabled(room.webURL == nil)
     Divider()
     if let openUser, let mid = room.authorID, mid > 0 { Button("进入主播空间") { openUser(mid) } }
     Button(pins.contains(room.id) ? "从菜单栏取消固定" : "固定到菜单栏") { pins.toggle(room) }
@@ -83,6 +95,7 @@ struct M5FollowLiveRow: View {
   /// Always plays in the app, whatever the browser setting says. Falls back to `play`.
   var watch: ((Int64) -> Void)?
   @ObservedObject private var pins = PinnedLiveStore.shared
+  @Environment(\.cardActions) private var actions
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     Button { if let play { play(room.id) } else { openWeb() } } label: {
@@ -97,6 +110,8 @@ struct M5FollowLiveRow: View {
       .contextMenu { LiveRoomMenu(room: room, play: watch ?? play, openUser: nil) }
   }
   private func openWeb() {
-    if let url = room.webURL { NSWorkspace.shared.open(url) }
+    if let url = room.webURL {
+      if let actions { actions.openWeb(url) } else { ExternalWebLink.open(url) }
+    }
   }
 }

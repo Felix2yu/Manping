@@ -723,7 +723,8 @@ enum PerformanceCoverData {
     if PerformanceOptions.networkNodePolicy == "manual" { model.cdn.select(host: url.host) }
     let stream = MediaStream(quality: 80, codec: "avc1", url: url, bandwidth: 8_000_000,
       label: "loopback", backupURLs: [PerformanceOptions.networkBackup, PerformanceOptions.networkThird].compactMap { $0 })
-    guard let prepared = await model.cdn.prepare(video: stream, audio: nil, avoidP2P: false, allowProbe: false)
+    guard case .prepared(let prepared) = await model.cdn.prepare(
+      video: stream, audio: nil, avoidP2P: false, allowProbe: false)
     else { throw PerformanceOptions.Failure.playbackUnavailable }
     let initialRenderFrames = renderFrames(player)
     let start = ProcessInfo.processInfo.systemUptime
@@ -768,7 +769,8 @@ enum PerformanceCoverData {
         diagnosticHidden = false
       }
       if let reloadAt = PerformanceOptions.networkHiddenReloadAt, diagnosticSession == 1, beforeSample >= reloadAt {
-        guard let next = await model.cdn.prepare(video: stream, audio: nil, avoidP2P: false, allowProbe: false)
+        guard case .prepared(let next) = await model.cdn.prepare(
+          video: stream, audio: nil, avoidP2P: false, allowProbe: false)
         else { throw PerformanceOptions.Failure.playbackUnavailable }
         await loadPrepared(next)
         diagnosticSession += 1
@@ -873,7 +875,7 @@ enum PerformanceCoverData {
       var duration = 0.0
       var mode = "video"
       switch target {
-      case .video(let bvid):
+      case .video(let bvid, _, _):
         let video = try await service.detail(bvid, expectedIdentity: expected)
         let manifest = try await service.playback(video, expectedIdentity: expected)
         duration = manifest.duration
@@ -881,7 +883,7 @@ enum PerformanceCoverData {
         guard duration >= PerformanceOptions.anonymousSeconds + 5 else { throw AnonymousFailure.shortMedia }
         let choice = try PlaybackSelector.select(manifest)
         guard await Self.anonymousUnchanged(service, expected: expected), model.player === player,
-          let prepared = await model.cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: true),
+          case .prepared(let prepared) = await model.cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: true),
           await Self.anonymousUnchanged(service, expected: expected), model.player === player else { throw AnonymousFailure.boundary }
         player.load(video: prepared.video, audio: prepared.audio)
         model.cdn.attach(player: player, ticket: prepared.ticket, reload: { [weak player, weak model] video, audio in

@@ -2,8 +2,9 @@ import XCTest
 @testable import ManpingCore
 
 final class RecommendationFilterTests: XCTestCase {
-  private func video(primary: Int? = 1, secondary: Int? = 24, author: Int64? = 42) -> Video {
-    Video(bvid: "BV1fixture001", title: "Video", author: "Creator", authorID: author,
+  private func video(bvid: String = "BV1fixture001", aid: Int64? = nil,
+    primary: Int? = 1, secondary: Int? = 24, author: Int64? = 42) -> Video {
+    Video(bvid: bvid, title: "Video", author: "Creator", aid: aid, authorID: author,
       partitionID: primary, partitionName: "动画", subpartitionID: secondary, subpartitionName: "剪辑")
   }
 
@@ -88,5 +89,60 @@ final class RecommendationFilterTests: XCTestCase {
     let filter = try JSONDecoder().decode(RecommendationFilter.self, from: data)
     XCTAssertEqual(filter.rules.count, 1)
     XCTAssertEqual(filter.rules.first?.valueID, 42)
+  }
+
+  func testLegacyFilterWithoutVideoFeedbackStillDecodes() throws {
+    let data = Data("""
+      {"rules":[{"id":"00000000-0000-0000-0000-000000000001","kind":"author","valueID":42,"name":"Creator"}]}
+      """.utf8)
+    let filter = try JSONDecoder().decode(RecommendationFilter.self, from: data)
+    XCTAssertEqual(filter.rules.count, 1)
+    XCTAssertTrue(filter.hiddenVideos.isEmpty)
+    XCTAssertTrue(filter.filters(video()))
+  }
+
+  func testHiddenVideoPrefersBVIDAndFallsBackToPositiveAID() {
+    var filter = RecommendationFilter()
+    XCTAssertTrue(filter.hide(video(bvid: "BV1fixture001", aid: 1)))
+    XCTAssertTrue(filter.filters(video(bvid: " BV1fixture001 ", aid: 999)))
+    XCTAssertFalse(filter.filters(video(bvid: "", aid: 1)))
+
+    XCTAssertTrue(filter.hide(video(bvid: "", aid: 2)))
+    XCTAssertTrue(filter.filters(video(bvid: "", aid: 2)))
+    XCTAssertFalse(filter.filters(video(bvid: "", aid: 3)))
+    XCTAssertFalse(filter.hide(video(bvid: "", aid: nil)))
+    XCTAssertFalse(filter.hide(video(bvid: "   ", aid: 0)))
+    XCTAssertEqual(filter.hiddenVideos.map(\.id), ["bvid:BV1fixture001", "av:2"])
+  }
+
+  func testHiddenVideoDeduplicationIsIndependentFromRules() {
+    var filter = RecommendationFilter()
+    let hidden = video(aid: 1)
+    XCTAssertTrue(filter.hide(hidden))
+    XCTAssertFalse(filter.hide(video(aid: 2)))
+    XCTAssertEqual(filter.hiddenVideos.count, 1)
+
+    let rule = RecommendationFilterRule(kind: .author, valueID: 42, name: "Creator")
+    XCTAssertTrue(filter.add(rule))
+    XCTAssertTrue(filter.removeHiddenVideo(id: "bvid:BV1fixture001"))
+    XCTAssertFalse(filter.hides(hidden))
+    XCTAssertTrue(filter.filters(hidden))
+    filter.remove(id: rule.id)
+    XCTAssertFalse(filter.filters(hidden))
+  }
+
+  func testPersistedVideoFeedbackDropsDuplicatesAndInvalidIdentities() throws {
+    let data = Data("""
+      {"rules":[],"hiddenVideos":[
+        {"bvid":"BV1fixture001","aid":1,"title":"First"},
+        {"bvid":"BV1fixture001","aid":2,"title":"Duplicate"},
+        {"bvid":"","aid":7,"title":"Fallback"},
+        {"bvid":"   ","aid":0,"title":"Invalid"}
+      ]}
+      """.utf8)
+    let filter = try JSONDecoder().decode(RecommendationFilter.self, from: data)
+    XCTAssertEqual(filter.hiddenVideos.map(\.id), ["bvid:BV1fixture001", "av:7"])
+    XCTAssertEqual(filter.hiddenVideos.first?.title, "First")
+    XCTAssertTrue(filter.filters(video(bvid: "", aid: 7)))
   }
 }

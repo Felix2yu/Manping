@@ -130,7 +130,7 @@ struct M6MessagePage: View {
     guard let url = item.sourceURL else { return }
     if let bvid = url.pathComponents.first(where: { $0.hasPrefix("BV") }), url.host == "www.bilibili.com" {
       onVideo(bvid)
-    } else { NSWorkspace.shared.open(url) }
+    } else { ExternalWebLink.open(url) }
   }
   private func symbol(_ item: MessageSection) -> String {
     switch item { case .reply: "arrowshape.turn.up.left"; case .at: "at"; case .like: "hand.thumbsup"; case .chat: "bubble.left.and.bubble.right" }

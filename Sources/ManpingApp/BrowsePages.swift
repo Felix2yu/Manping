@@ -5,6 +5,9 @@ struct VideoPartitionPage: View {
   let service: BiliService
   let open: (Video) -> Void
   var refreshToken = 0
+  var request: AppModel.PartitionRequest?
+  let onRequestHandled: () -> Void
+  @State private var requestError: String?
   /// A partition's ranking (排行榜), moved here from the old 流行 sidebar.
   let ranking: (Int) async throws -> BrowseVideoPage
 
@@ -17,8 +20,10 @@ struct VideoPartitionPage: View {
   @Environment(\.colorScheme) private var scheme
 
   init(service: BiliService, open: @escaping (Video) -> Void, refreshToken: Int = 0,
+    request: AppModel.PartitionRequest? = nil, onRequestHandled: @escaping () -> Void = {},
     ranking: @escaping (Int) async throws -> BrowseVideoPage) {
-    self.service = service; self.open = open; self.refreshToken = refreshToken; self.ranking = ranking
+    self.service = service; self.open = open; self.refreshToken = refreshToken
+    self.request = request; self.onRequestHandled = onRequestHandled; self.ranking = ranking
     _feed = StateObject(wrappedValue: BrowseFeedModel(service: service))
   }
 
@@ -40,7 +45,9 @@ struct VideoPartitionPage: View {
       sidebar
       Hairline(axis: .vertical)
       VStack(spacing: 0) {
-        if let parent {
+        if let requestError {
+          PageStateView(.error, title: "没能打开分区", message: requestError, icon: "rectangle.grid.2x2")
+        } else if let parent {
           header(parent: parent)
           BrowseVideoResults(feed: feed, open: open).equatable()
         } else if directory.isLoading {
@@ -58,10 +65,19 @@ struct VideoPartitionPage: View {
       refreshing: feed.state.isLoading && !feed.state.items.isEmpty, refresh: { feed.refresh() })
     .task(id: refreshToken) { directory.loadIfNeeded(service: service) }
     .onChange(of: directory.partitions.map(\.id)) { _, ids in
-      if !ids.contains(selectedParentID ?? -1) {
+      guard !ids.isEmpty else { return }
+      if let request {
+        if !applyRequest(request) { requestError = "服务器没有返回这个分区，请检查链接或从左侧重新选择。" }
+      } else if !ids.contains(selectedParentID ?? -1) {
         selectedParentID = ids.first
         selectedChildID = nil
         order = .recommended
+      }
+    }
+    .onChange(of: request) { _, request in
+      requestError = nil
+      if let request, !directory.partitions.isEmpty, !applyRequest(request) {
+        requestError = "服务器没有返回这个分区，请检查链接或从左侧重新选择。"
       }
     }
     .onChange(of: parent?.children.map(\.id)) { _, ids in
@@ -89,6 +105,19 @@ struct VideoPartitionPage: View {
       feed.deactivate()
       directory.cancel()
     }
+  }
+
+  private func applyRequest(_ request: AppModel.PartitionRequest) -> Bool {
+    guard let parent = directory.partitions.first(where: { $0.id == request.tid })
+      ?? directory.partitions.first(where: { $0.children.contains { $0.id == request.tid } }) else { return false }
+    let child = parent.children.first { $0.id == request.tid }
+    selectedParentID = parent.id
+    selectedChildID = child?.id
+    showsRanking = false
+    order = .recommended
+    requestError = nil
+    onRequestHandled()
+    return true
   }
 
   private var sidebar: some View {
@@ -188,6 +217,7 @@ private extension PartitionOrder {
 struct BrowseVideoResults: View, Equatable {
   @ObservedObject var feed: BrowseFeedModel
   @ObservedObject private var recommendationFilter = RecommendationFilterStore.shared
+  @State private var videoFeedback: VideoFeedbackNotice?
   let open: (Video) -> Void
   let filtersRecommendations: Bool
   private let feedID: ObjectIdentifier
@@ -201,6 +231,19 @@ struct BrowseVideoResults: View, Equatable {
 
   nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.feedID == rhs.feedID && lhs.filtersRecommendations == rhs.filtersRecommendations
+  }
+
+  private struct VideoFeedbackNotice: Equatable {
+    let title: String
+    let message: String
+    let offersUndo: Bool
+
+    static let hidden = Self(title: "已从推荐中移除",
+      message: "这个视频已从首页推荐隐藏。可立即撤销，或稍后在设置 › 推荐过滤中清除。", offersUndo: true)
+    static let hideFailed = Self(title: "没能更新推荐反馈",
+      message: "偏好设置写入失败，这个视频仍在推荐列表中。", offersUndo: false)
+    static let undoFailed = Self(title: "没能撤销",
+      message: "偏好设置写入失败，这个视频仍保持隐藏。", offersUndo: false)
   }
 
   private var visibleItems: [Video] {
@@ -230,7 +273,9 @@ struct BrowseVideoResults: View, Equatable {
           ) {
             ForEach(visibleItems) { video in
               VideoCard(video: video, action: { open(video) }, filterRecommendation: filtersRecommendations ? { kind in
-                if recommendationFilter.add(video, kind: kind) { feed.remove(videoID: video.id) }
+                if recommendationFilter.add(video, kind: kind).succeeded { feed.remove(videoID: video.id) }
+              } : nil, hideRecommendation: filtersRecommendations ? {
+                videoFeedback = recommendationFilter.hide(video: video) ? .hidden : .hideFailed
               } : nil)
             }
           }.cardGridContent()
@@ -250,6 +295,20 @@ struct BrowseVideoResults: View, Equatable {
           feed.loadNext()
         }
       }
+    }
+    .alert(videoFeedback?.title ?? "", isPresented: Binding(
+      get: { videoFeedback != nil },
+      set: { if !$0 { videoFeedback = nil } }
+    )) {
+      if videoFeedback?.offersUndo == true {
+        Button("撤销") {
+          if recommendationFilter.undoLastHide() { videoFeedback = nil }
+          else { videoFeedback = .undoFailed }
+        }
+      }
+      Button("知道了", role: .cancel) { videoFeedback = nil }
+    } message: {
+      Text(videoFeedback?.message ?? "")
     }
   }
 }

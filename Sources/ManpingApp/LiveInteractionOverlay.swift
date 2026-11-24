@@ -160,7 +160,7 @@ private struct LiveActivityBanner: View {
     if let room = interaction.context?.roomID,
       let url = URL(string: "https://live.bilibili.com/\(room)")
     {
-      NSWorkspace.shared.open(url)
+      ExternalWebLink.open(url)
     }
   }
 }
@@ -207,7 +207,7 @@ struct LiveGiftResultCards: View {
           HStack {
             Button("查看消费记录 ↗") {
               if let url = URL(string: "https://link.bilibili.com/p/center/index") {
-                NSWorkspace.shared.open(url)
+                ExternalWebLink.open(url)
               }
             }.buttonStyle(.link)
             Spacer()

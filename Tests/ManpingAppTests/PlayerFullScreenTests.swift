@@ -3,6 +3,19 @@ import XCTest
 @testable import ManpingApp
 
 final class PlayerFullScreenTests: XCTestCase {
+  func testTerminalFailureClearsPreviousMediaClock() {
+    let player = PlayerModel()
+    player.time = 125
+    player.duration = 600
+    player.failPlayback("fixture failure")
+    XCTAssertTrue(player.terminalFailure)
+    XCTAssertEqual(player.time, 0)
+    XCTAssertEqual(player.duration, 0)
+    XCTAssertTrue(player.paused)
+    XCTAssertFalse(player.eofReached)
+    XCTAssertEqual(player.error, "fixture failure")
+  }
+
   func testExitFramesFitCurrentVisibleScreen() {
     let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
     let visible = NSRect(x: 0, y: 25, width: 1440, height: 850)

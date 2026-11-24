@@ -12,6 +12,9 @@ struct CardActions {
   var playDetached: @MainActor (Video) -> Void
   var openSpace: @MainActor (Int64) -> Void
   var playLiveCompact: @MainActor (Int64) -> Void
+  var addViewLater: @MainActor (Video) -> Void
+  var openWeb: @MainActor (URL) -> Void
+  var copyWebLink: @MainActor (URL) -> Void
 
   @MainActor init(model: AppModel) {
     play = { model.open($0) }
@@ -20,20 +23,29 @@ struct CardActions {
     playDetached = { model.open($0, mode: .detached) }
     openSpace = { model.openOverlay(.userSpace($0)) }
     playLiveCompact = { model.openLive($0, mode: .compact) }
+    addViewLater = { video in
+      guard let aid = video.aid, aid > 0 else { return }
+      Task { await model.viewLaterActions.add(aid) { model.showingLogin = true } }
+    }
+    openWeb = { model.openWebURL($0) }
+    copyWebLink = { url in
+      NSPasteboard.general.clearContents()
+      guard NSPasteboard.general.setString(url.absoluteString, forType: .string) else {
+        model.error = "没能把链接写入剪贴板，请重试。"; return
+      }
+      model.actionNotice = "链接已复制。"
+    }
   }
 
   static func webURL(_ video: Video) -> URL? {
     let id = video.bvid.hasPrefix("BV") ? video.bvid : video.aid.map { "av\($0)" } ?? ""
     return id.isEmpty ? nil : URL(string: "https://www.bilibili.com/video/\(id)")
   }
-  static func copy(_ url: URL) {
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(url.absoluteString, forType: .string)
-  }
 }
 
 extension EnvironmentValues {
   @Entry var cardActions: CardActions? = nil
+  @Entry var viewLaterActions: ViewLaterActionsModel? = nil
 }
 
 /// The shared video context menu: 播放 / 小窗播放 / 在独立窗口播放 — 拷贝链接 / 在浏览器中打开 —
@@ -42,17 +54,28 @@ struct VideoContextMenu: View {
   let video: Video
   var extra: AnyView?
   var filterRecommendation: ((RecommendationRuleKind) -> Void)?
+  var hideRecommendation: (() -> Void)?
   @Environment(\.cardActions) private var actions
+  @Environment(\.viewLaterActions) private var viewLater
   var body: some View {
     if let actions {
       Button("播放") { actions.play(video) }
       Button("小窗播放") { actions.playCompact(video) }
       Button("在独立窗口播放") { actions.playDetached(video) }
+      if let aid = video.aid, aid > 0 {
+        Button { actions.addViewLater(video) } label: {
+          Label("加入稍后再看", systemImage: "clock")
+        }.disabled(viewLater?.isBusy(aid) == true)
+      }
       Divider()
     }
+    if let viewLater, let aid = video.aid, let error = viewLater.error(for: aid) {
+      Text(error).foregroundStyle(.red)
+    }
+    if let notice = viewLater?.notice { Text(notice).foregroundStyle(Theme.accent) }
     if let url = CardActions.webURL(video) {
-      Button("拷贝链接") { CardActions.copy(url) }
-      Button("在浏览器中打开") { NSWorkspace.shared.open(url) }
+      Button("拷贝链接") { actions.copyWebLink(url) }
+      Button("在浏览器中打开") { actions.openWeb(url) }
     }
     if let actions, let mid = video.authorID, mid > 0 {
       Divider()
@@ -60,7 +83,7 @@ struct VideoContextMenu: View {
     }
     if let filterRecommendation {
       Divider()
-      RecommendationFilterMenu(video: video, onFilter: filterRecommendation)
+      RecommendationFilterMenu(video: video, onFilter: filterRecommendation, onHide: hideRecommendation)
     }
     if let extra {
       Divider()
@@ -134,6 +157,7 @@ struct VideoCard: View {
   /// Page-specific items appended to the context menu.
   var menuExtra: AnyView? = nil
   var filterRecommendation: ((RecommendationRuleKind) -> Void)?
+  var hideRecommendation: (() -> Void)?
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     // Cover and title play; the UP 主 name opens their space, as on Bilibili.
@@ -150,7 +174,10 @@ struct VideoCard: View {
         .demoAnchor("card.\(video.title)")
       CardMetadataLine(author: video.author, authorID: video.authorID, rest: metadata, action: action)
     }.cardHover()
-      .contextMenu { VideoContextMenu(video: video, extra: menuExtra, filterRecommendation: filterRecommendation) }
+      .contextMenu {
+        VideoContextMenu(video: video, extra: menuExtra,
+          filterRecommendation: filterRecommendation, hideRecommendation: hideRecommendation)
+      }
   }
 
   /// The subtitle stands in for the time when the feed gives one.
@@ -175,10 +202,22 @@ struct VideoCard: View {
 private struct RecommendationFilterMenu: View {
   let video: Video
   let onFilter: (RecommendationRuleKind) -> Void
+  let onHide: (() -> Void)?
   @ObservedObject private var store = RecommendationFilterStore.shared
 
   var body: some View {
     Menu("不再推荐") {
+      if let onHide {
+        Button {
+          onHide()
+        } label: {
+          if store.filter.hides(video) { Label("这个视频", systemImage: "checkmark") }
+          else { Text("这个视频") }
+        }
+        .disabled(store.filter.hides(video)
+          || RecommendationHiddenVideo.identity(bvid: video.bvid, aid: video.aid) == nil)
+        Divider()
+      }
       if let id = video.partitionID, let name = video.partitionName, !name.isEmpty {
         filterButton("一级分区：\(name)", kind: .primaryPartition, id: Int64(id))
       }

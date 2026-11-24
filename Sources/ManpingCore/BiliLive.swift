@@ -157,7 +157,8 @@ public enum LiveStreamSelector {
     }
   }
 
-  /// Every stream in preference order, each with its peer-assisted lines moved last.
+  /// Every stream in preference order. Peer-assisted lines are moved last, or removed when
+  /// the user disabled P2P.
   /// The requested quality (or the closest one below it, then above it) first; then the
   /// preferred hardware codec (AV1 last, it decodes in software on most Macs); then FLV (lowest
   /// latency), fMP4 HLS, TS HLS. Without a request the highest delivered quality wins.
@@ -187,10 +188,11 @@ public enum LiveStreamSelector {
         < ($1.codecName == "av1" ? 1 : 0, distance($1.currentQuality), codecRank($1.codecName), formatRank($1))
     }
     guard avoidPeerAssisted else { return ranked }
-    return ranked.map { stream in
-      LiveStream(protocolName: stream.protocolName, formatName: stream.formatName, codecName: stream.codecName,
-        currentQuality: stream.currentQuality, acceptedQualities: stream.acceptedQualities,
-        urls: stream.urls.filter { !isPeerAssisted($0) } + stream.urls.filter(isPeerAssisted))
+    return ranked.compactMap { stream in
+      let urls = stream.urls.filter { !isPeerAssisted($0) }
+      guard !urls.isEmpty else { return nil }
+      return LiveStream(protocolName: stream.protocolName, formatName: stream.formatName, codecName: stream.codecName,
+        currentQuality: stream.currentQuality, acceptedQualities: stream.acceptedQualities, urls: urls)
     }
   }
 }

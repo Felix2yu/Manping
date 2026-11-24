@@ -68,6 +68,9 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
                 observed.add(command[2])
                 property_change(command[2])
             elif name == "loadfile":
+                if "fixture=load-error" in command[1]:
+                    send({"request_id": message.get("request_id"), "error": "fixture load failed"})
+                    continue
                 properties.update({"time-pos": 3.25, "duration": 99.0, "idle-active": False,
                                    "eof-reached": False})
                 send({"event": "file-loaded"})
@@ -86,6 +89,9 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
                 property_change("time-pos")
             elif name == "set_property":
                 key, value = command[1:3]
+                if key == "fixture-error":
+                    send({"request_id": message.get("request_id"), "error": "property not found"})
+                    continue
                 if key == "pause":
                     properties[key] = value in (True, "yes", "true")
                 elif key in ("volume", "speed"):

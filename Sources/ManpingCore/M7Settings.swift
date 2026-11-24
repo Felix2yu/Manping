@@ -47,7 +47,32 @@ public enum MacSettingKey: String, CaseIterable, Sendable {
   case powerSavingMode = "Manping.powerSavingMode", powerSavingDanmaku60 = "Manping.powerSavingDanmaku60"
   case powerSavingStrong = "Manping.powerSavingStrong", powerSavingLowerQuality = "Manping.powerSavingLowerQuality"
 }
-public enum MacSettingValue: Sendable, Equatable { case bool(Bool), number(Double), text(String) }
+public enum MacSettingValue: Sendable, Equatable, Codable {
+  case bool(Bool), number(Double), text(String)
+  private enum CodingKeys: String, CodingKey, CaseIterable { case type, value }
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    guard Set(container.allKeys) == Set(CodingKeys.allCases) else {
+      throw DecodingError.dataCorruptedError(forKey: .type, in: container,
+        debugDescription: "A setting value must contain exactly type and value.")
+    }
+    switch try container.decode(String.self, forKey: .type) {
+    case "bool": self = .bool(try container.decode(Bool.self, forKey: .value))
+    case "number": self = .number(try container.decode(Double.self, forKey: .value))
+    case "text": self = .text(try container.decode(String.self, forKey: .value))
+    case let type: throw DecodingError.dataCorruptedError(forKey: .type, in: container,
+      debugDescription: "Unknown setting value type: \(type).")
+    }
+  }
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    switch self {
+    case .bool(let value): try container.encode("bool", forKey: .type); try container.encode(value, forKey: .value)
+    case .number(let value): try container.encode("number", forKey: .type); try container.encode(value, forKey: .value)
+    case .text(let value): try container.encode("text", forKey: .type); try container.encode(value, forKey: .value)
+    }
+  }
+}
 public enum MacSettingControl: Sendable {
   case toggle, choice([MacSettingChoice]), number(ClosedRange<Double>, step: Double), text, directory, executable
 }
@@ -278,7 +303,7 @@ public struct MacSettings: Sendable, Equatable {
     case .text(let value): defaults.set(value, forKey: key.rawValue)
     }
   }
-  private static func normalize(_ value: MacSettingValue, descriptor: MacSettingDescriptor) -> MacSettingValue? {
+  static func normalize(_ value: MacSettingValue, descriptor: MacSettingDescriptor) -> MacSettingValue? {
     switch (descriptor.control, value) {
     case (.toggle, .bool): return value
     case (.choice(let choices), _): return choices.contains { $0.value == value } ? value : nil
@@ -294,6 +319,105 @@ public struct MacSettings: Sendable, Equatable {
       if [.customMpv, .customLibMpv].contains(descriptor.key), !path.isEmpty, !path.hasPrefix("/") { return nil }
       return .text(path)
     default: return nil
+    }
+  }
+}
+
+/// A versioned, portable snapshot of preferences only. The allowlist is deliberately explicit:
+/// account credentials, AI keys and proxy passwords are not settings in this catalog at all,
+/// and the self-hosted history server address is excluded even though it is a preference.
+public struct MacSettingsBackup: Codable, Equatable, Sendable {
+  public static let schemaVersion = 1
+  public static let maximumDataSize = 1_048_576
+  public static let backupKeys = MacSettingsCatalog.descriptors.map(\.key).filter { $0 != .historyServer }
+  public static let excludedKeys: Set<String> = [MacSettingKey.historyServer.rawValue]
+
+  public let schemaVersion: Int
+  public let values: [String: MacSettingValue]
+  private enum CodingKeys: String, CodingKey, CaseIterable { case schemaVersion, values }
+
+  public init(settings: MacSettings) {
+    self.schemaVersion = Self.schemaVersion
+    // Include effective current values, including defaults for keys never saved locally.
+    self.values = Dictionary(uniqueKeysWithValues: Self.backupKeys.map { ($0.rawValue, settings[$0]) })
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    guard Set(container.allKeys) == Set(CodingKeys.allCases) else {
+      throw MacSettingsBackupError.malformedBackup("顶层必须且只能包含 schemaVersion 和 values。")
+    }
+    let version = try container.decode(Int.self, forKey: .schemaVersion)
+    guard version == Self.schemaVersion else {
+      throw MacSettingsBackupError.unsupportedSchemaVersion(version)
+    }
+    let values = try container.decode([String: MacSettingValue].self, forKey: .values)
+    var validated: [String: MacSettingValue] = [:]
+    for (rawKey, value) in values {
+      guard let key = Self.backupKeys.first(where: { $0.rawValue == rawKey }) else {
+        throw MacSettingsBackupError.unknownSettingKey(rawKey)
+      }
+      // Use the same rules as loading and editing, but never silently clamp a backup value.
+      // Only canonical values accepted by the current catalog may cross the trust boundary.
+      guard let normalized = MacSettings.normalize(value, descriptor: MacSettingsCatalog.descriptor(key)),
+        normalized == value else {
+        throw MacSettingsBackupError.invalidSettingValue(rawKey)
+      }
+      validated[rawKey] = normalized
+    }
+    self.schemaVersion = version
+    self.values = validated
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(schemaVersion, forKey: .schemaVersion)
+    try container.encode(values, forKey: .values)
+  }
+
+  /// Values in catalog order, so an import is deterministic and can be preflighted as a batch.
+  public var settingValues: [(key: MacSettingKey, value: MacSettingValue)] {
+    Self.backupKeys.compactMap { key in values[key.rawValue].map { (key, $0) } }
+  }
+
+  public func encodedData() throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    let data = try encoder.encode(self)
+    guard data.count <= Self.maximumDataSize else {
+      throw MacSettingsBackupError.dataTooLarge(limit: Self.maximumDataSize)
+    }
+    return data
+  }
+
+  public static func decode(data: Data) throws -> Self {
+    guard data.count <= maximumDataSize else { throw MacSettingsBackupError.dataTooLarge(limit: maximumDataSize) }
+    return try JSONDecoder().decode(Self.self, from: data)
+  }
+
+  /// Check the file size before reading it, then validate the complete document before returning.
+  public static func read(from url: URL) throws -> Self {
+    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+    if let size, size > maximumDataSize { throw MacSettingsBackupError.dataTooLarge(limit: maximumDataSize) }
+    return try decode(data: Data(contentsOf: url, options: .mappedIfSafe))
+  }
+}
+
+public enum MacSettingsBackupError: Error, Equatable, Sendable, LocalizedError {
+  case unsupportedSchemaVersion(Int)
+  case dataTooLarge(limit: Int)
+  case unknownSettingKey(String)
+  case invalidSettingValue(String)
+  case malformedBackup(String)
+
+  public var errorDescription: String? {
+    switch self {
+    case .unsupportedSchemaVersion(let version):
+      "不支持版本 \(version) 的设置备份；当前版本为 \(MacSettingsBackup.schemaVersion)。"
+    case .dataTooLarge(let limit): "设置备份超过 \(limit) 字节（1 MiB）上限。"
+    case .unknownSettingKey(let key): "备份包含不允许或不支持的设置项「\(key)」。"
+    case .invalidSettingValue(let key): "设置项「\(key)」的类型或值无效。"
+    case .malformedBackup(let detail): "设置备份格式无效：\(detail)"
     }
   }
 }

@@ -18,6 +18,7 @@ struct VideoDetailPage: View {
   /// Full screen: the picture fills the window; the right column's own setting is kept.
   @Environment(\.immersivePlayback) private var immersive
   @Environment(\.colorScheme) private var scheme
+  @Environment(\.viewLaterActions) private var viewLater
   @State private var section: Section = .info
   @State private var userPickedSection = false
   @State private var showingCoin = false
@@ -97,6 +98,7 @@ struct VideoDetailPage: View {
     // Keyed by bvid: `Video.id` switches from BV to av when details arrive, which used to
     // re-run this and throw the user back to the default tab.
     .task(id: video.bvid.isEmpty ? video.id : video.bvid) {
+      model.refreshPlaybackBookmarks()
       detailLoadError = nil
       userPickedSection = false
       section = model.launchVideoTab.flatMap(Section.init(launchTab:)) ??
@@ -118,7 +120,7 @@ struct VideoDetailPage: View {
     .onChange(of: interactions.identityGeneration) { _, _ in
       showingFavorites = false; showingCoin = false; showingTriple = false
     }
-    .onChange(of: model.selected?.cid) { _, _ in fixtureTime = 0 }
+    .onChange(of: model.selected?.cid) { _, _ in fixtureTime = 0; model.refreshPlaybackBookmarks() }
     .task(id: model.selected?.cid) {
       videoShot = nil
       guard !model.usesUIFixtures, let selected = model.selected, let cid = selected.cid else { return }
@@ -196,6 +198,7 @@ struct VideoDetailPage: View {
   private var controlsPinned: Bool {
     fixturePlayback || PlaybackTimeline.debugHover != nil || displayPaused || showingVolume ||
       danmakuSettingsShown || networkShown || composeShown || chaptersShown || scrubbing || !features.input.isEmpty
+      || model.bookmarkNotice != nil
   }
   private var controlsShown: Bool { chrome.visible || controlsPinned }
   /// The picture's shape, from the stream being played (16:9 until it is known).
@@ -280,6 +283,7 @@ struct VideoDetailPage: View {
     return PlayerControlPanel(chrome: chrome) {
       PlaybackTimeline(clock: player.clock, duration: displayDuration, override: fixturePlayback ? fixtureTime : nil,
         preview: videoShot, density: timelineDensity, chapters: timelineChapters, markers: model.aiMarks(for: model.aiMediaKey),
+        bookmarkTimes: model.bookmarksForCurrentMedia.map(\.time),
         bufferedAhead: { [player] in player.bufferedAhead }, scrubbing: { scrubbing = $0 }) { position in
         if fixturePlayback { fixtureTime = position } else { player.seek(position) }
       }
@@ -291,7 +295,7 @@ struct VideoDetailPage: View {
             features.send(seconds: displayTime) { model.showingLogin = true }
           })
         },
-        extraMenu: { AnyView(debugMenuItems) }) {
+        extraMenu: { AnyView(extraMenuItems) }) {
         PlayerPlayButton(paused: displayPaused) {
           if fixturePlayback { fixturePaused.toggle() } else { player.togglePause() }
         }
@@ -307,8 +311,8 @@ struct VideoDetailPage: View {
           PlayerTimeLabel(clock: player.clock, duration: displayDuration, override: fixturePlayback ? fixtureTime : nil)
             .padding(.horizontal, 4)
         }
-        if layout.showsChapter, !timelineChapters.isEmpty {
-          PlayerChapterButton(clock: player.clock, chapters: timelineChapters, override: fixturePlayback ? fixtureTime : nil,
+        if layout.showsChapter, !timelineChapters.isEmpty || !model.bookmarksForCurrentMedia.isEmpty {
+          PlayerChapterButton(model: model, clock: player.clock, chapters: timelineChapters, override: fixturePlayback ? fixtureTime : nil,
             shown: $chaptersShown) { position in
             if fixturePlayback { fixtureTime = position } else { player.seek(position) }
           }
@@ -337,9 +341,21 @@ struct VideoDetailPage: View {
     PlayerBarPage(slots: [
       .quality: .quality(streams: playableStreams, selected: model.selectedStream) { model.changeQuality($0) },
       .subtitle: .subtitle(features: features, player: player, filterAI: model.appSettings.bool(.filterAISubtitle)),
-    ], downloadEnabled: model.manifest != nil)
+    ], downloadEnabled: model.manifest != nil,
+      bookmarkTime: { fixturePlayback ? fixtureTime : player.time },
+      bookmarkSeek: { position in
+        if fixturePlayback { fixtureTime = position } else { player.seek(position) }
+      })
   }
-  @ViewBuilder private var debugMenuItems: some View {
+  @ViewBuilder private var extraMenuItems: some View {
+    let aid = details?.video.aid ?? video.aid
+    Divider()
+    Button {
+      guard let aid, aid > 0 else { return }
+      Task { await model.viewLaterActions.add(aid) { model.showingLogin = true } }
+    } label: {
+      Label("加入稍后再看", systemImage: "clock")
+    }.disabled(aid == nil || aid.map { $0 <= 0 || viewLater?.isBusy($0) == true } == true)
     #if DEBUG
     if model.usesUIFixtures && model.playbackQueue.count > 0 {
       Divider()
@@ -465,10 +481,25 @@ struct VideoDetailPage: View {
               if await interactions.loadFolders(aid: aid, requiresLogin: { model.showingLogin = true }) { showingFavorites = true }
             }
           }
+          Button {
+            guard let aid = details.video.aid, aid > 0 else { return }
+            Task { await model.viewLaterActions.add(aid) { model.showingLogin = true } }
+          } label: {
+            GlassTileLabel(symbol: "clock", value: "稍后再看")
+          }.buttonStyle(GlassTileButtonStyle())
+            .help("加入稍后再看").accessibilityLabel("加入稍后再看")
+            .disabled(details.video.aid == nil || viewLater == nil
+              || details.video.aid.map { viewLater?.isBusy($0) == true } == true)
           Button { showingTriple = true } label: { GlassTileLabel(symbol: "sparkles", value: "三连") }
             .buttonStyle(GlassTileButtonStyle()).help("三连：点赞、投币并收藏").accessibilityLabel("三连")
             .disabled(details.video.aid == nil || interactions.busy)
         }
+      }
+      if let aid = details.video.aid, let viewLater, let error = viewLater.error(for: aid) {
+        InlineErrorText(message: error)
+      }
+      if let notice = viewLater?.notice {
+        Text(notice).font(Theme.Font.caption).foregroundStyle(Theme.accentText(scheme))
       }
       HStack(spacing: 16) {
         Text("AV \(details.video.aid.map(String.init) ?? "—")")
@@ -539,6 +570,9 @@ struct VideoDetailPage: View {
                     override: fixturePlayback ? fixtureTime : nil) { position in
                     if fixturePlayback { fixtureTime = position } else { player.seek(position) }
                   }
+                }
+                PlaybackBookmarkList(model: model, clock: player.clock, override: fixturePlayback ? fixtureTime : nil) { position in
+                  if fixturePlayback { fixtureTime = position } else { player.seek(position) }
                 }
               }
             case .parts: partsSection(details)

@@ -23,8 +23,13 @@ public final class DanmakuParser: NSObject, XMLParserDelegate {
   private var result: [DanmakuComment] = []
   private var properties: [String]?
   private var text = ""
-  public static func parse(_ data: Data) throws -> [DanmakuComment] {
-    let delegate = DanmakuParser()
+  private let limit: Int
+  private var accepted = 0
+  private var randomState: UInt64 = 0x6a09e667f3bcc909
+
+  private init(limit: Int) { self.limit = limit }
+  public static func parse(_ data: Data, limit: Int = Int.max) throws -> [DanmakuComment] {
+    let delegate = DanmakuParser(limit: max(1, limit))
     let parser = XMLParser(data: data)
     parser.delegate = delegate
     parser.shouldResolveExternalEntities = false
@@ -54,8 +59,15 @@ public final class DanmakuParser: NSObject, XMLParserDelegate {
     // list.so: time, mode, size, color, sent, pool, user hash, id, weight.
     let weight = p.count >= 9 ? Int(p[8]) : nil
     let hash = p.count >= 7 && !p[6].isEmpty ? p[6].lowercased() : nil
-    result.append(
-      DanmakuComment(time: time, mode: mode, color: color, text: String(text.prefix(160)), weight: weight, userHash: hash))
+    let comment = DanmakuComment(time: time, mode: mode, color: color, text: String(text.prefix(160)), weight: weight, userHash: hash)
+    accepted += 1
+    if result.count < limit {
+      result.append(comment)
+    } else {
+      randomState = randomState &* 6364136223846793005 &+ 1442695040888963407
+      let index = Int(randomState % UInt64(accepted))
+      if index < limit { result[index] = comment }
+    }
   }
 }
 public struct PositionedComment: Sendable {

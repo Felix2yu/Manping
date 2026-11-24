@@ -2,7 +2,7 @@ import AppKit
 import ManpingCore
 import SwiftUI
 
-// The settings window (⌘,): a glass sidebar with nine categories and a grouped `Form` per
+// The settings window (⌘,): a glass sidebar with ten categories and a grouped `Form` per
 // category, built from `MacSettingsCatalog`. It replaces the old settings page in the main window.
 
 extension MacSettingGroup {
@@ -28,8 +28,19 @@ enum SettingsPage: Equatable {
   case playerBar
   /// 首页推荐的一级/二级分区与 UP 主过滤规则。
   case recommendationFilters
+  /// 非敏感偏好的版本化 JSON 备份，位于高级分组。
+  case settingsBackup
   /// 致谢, below the categories.
   case acknowledgements
+
+  var parentGroup: MacSettingGroup? {
+    switch self {
+    case .playerBar: .playback
+    case .recommendationFilters: .general
+    case .settingsBackup: .advanced
+    case .acknowledgements: nil
+    }
+  }
 }
 
 final class SettingsSelection: ObservableObject {
@@ -37,6 +48,11 @@ final class SettingsSelection: ObservableObject {
     didSet { page = nil }
   }
   @Published var page: SettingsPage?
+
+  func select(_ page: SettingsPage) {
+    if let group = page.parentGroup { self.group = group }
+    self.page = page
+  }
 }
 
 /// Owns the one settings window. AppKit-hosted like the main window, so ⌘, works the same way
@@ -50,7 +66,7 @@ final class SettingsSelection: ObservableObject {
 
   func show(model: AppModel, group: MacSettingGroup? = nil, page: SettingsPage? = nil) {
     if let group { selection.group = group }
-    if let page { selection.page = page }
+    if let page { selection.select(page) }
     let window = self.window ?? makeWindow(model: model)
     self.window = window
     NSApp.activate()
@@ -97,6 +113,12 @@ struct SettingsView: View {
       .preferredColorScheme(diagnosticTheme?.colorScheme ?? model.theme.colorScheme)
       .tint(Theme.accent)
       .onAppear { settings.reload() }
+      .alert("出了点问题", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+        Button("确定") { model.error = nil }
+      } message: { Text(model.error ?? "") }
+      .alert("截图完成", isPresented: Binding(get: { model.screenshotNotice != nil }, set: { if !$0 { model.screenshotNotice = nil } })) {
+        Button("好") { model.screenshotNotice = nil }
+      } message: { Text(model.screenshotNotice ?? "") }
   }
 }
 
@@ -121,27 +143,36 @@ private struct SettingsLayout: View {
           }.buttonStyle(SidebarRowStyle(selected: selection.page == nil && selection.group == group))
             .demoAnchor("settings.\(group.rawValue)")
           if group == .playback {
-            Button { selection.page = .playerBar } label: {
+            Button { selection.select(.playerBar) } label: {
               HStack(spacing: 10) {
                 Image(systemName: "rectangle.bottomthird.inset.filled").font(.system(size: 13)).frame(width: 20)
                 Text("控制条").font(Theme.Font.body)
                 Spacer(minLength: 0)
-              }.padding(.horizontal, 10).frame(height: 32).contentShape(Rectangle())
+              }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 32).contentShape(Rectangle())
             }.buttonStyle(SidebarRowStyle(selected: selection.page == .playerBar))
           }
           if group == .general {
-            Button { selection.page = .recommendationFilters } label: {
+            Button { selection.select(.recommendationFilters) } label: {
               HStack(spacing: 10) {
                 Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 13)).frame(width: 20)
                 Text("推荐过滤").font(Theme.Font.body)
                 Spacer(minLength: 0)
-              }.padding(.horizontal, 10).frame(height: 32).contentShape(Rectangle())
+              }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 32).contentShape(Rectangle())
             }.buttonStyle(SidebarRowStyle(selected: selection.page == .recommendationFilters))
+          }
+          if group == .advanced {
+            Button { selection.select(.settingsBackup) } label: {
+              HStack(spacing: 10) {
+                Image(systemName: "arrow.up.arrow.down.circle").font(.system(size: 13)).frame(width: 20)
+                Text("设置备份").font(Theme.Font.body)
+                Spacer(minLength: 0)
+              }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 32).contentShape(Rectangle())
+            }.buttonStyle(SidebarRowStyle(selected: selection.page == .settingsBackup))
           }
         }
         Spacer(minLength: 0)
         Divider().padding(.horizontal, 6)
-        Button { selection.page = .acknowledgements } label: {
+        Button { selection.select(.acknowledgements) } label: {
           HStack(spacing: 10) {
             Image(systemName: "heart").font(.system(size: 13)).frame(width: 20)
             Text("致谢").font(Theme.Font.body)
@@ -166,6 +197,8 @@ private struct SettingsLayout: View {
           PlayerBarCustomizer()
         case .recommendationFilters:
           RecommendationFilterSettingsView(model: model)
+        case .settingsBackup:
+          SettingsBackupPage(settings: settings)
         case nil:
           SettingsCategoryView(model: model, settings: settings, group: selection.group)
             .id(selection.group)
@@ -180,8 +213,37 @@ private struct SettingsLayout: View {
     case .acknowledgements: "致谢"
     case .playerBar: "控制条"
     case .recommendationFilters: "推荐过滤"
+    case .settingsBackup: "设置备份"
     case nil: selection.group.rawValue
     }
+  }
+}
+
+/// 设置 › 高级 › 设置备份: portable preferences, with account secrets deliberately out of scope.
+private struct SettingsBackupPage: View {
+  @ObservedObject var settings: M7SettingsModel
+  var body: some View {
+    Form {
+      Section {
+        LabeledContent {
+          Button("导出设置…") { settings.exportSettings() }
+        } label: {
+          SettingLabel(title: "导出非敏感设置", detail: "保存为 JSON 文件，可用于迁移到另一台 Mac。")
+        }
+        LabeledContent {
+          Button("导入设置…") { settings.importSettings() }
+        } label: {
+          SettingLabel(title: "从备份恢复", detail: "替换备份中非敏感设置的当前值，其他设置保持不变。")
+        }
+      } header: {
+        Text("备份与恢复")
+      } footer: {
+        Text("不包含登录、AI、代理密码及自建历史服务器地址。导入前会验证整个文件，验证失败时不会更改任何设置。")
+      }
+      if let status = settings.status {
+        Section { Text(status).font(Theme.Font.caption).foregroundStyle(.secondary) }
+      }
+    }.formStyle(.grouped).scrollContentBackground(.hidden)
   }
 }
 
@@ -272,7 +334,7 @@ private struct SettingsCategoryView: View {
     if group == .privacy, section == "bili-history" { WatchHistoryTokenRow(store: model.watchHistory) }
     if group == .download, section == "截图" {
       LabeledContent {
-        Button("截取画面") { settings.takeScreenshot() }.disabled(!model.canTakeScreenshot)
+        Button("截取画面") { settings.takeScreenshot() }.disabled(!model.canTakeScreenshot || model.screenshotBusy)
       } label: {
         SettingLabel(title: "截取当前画面", detail: "按上面的格式和位置保存正在播放的画面。")
       }
@@ -614,7 +676,7 @@ private struct AcknowledgementsPage: View {
 }
 
 private func open(_ link: String) {
-  if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+  if let url = URL(string: link) { ExternalWebLink.open(url) }
 }
 
 private struct LicenseCapsule: View {

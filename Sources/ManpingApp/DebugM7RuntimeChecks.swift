@@ -23,7 +23,7 @@ private final class M7RuntimeStateBox: @unchecked Sendable {
       try await checkNormal(mockExecutable: mockExecutable, directory: directory)
       try await checkStubborn(mockExecutable: mockExecutable, directory: directory)
       try await checkDisconnected(mockExecutable: mockExecutable, directory: directory)
-      print("PASS M7 Unix socket IPC: literal load, state, seek, pause, chapters, natural exit, bounded shutdown, disconnected child termination")
+      print("PASS M7 Unix socket IPC: literal load, failure recovery, state, seek, pause, chapters, natural exit, bounded shutdown, disconnected child termination")
       return true
     } catch {
       print("FAIL M7 Unix socket IPC fixture: \(error)")
@@ -74,8 +74,14 @@ private final class M7RuntimeStateBox: @unchecked Sendable {
     try require(loaded?[1] as? String == literal, "load URL arrives literally in IPC")
     let arguments = records.first { $0["event"] as? String == "start" }?["argv"] as? [String] ?? []
     try require(!arguments.isEmpty && !arguments.contains { $0.contains("example.invalid") }, "media URL absent from argv")
+    driver.set("fixture-error", "yes")
     driver.command(["seek", "17.5", "absolute+exact"])
     try await wait("seek") { box.state.time == 17.5 }
+    try require(box.state.error == nil, "non-load command errors do not become playback failures")
+    driver.load(video: URL(string: "https://example.invalid/video?fixture=load-error")!, audio: nil, start: 0, paused: false)
+    try await wait("load failure") { box.state.error?.contains("fixture load failed") == true }
+    driver.load(video: URL(string: literal)!, audio: nil, start: 0, paused: false)
+    try await wait("reload clears failure") { box.state.time == 3.25 && box.state.error == nil }
     driver.set("pause", "yes")
     try await wait("pause") { box.state.paused }
     driver.set("speed", "2.25"); driver.set("volume", "65")

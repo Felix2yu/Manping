@@ -86,10 +86,11 @@ struct PGCPlayerPage: View {
     }
     .task(id: selection) { await playback.ensureLoaded(selection) }
       .onChange(of: playback.episode?.id) { _, _ in
+        model.refreshPlaybackBookmarks()
         showingCoin = false; showingFavorites = false; showingTriple = false
         if playback.details != nil && !tabs.contains(tab) { tab = .info }
       }
-      .onChange(of: playback.identityVersion) { _, _ in comments.cancel(); tab = .info; showingCoin = false; showingFavorites = false; showingTriple = false }
+      .onChange(of: playback.identityVersion) { _, _ in model.refreshPlaybackBookmarks(); comments.cancel(); tab = .info; showingCoin = false; showingFavorites = false; showingTriple = false }
       .onDisappear { comments.cancel(); restoreTemporarySpeed() }
       .task(id: playback.episode?.cid) {
         videoShot = nil
@@ -116,7 +117,7 @@ struct PGCPlayerPage: View {
   /// Paused, a popover open, typing a comment or scrubbing: the controls stay up.
   private var controlsPinned: Bool {
     playback.usesFixtures || paused || volumeShown || danmakuSettingsShown || networkShown || composeShown || chaptersShown || scrubbing
-      || !features.input.isEmpty
+      || !features.input.isEmpty || model.bookmarkNotice != nil
   }
   private var controlsShown: Bool { chrome.visible || controlsPinned }
   /// The picture's shape, from the stream being played (16:9 until it is known).
@@ -202,6 +203,7 @@ struct PGCPlayerPage: View {
       PlaybackTimeline(clock: player.clock, duration: duration, override: playback.usesFixtures ? playback.fixturePosition : nil,
         enabled: playback.manifest != nil || playback.usesFixtures, preview: videoShot,
         density: player.timeline.density(duration: duration), chapters: chapters, markers: model.aiMarks(for: model.aiMediaKey),
+        bookmarkTimes: model.bookmarksForCurrentMedia.map(\.time),
         bufferedAhead: { [player] in player.bufferedAhead }, scrubbing: { scrubbing = $0 }) { playback.seek($0) }
       PlayerBarRow(model: model, player: player, layout: layout, page: barPage, cdn: model.cdn,
         danmakuShown: $danmakuSettingsShown, networkShown: $networkShown, volumeShown: $volumeShown,
@@ -226,8 +228,8 @@ struct PGCPlayerPage: View {
           PlayerTimeLabel(clock: player.clock, duration: duration, override: playback.usesFixtures ? playback.fixturePosition : nil)
             .padding(.horizontal, 4)
         }
-        if layout.showsChapter, !chapters.isEmpty {
-          PlayerChapterButton(clock: player.clock, chapters: chapters, override: playback.usesFixtures ? playback.fixturePosition : nil,
+        if layout.showsChapter, !chapters.isEmpty || !model.bookmarksForCurrentMedia.isEmpty {
+          PlayerChapterButton(model: model, clock: player.clock, chapters: chapters, override: playback.usesFixtures ? playback.fixturePosition : nil,
             shown: $chaptersShown) { playback.seek($0) }
         }
         DanmakuToggleButton(enabled: $player.commentsEnabled) { danmakuSettingsShown = true }
@@ -245,7 +247,9 @@ struct PGCPlayerPage: View {
         playback.changeQuality($0)
       },
       .subtitle: .subtitle(features: features, player: player, filterAI: model.appSettings.bool(.filterAISubtitle)),
-    ], downloadEnabled: playback.manifest != nil)
+    ], downloadEnabled: playback.manifest != nil,
+      bookmarkTime: { playback.usesFixtures ? playback.fixturePosition : player.time },
+      bookmarkSeek: playback.seek)
   }
   @ViewBuilder private var debugMenuItems: some View {
     #if DEBUG
@@ -298,6 +302,8 @@ struct PGCPlayerPage: View {
           PlaybackChapterList(clock: player.clock, chapters: chapters,
             override: playback.usesFixtures ? playback.fixturePosition : nil, seek: playback.seek)
         }
+        PlaybackBookmarkList(model: model, clock: player.clock, override: playback.usesFixtures ? playback.fixturePosition : nil,
+          seek: model.seekToPlaybackBookmark)
         operations(details)
       } else if let error = playback.error { InlineErrorText(message: error) }
       else { ProgressView("正在加载信息…") }

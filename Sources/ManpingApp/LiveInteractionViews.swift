@@ -346,7 +346,7 @@ private struct LiveGiftPanel: View {
   }
   private var roomURL: String { "https://live.bilibili.com/\(interaction.context?.roomID ?? 0)" }
   private func official(_ title: String, _ help: String, url: String) -> some View {
-    Button(title + " ↗") { if let url = URL(string: url) { NSWorkspace.shared.open(url) } }
+    Button(title + " ↗") { if let url = URL(string: url) { ExternalWebLink.open(url) } }
       .buttonStyle(.link).help(help)
   }
   private func giftCell(_ gift: LiveGift, bag: LiveBagItem? = nil) -> some View {

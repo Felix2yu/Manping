@@ -94,6 +94,8 @@ public actor AIConversationService {
   private var runs: [String: (id: UUID, task: Task<Void, Never>)] = [:]
   /// Threads kept only in memory while saving is off; dropped with the owner ticket.
   private var memoryThreads: [String: AIThread] = [:]
+  private var memoryOrder: [String] = []
+  private let memoryLimit = 64
   private var memoryTicket: AIConversationStore.Ticket?
   private var bundles: [String: (key: String, bundle: AIMaterialBundle)] = [:]
   private var pendingThreads: [String: String] = [:]
@@ -174,14 +176,17 @@ public actor AIConversationService {
   /// The thread of a source under the current account (memory only while saving is off).
   public func thread(for source: AISource) -> AIThread? {
     let ticket = store.ticket()
-    if memoryTicket != ticket { memoryThreads = [:]; pendingThreads = [:]; memoryTicket = ticket }
-    if let thread = memoryThreads[source.identifier] { return thread }
+    if memoryTicket != ticket { memoryThreads = [:]; memoryOrder = []; pendingThreads = [:]; memoryTicket = ticket }
+    if let thread = memoryThreads[source.identifier] {
+      touchMemoryThread(source.identifier)
+      return thread
+    }
     return (try? store.threads(sourceKey: source.identifier, ticket: ticket))?.first
   }
   /// Cancels running answers, then deletes every saved thread, answer and segment.
   public func clear() throws {
     for run in runs.values { run.task.cancel() }
-    runs = [:]; memoryThreads = [:]; bundles = [:]; pendingThreads = [:]
+    runs = [:]; memoryThreads = [:]; memoryOrder = []; bundles = [:]; pendingThreads = [:]
     try store.clearAll()
   }
   /// 清除此视频的对话: cancels the source's running answer, then removes its threads (saved or
@@ -189,7 +194,9 @@ public actor AIConversationService {
   public func clearThread(for source: AISource) throws {
     let ticket = store.ticket()
     if let id = pendingThreads.removeValue(forKey: source.identifier) { cancel(threadID: id) }
-    if memoryTicket == ticket, let memory = memoryThreads.removeValue(forKey: source.identifier) { cancel(threadID: memory.id) }
+    if memoryTicket == ticket, let memory = memoryThreads[source.identifier] {
+      forgetMemoryThread(source.identifier); cancel(threadID: memory.id)
+    }
     for thread in try store.threads(sourceKey: source.identifier, ticket: ticket) {
       cancel(threadID: thread.id)
       _ = try store.deleteThread(id: thread.id, ticket: ticket)
@@ -258,6 +265,22 @@ public actor AIConversationService {
   }
   private func finished(threadID: String, runID: UUID) {
     if runs[threadID]?.id == runID { runs.removeValue(forKey: threadID) }
+    guard runs[threadID] == nil else { return }
+    pendingThreads = pendingThreads.filter { $0.value != threadID }
+  }
+  private func touchMemoryThread(_ key: String) {
+    memoryOrder.removeAll { $0 == key }; memoryOrder.append(key)
+  }
+  private func forgetMemoryThread(_ key: String) {
+    memoryThreads.removeValue(forKey: key)
+    memoryOrder.removeAll { $0 == key }
+  }
+  private func rememberMemoryThread(_ key: String, _ thread: AIThread) {
+    memoryThreads[key] = thread; touchMemoryThread(key)
+    while memoryOrder.count > memoryLimit {
+      let oldest = memoryOrder.removeFirst()
+      memoryThreads.removeValue(forKey: oldest)
+    }
   }
   private static let log = Logger(subsystem: "io.github.pidean.manping", category: "ai")
   nonisolated static func message(_ error: Error) -> String {
@@ -497,7 +520,7 @@ public actor AIConversationService {
   private func commit(_ turn: AITurn, threadID: String, source: AISource, replacing: String?, options: AIRunOptions,
     ticket: AIConversationStore.Ticket) async throws {
     guard store.isCurrent(ticket) else { throw AIConversationFailure.identityChanged }
-    if memoryTicket != ticket { memoryThreads = [:]; memoryTicket = ticket }
+    if memoryTicket != ticket { memoryThreads = [:]; memoryOrder = []; memoryTicket = ticket }
     var thread: AIThread
     if let memory = memoryThreads[source.identifier] { thread = memory }
     else if let saved = try store.thread(id: threadID, ticket: ticket) { thread = saved }
@@ -508,11 +531,11 @@ public actor AIConversationService {
     } else { thread.turns.append(turn) }
     thread.updatedAt = Date(); thread.title = source.title
     if persists(options), try store.save(thread, ticket: ticket) {
-      memoryThreads.removeValue(forKey: source.identifier)
+      forgetMemoryThread(source.identifier)
     } else {
       // Refused: the account changed, or saving was switched off meanwhile (kept in memory).
       guard store.isCurrent(ticket) else { throw AIConversationFailure.identityChanged }
-      memoryThreads[source.identifier] = thread
+      rememberMemoryThread(source.identifier, thread)
     }
   }
 

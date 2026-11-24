@@ -11,6 +11,7 @@ struct RecommendationFilterSettingsView: View {
   @State private var authorID = ""
   @State private var authorName = ""
   @State private var message: String?
+  @State private var videoFeedbackMessage: String?
   @Environment(\.colorScheme) private var scheme
 
   var body: some View {
@@ -22,13 +23,18 @@ struct RecommendationFilterSettingsView: View {
           }
           partitionEditor
           authorEditor
+          if let validationError {
+            Text(validationError).font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(scheme))
+          }
           HStack {
             Spacer()
             Button("新增规则", action: addRule).buttonStyle(AppButtonStyle(role: .primary, size: .small))
               .disabled(!canAdd)
           }
           if let message {
-            Text(message).font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(scheme))
+            Text(message).font(Theme.Font.caption).foregroundStyle(
+              message.hasPrefix("没能") || message.hasPrefix("规则") || message.hasPrefix("请")
+                ? Theme.danger(scheme) : Theme.secondaryText(scheme))
           }
           if let error = directory.error, directory.partitions.isEmpty {
             Text("没能加载分区：\(error)").font(Theme.Font.caption).foregroundStyle(Theme.danger(scheme))
@@ -60,6 +66,28 @@ struct RecommendationFilterSettingsView: View {
               }
             }
           }
+        }
+
+        Section("单视频反馈（\(store.filter.hiddenVideos.count)）") {
+          if store.filter.hiddenVideos.isEmpty {
+            Text("还没有隐藏的推荐视频。可在首页视频的“不再推荐 › 这个视频”中添加。")
+              .foregroundStyle(Theme.secondaryText(scheme))
+          } else {
+            ForEach(store.filter.hiddenVideos) { video in
+              VStack(alignment: .leading, spacing: 2) {
+                Text(video.title.isEmpty ? video.id : video.title).font(Theme.Font.body).lineLimit(1)
+                Text(video.id).font(Theme.Font.caption2).foregroundStyle(Theme.tertiaryText(scheme))
+              }
+            }
+            Button("清除单视频反馈", action: clearVideoFeedback)
+              .buttonStyle(AppButtonStyle(role: .destructive, size: .small))
+          }
+          if let videoFeedbackMessage {
+            Text(videoFeedbackMessage).font(Theme.Font.caption).foregroundStyle(
+              videoFeedbackMessage.hasPrefix("没能") ? Theme.danger(scheme) : Theme.secondaryText(scheme))
+          }
+        } footer: {
+          Text("清除后，这些视频会重新符合首页推荐条件；不会删除收藏、稍后再看或观看记录。")
         }
       }.formStyle(.grouped).scrollContentBackground(.hidden)
         .padding(.horizontal, 30).padding(.top, 16).padding(.bottom, 24)
@@ -95,21 +123,36 @@ struct RecommendationFilterSettingsView: View {
   @ViewBuilder private var authorEditor: some View {
     if kind == .author {
       TextField("UP 主 UID", text: $authorID, prompt: Text("例如 208259")).labelsHidden()
+        .onSubmit(addRule)
       TextField("显示名称（可选）", text: $authorName, prompt: Text("留空显示为 UID")).labelsHidden()
+        .onSubmit(addRule)
     }
   }
 
   private var parent: VideoPartition? { directory.partitions.first { $0.id == parentID } }
 
-  private var canAdd: Bool {
+  private var validationError: String? {
     switch kind {
-    case .primaryPartition: parentID != nil
-    case .subpartition: childID != nil
-    case .author: (Int64(authorID.trimmingCharacters(in: .whitespaces)) ?? 0) > 0
+    case .primaryPartition:
+      parentID == nil ? "请选择一级分区。" : nil
+    case .subpartition:
+      if parentID == nil { return "请选择一级分区。" }
+      return childID == nil ? "请选择二级分区。" : nil
+    case .author:
+      let text = authorID.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard let value = Int64(text), value > 0 else { return "请输入有效的 UP 主 UID（正整数）。" }
+      return nil
     }
   }
 
+  private var canAdd: Bool { validationError == nil }
+
+  private func clearVideoFeedback() {
+    videoFeedbackMessage = store.clearVideoFeedback() ? "已清除单视频反馈。" : "没能保存，请检查偏好设置写入权限后重试。"
+  }
+
   private func addRule() {
+    guard canAdd else { message = validationError; return }
     let name: String
     let id: Int64
     switch kind {
@@ -120,16 +163,21 @@ struct RecommendationFilterSettingsView: View {
       guard let childID, let child = parent?.children.first(where: { $0.id == childID }) else { return }
       name = child.title; id = Int64(childID)
     case .author:
-      guard let parsed = Int64(authorID.trimmingCharacters(in: .whitespaces)), parsed > 0 else { return }
+      guard let parsed = Int64(authorID.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
       id = parsed
       let trimmed = authorName.trimmingCharacters(in: .whitespacesAndNewlines)
       name = trimmed.isEmpty ? "UID \(parsed)" : trimmed
     }
-    if store.add(RecommendationFilterRule(kind: kind, valueID: id, name: name)) {
+    switch store.add(RecommendationFilterRule(kind: kind, valueID: id, name: name)) {
+    case .added:
       message = "已添加：\(name)"
       authorID = ""; authorName = ""
-    } else {
+    case .duplicate:
       message = "这条规则已经存在。"
+    case .invalid:
+      message = "规则内容无效，请重新选择。"
+    case .persistenceFailed:
+      message = "没能保存规则，请检查偏好设置写入权限后重试。"
     }
   }
 }

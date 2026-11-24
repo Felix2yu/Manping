@@ -7,6 +7,23 @@ final class M7SettingsTests: XCTestCase {
     let defaults = scratchDefaults("Manping.SettingsFixture")
     try body(defaults)
   }
+  private func backupJSON(version: Any = 1, values: [String: Any] = [:], extra: [String: Any] = [:]) throws -> Data {
+    var object: [String: Any] = ["schemaVersion": version, "values": values]
+    object.merge(extra, uniquingKeysWith: { _, new in new })
+    return try JSONSerialization.data(withJSONObject: object)
+  }
+  private func assertBackupError(_ data: Data, _ expected: MacSettingsBackupError,
+    file: StaticString = #filePath, line: UInt = #line) {
+    do {
+      _ = try MacSettingsBackup.decode(data: data)
+      XCTFail("Expected \(expected)", file: file, line: line)
+    } catch {
+      guard let error = error as? MacSettingsBackupError else {
+        XCTFail("Unexpected error: \(error)", file: file, line: line); return
+      }
+      XCTAssertEqual(error, expected, file: file, line: line)
+    }
+  }
   func testTVPlaybackDefaultsAreConservativeAndRoundTrip() throws {
     try withDefaults { defaults in
       let initial = MacSettings.load(from: defaults)
@@ -76,6 +93,105 @@ final class M7SettingsTests: XCTestCase {
     XCTAssertTrue(settings.set(.bbdownPath, .text("BBDown"), capabilities: [.bbdownPath]))
     XCTAssertEqual(settings.text(.downloadDirectory), "/tmp/Bili Fixture")
     XCTAssertEqual(Set(MacSettingsCatalog.descriptors.map(\.key)).count, MacSettingKey.allCases.count)
+  }
+  func testSettingsBackupRoundTripIncludesEffectiveValuesAndOnlyAllowlist() throws {
+    try withDefaults { defaults in
+      var settings = MacSettings.load(from: defaults)
+      let capabilities = Set(MacSettingKey.allCases)
+      let edits: [(MacSettingKey, MacSettingValue)] = [
+        (.theme, .text("深色")), (.volume, .number(45)), (.stepForward, .number(75)),
+        (.notifications, .bool(true)), (.downloadDirectory, .text("/tmp/Manping Backup")),
+        (.historyServer, .text("https://private:password@history.internal:8899")),
+      ]
+      for (key, value) in edits {
+        XCTAssertTrue(settings.set(key, value, capabilities: capabilities))
+        settings.save(key, to: defaults)
+      }
+      let original = MacSettings.load(from: defaults)
+      let backup = MacSettingsBackup(settings: original)
+      let data = try backup.encodedData()
+      let decoded = try MacSettingsBackup.decode(data: data)
+      XCTAssertEqual(decoded.schemaVersion, 1)
+      XCTAssertEqual(Set(decoded.values.keys), Set(MacSettingsBackup.backupKeys.map(\.rawValue)))
+      for key in MacSettingsBackup.backupKeys {
+        XCTAssertEqual(decoded.values[key.rawValue], original[key])
+        XCTAssertEqual(backup.values[key.rawValue], original[key])
+      }
+      XCTAssertFalse(decoded.values.keys.contains(MacSettingKey.historyServer.rawValue))
+      XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("history.internal"))
+      XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("private:password"))
+
+      let restoredDefaults = scratchDefaults("Manping.SettingsBackupRestored")
+      var restored = MacSettings()
+      for entry in decoded.settingValues {
+        XCTAssertTrue(restored.set(entry.key, entry.value, capabilities: capabilities))
+        restored.save(entry.key, to: restoredDefaults)
+      }
+      let loaded = MacSettings.load(from: restoredDefaults)
+      for key in MacSettingsBackup.backupKeys { XCTAssertEqual(loaded[key], original[key]) }
+      XCTAssertEqual(loaded.text(.historyServer), "")
+      XCTAssertNil(restoredDefaults.object(forKey: MacSettingKey.historyServer.rawValue))
+    }
+  }
+  func testSettingValuesUseExplicitCodableTypes() throws {
+    let values: [MacSettingValue] = [.bool(true), .number(12.5), .text("深色")]
+    let data = try JSONEncoder().encode(values)
+    XCTAssertEqual(try JSONDecoder().decode([MacSettingValue].self, from: data), values)
+    XCTAssertThrowsError(try JSONDecoder().decode(MacSettingValue.self,
+      from: Data(#"{"type":"bool","value":"true"}"#.utf8)))
+    XCTAssertThrowsError(try JSONDecoder().decode(MacSettingValue.self,
+      from: Data(#"{"type":"text","value":"深色","extra":1}"#.utf8)))
+  }
+  func testSettingsBackupRejectsOldAndFutureSchemaVersions() throws {
+    assertBackupError(try backupJSON(version: 0), .unsupportedSchemaVersion(0))
+    assertBackupError(try backupJSON(version: 2), .unsupportedSchemaVersion(2))
+    XCTAssertThrowsError(try MacSettingsBackup.decode(data: Data(#"{"schemaVersion":"1","values":{}}"#.utf8)))
+  }
+  func testSettingsBackupExcludesSensitiveKeysAndRejectsTheirImport() throws {
+    let backup = MacSettingsBackup(settings: MacSettings())
+    XCTAssertFalse(MacSettingsBackup.backupKeys.contains(.historyServer))
+    XCTAssertEqual(MacSettingsBackup.excludedKeys, [MacSettingKey.historyServer.rawValue])
+    XCTAssertFalse(backup.values.keys.contains(MacSettingKey.historyServer.rawValue))
+    for rawKey in [MacSettingKey.historyServer.rawValue, "historyServer", "Manping.historyToken", "accessToken",
+      "cookie", "Manping.aiAPIKey", "aiKey", "Manping.proxyPassword"] {
+      let data = try backupJSON(values: [rawKey: ["type": "text", "value": "private-fixture-value"]])
+      assertBackupError(data, .unknownSettingKey(rawKey))
+    }
+  }
+  func testSettingsBackupRejectsUnknownKeysAndMalformedEnvelopes() throws {
+    let value = ["type": "text", "value": "深色"]
+    assertBackupError(try backupJSON(values: ["unknown.setting": value]), .unknownSettingKey("unknown.setting"))
+    XCTAssertThrowsError(try MacSettingsBackup.decode(data: try backupJSON(extra: ["unexpected": true])))
+    XCTAssertThrowsError(try MacSettingsBackup.decode(data: Data(#"{"schemaVersion":1}"#.utf8)))
+    XCTAssertThrowsError(try MacSettingsBackup.decode(data: Data(#"{"schemaVersion":1,"values":[]}"#.utf8)))
+  }
+  func testSettingsBackupRejectsIllegalTypesAndValuesWithoutClamping() throws {
+    let invalidValues: [(String, [String: Any])] = [
+      (MacSettingKey.volume.rawValue, ["type": "bool", "value": true]),
+      (MacSettingKey.theme.rawValue, ["type": "text", "value": 42]),
+      (MacSettingKey.notifications.rawValue, ["type": "text", "value": "true"]),
+      (MacSettingKey.stepForward.rawValue, ["type": "number", "value": "30"]),
+      (MacSettingKey.codec.rawValue, ["type": "text", "value": "not-a-codec"]),
+      (MacSettingKey.stepForward.rawValue, ["type": "number", "value": 601]),
+      (MacSettingKey.stepForward.rawValue, ["type": "number", "value": 0]),
+      (MacSettingKey.downloadDirectory.rawValue, ["type": "text", "value": "relative/path"]),
+      (MacSettingKey.customMpv.rawValue, ["type": "text", "value": "relative/mpv"]),
+      (MacSettingKey.theme.rawValue, ["type": "text", "value": " 深色 "]),
+      (MacSettingKey.theme.rawValue, ["type": "text", "value": "深色", "extra": 1]),
+    ]
+    for (key, value) in invalidValues {
+      // A valid entry alongside the invalid one must still make the complete import fail.
+      let values = [MacSettingKey.notifications.rawValue: ["type": "bool", "value": true], key: value]
+      XCTAssertThrowsError(try MacSettingsBackup.decode(data: backupJSON(values: values)), key)
+    }
+  }
+  func testSettingsBackupEnforcesOneMiBInputLimit() throws {
+    let oversized = Data(repeating: 0x20, count: MacSettingsBackup.maximumDataSize + 1)
+    assertBackupError(oversized, .dataTooLarge(limit: MacSettingsBackup.maximumDataSize))
+    let valid = try MacSettingsBackup(settings: MacSettings()).encodedData()
+    let atLimit = valid + Data(repeating: 0x20, count: MacSettingsBackup.maximumDataSize - valid.count)
+    XCTAssertEqual(atLimit.count, MacSettingsBackup.maximumDataSize)
+    XCTAssertEqual(try MacSettingsBackup.decode(data: atLimit).schemaVersion, 1)
   }
   func testWindowsOnlyOptionsAreRetiredAndTheirSavedValuesAreLeftAlone() throws {
     for raw in MacSettingsCatalog.retiredKeys {

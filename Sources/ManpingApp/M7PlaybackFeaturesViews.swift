@@ -78,17 +78,18 @@ struct PlaybackChapterList: View {
   @ObservedObject var clock: PlaybackClock
   let chapters: [PlaybackChapter]
   var override: Double? = nil
+  var showsHeader = true
   let seek: (Double) -> Void
   @Environment(\.colorScheme) private var scheme
   private var time: Double { override ?? clock.time }
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("章节").font(Theme.Font.headline)
+      if showsHeader { Text("章节").font(Theme.Font.headline) }
       ForEach(chapters) { chapter in
         let nextTime = chapters.first(where: { $0.time > chapter.time })?.time ?? .infinity
         Button { seek(chapter.time) } label: {
           HStack(spacing: 10) {
-            Text(String(format: "%02d:%02d", Int(chapter.time) / 60, Int(chapter.time) % 60))
+            Text(PlaybackTimeline.format(chapter.time))
               .font(Theme.Font.caption.monospacedDigit()).foregroundStyle(Theme.secondaryText(scheme))
             Text(chapter.title).font(Theme.Font.body).lineLimit(2)
             Spacer(minLength: 0)
@@ -182,6 +183,8 @@ struct PlaybackTimeline: View {
   var chapters: [PlaybackChapter] = []
   /// Times cited by the AI answer on screen: amber ticks; a click next to one lands exactly on it.
   var markers: [Double] = []
+  /// User-created bookmarks: cyan ribbon pins, never rendered or snapped as AI marks.
+  var bookmarkTimes: [Double] = []
   /// Seconds buffered ahead of the playhead, read on each clock tick.
   var bufferedAhead: () -> Double = { 0 }
   /// Scrubbing started (true) or ended (false); the page keeps the controls up meanwhile.
@@ -241,6 +244,13 @@ struct PlaybackTimeline: View {
             .offset(x: trackWidth * mark - 1.5)
             .allowsHitTesting(false).accessibilityHidden(true)
         }
+        ForEach(bookmarkFractions, id: \.self) { mark in
+          PlaybackBookmarkPin()
+            .fill(Theme.accent)
+            .frame(width: 9, height: 13)
+            .offset(x: trackWidth * mark - 4.5, y: -2)
+            .allowsHitTesting(false).accessibilityHidden(true)
+        }
         if enabled {
           Circle().fill(.white).frame(width: 14, height: 14)
             .background(Circle().fill(Theme.accent.opacity(0.55)).frame(width: 22, height: 22))
@@ -298,6 +308,10 @@ struct PlaybackTimeline: View {
 
   private var markerFractions: [Double] {
     markers.filter { $0.isFinite && $0 >= 0 && $0 <= total }.map { $0 / total }
+  }
+
+  private var bookmarkFractions: [Double] {
+    Array(Set(bookmarkTimes.filter { $0.isFinite && $0 >= 0 && $0 <= total }.map { $0 / total })).sorted()
   }
 
   private var chapterMarks: [Double] {
@@ -376,6 +390,20 @@ struct PlaybackTimeline: View {
   }
 }
 
+/// Distinct local-bookmark silhouette above the AI citation ticks.
+private struct PlaybackBookmarkPin: Shape {
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - 3))
+    path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+    path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - 3))
+    path.closeSubpath()
+    return path
+  }
+}
+
 /// The track cut at chapter starts: one rectangle per chapter with `gap` between neighbours.
 struct ChapterSegments: Shape {
   let marks: [Double]
@@ -394,6 +422,7 @@ struct ChapterSegments: Shape {
 
 /// 「章节 · 当前章节 ›」 after the time readout; opens the chapter list to jump between chapters.
 struct PlayerChapterButton: View {
+  @ObservedObject var model: AppModel
   @ObservedObject var clock: PlaybackClock
   let chapters: [PlaybackChapter]
   var override: Double? = nil
@@ -413,7 +442,9 @@ struct PlayerChapterButton: View {
     .help("章节").accessibilityLabel("章节：" + title).demoAnchor("chapters")
     .popover(isPresented: $shown, arrowEdge: .top) {
       ScrollView {
-        PlaybackChapterList(clock: clock, chapters: chapters, override: override) { seek($0); shown = false }.padding(14)
+        PlaybackChapterAndBookmarkList(model: model, clock: clock, chapters: chapters, override: override) { position in
+          seek(position); shown = false
+        }
       }.frame(width: 320).frame(maxHeight: 420)
     }
   }

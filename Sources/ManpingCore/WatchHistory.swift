@@ -109,11 +109,15 @@ public enum OfficialWatchHistory {
 /// seen is kept — 5000 entries are under 1 MB, and dropping old ones would lose exactly the
 /// permanent history bili-history exists to preserve.
 public enum WatchHistoryCache {
-  public static func fileURL() -> URL? {
-    guard let variant = LocalSecretVault.appVariant else { return nil } // tests and tools: memory only
+  public static func fileURL(accountID: Int64? = nil) -> URL? { cacheFileURL("watch-history", accountID: accountID) }
+  public static func outboxFileURL(accountID: Int64? = nil) -> URL? { cacheFileURL("watch-history-outbox", accountID: accountID) }
+
+  static func cacheFileURL(_ name: String, accountID: Int64?, variant: String? = LocalSecretVault.appVariant) -> URL? {
+    guard let variant else { return nil } // tests and tools: memory only
     let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("Manping", isDirectory: true)
-    return base.appendingPathComponent("watch-history\(variant).json")
+    let account = accountID.map { "-\($0)" } ?? "-guest"
+    return base.appendingPathComponent("\(name)\(account)\(variant).json")
   }
 
   public static func load(from url: URL) -> [String: WatchRecord] {

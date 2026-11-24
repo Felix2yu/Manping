@@ -145,11 +145,12 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
   func likeCount(_ item: RPCDynamic) -> Int64 { likeCounts[item.id] ?? item.likes }
   func canLike(_ item: RPCDynamic) -> Bool {
     (Int64(item.id) ?? 0) > 0 && (item.author?.mid ?? 0) > 0 && operations != nil
-      && stateIdentities[item.id]?.token != nil && !busy.contains(item.id)
+      && stateIdentities[item.id] != nil && !busy.contains(item.id)
   }
   func toggleLike(_ item: RPCDynamic, requiresLogin: @escaping () -> Void) async {
     guard canLike(item), let dynamicID = Int64(item.id), let authorID = item.author?.mid,
       let expected = stateIdentities[item.id], let operations else { return }
+    guard expected.token != nil else { requiresLogin(); return }
     let revision = generation; let target = !isLiked(item)
     busy.insert(item.id); mutationError = nil
     let task = Task { @MainActor [weak self, auth] in

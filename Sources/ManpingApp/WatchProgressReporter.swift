@@ -22,22 +22,24 @@ import Foundation
 
   private let service: BiliService
   private let enabled: () -> Bool
-  private let onReport: @MainActor (Item, Int) -> Void
+  private let onReport: @MainActor (Item, Int, UUID) -> Void
+  private var sessionID = UUID()
   private weak var player: PlayerModel?
   private var item: Item?
   private var identity: AuthSnapshot?
   private var timer: Timer?
   private var lastSent: (item: Item, seconds: Int)?
+  private var inFlight: (item: Item, seconds: Int)?
 
   init(service: BiliService, enabled: @escaping () -> Bool,
-    onReport: @escaping @MainActor (Item, Int) -> Void = { _, _ in }) {
+    onReport: @escaping @MainActor (Item, Int, UUID) -> Void = { _, _, _ in }) {
     self.service = service; self.enabled = enabled; self.onReport = onReport
   }
 
   /// Starts reporting for the media now loaded in `player`, closing out the previous one.
   func begin(_ next: Item, player: PlayerModel, identity: AuthSnapshot?) {
     if item != next { flush(); lastSent = nil }
-    item = next; self.player = player; self.identity = identity
+    item = next; self.player = player; self.identity = identity; sessionID = UUID()
     timer?.invalidate()
     timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated { self?.send(requirePlaying: true) }
@@ -68,18 +70,28 @@ import Foundation
     guard position.isFinite, position >= 1, !requirePlaying || !player.paused else { return }
     let seconds = Int(position)
     if let lastSent, lastSent.item == item, lastSent.seconds == seconds { return }
-    lastSent = (item, seconds)
+    if let inFlight, inFlight.item == item, inFlight.seconds == seconds { return }
 
     // bili-history is independent of Bilibili sign-in and of the account-history toggle.
-    onReport(item, seconds)
+    onReport(item, seconds, sessionID)
 
-    guard let identity, identity.state != .needsLogin, enabled() else { return }
+    guard let identity, identity.state != .needsLogin, enabled() else {
+      lastSent = (item, seconds)
+      return
+    }
     let service = self.service
     let episode = item.episode.flatMap { id in item.season.map { (id: id, season: $0) } }
+    inFlight = (item, seconds)
     Task {
-      // Bound to the identity checked for sign-in: a report that is late for an account switch
-      // is dropped instead of being written to the new account.
-      _ = try? await service.reportProgress(aid: item.aid, cid: item.cid, seconds: seconds, episode: episode, expectedIdentity: identity)
+      do {
+        // Bound to the identity checked for sign-in: a report that is late for an account switch
+        // is dropped instead of being written to the new account.
+        try await service.reportProgress(aid: item.aid, cid: item.cid, seconds: seconds, episode: episode, expectedIdentity: identity)
+        if self.item == item { self.lastSent = (item, seconds) }
+      } catch {
+        // Keep the position retryable; a later tick or flush sends the same seconds again.
+      }
+      if self.inFlight?.item == item, self.inFlight?.seconds == seconds { self.inFlight = nil }
     }
   }
 }

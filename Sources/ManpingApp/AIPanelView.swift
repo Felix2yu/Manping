@@ -243,7 +243,7 @@ private struct AIPanelContent: View {
       HStack(spacing: 8) {
         if failure.usageLimit {
           // OpenAI guidance: managing usage is the primary action; no silent fallback to other billing.
-          Button("管理用量") { NSWorkspace.shared.open(M8AISettingsModel.manageUsageURL) }
+          Button("管理用量") { ExternalWebLink.open(M8AISettingsModel.manageUsageURL) }
             .buttonStyle(AppButtonStyle(role: .primary, size: .small))
         }
         if failure.aiSubtitlesOff {

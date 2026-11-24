@@ -194,30 +194,42 @@ public enum PlaybackSelector {
           $0 != .h264 && $0.matches(stream) && supportsHardware($0)
         }
     }
-    guard !supported.isEmpty,
-      let audio = manifest.audio.max(by: {
+    let eligible = supported.filter { stream in
+      !preferences.avoidP2P || ([stream.url] + stream.backupURLs).contains(where: { !isP2P($0) })
+    }
+    let eligibleAudio = manifest.audio.filter { stream in
+      !preferences.avoidP2P || ([stream.url] + stream.backupURLs).contains(where: { !isP2P($0) })
+    }
+    guard !eligible.isEmpty, !eligibleAudio.isEmpty,
+      let audio = eligibleAudio.max(by: {
         $0.quality < $1.quality || ($0.quality == $1.quality && $0.bandwidth < $1.bandwidth)
       })
-    else { throw BiliError.invalidResponse("No compatible playback streams") }
-    let qualities = Set(supported.map(\.quality)).sorted(by: >)
+    else {
+      throw BiliError.invalidResponse(
+        preferences.avoidP2P ? "没有可用的非 P2P 播放节点，请关闭「不使用 P2P」或选择其他画质。" : "No compatible playback streams")
+    }
+    let qualities = Set(eligible.map(\.quality)).sorted(by: >)
     // With no preference yet, start at 1080P 60 (116) rather than 8K / Dolby Vision: the
     // highest tiers start slowly and stall on ordinary networks. A request below every
     // available tier falls back to the lowest tier, not the highest.
     let requested = preferences.quality ?? preferences.lastQuality ?? PlaybackSelector.defaultQualityCeiling
     let quality = qualities.first(where: { $0 <= requested }) ?? qualities[qualities.count - 1]
-    let candidates = supported.filter { $0.quality == quality }.sorted {
+    let candidates = eligible.filter { $0.quality == quality }.sorted {
       $0.bandwidth > $1.bandwidth
     }
     let video =
       candidates.first(where: { preferences.codec.matches($0) })
       ?? candidates.first(where: { PlaybackCodec.h264.matches($0) }) ?? candidates[0]
-    func selectedURL(_ stream: MediaStream) -> URL {
+    func selectedURL(_ stream: MediaStream) throws -> URL {
       guard preferences.avoidP2P else { return stream.url }
-      return ([stream.url] + stream.backupURLs).first(where: { !isP2P($0) }) ?? stream.url
+      guard let url = ([stream.url] + stream.backupURLs).first(where: { !isP2P($0) }) else {
+        throw BiliError.invalidResponse("没有可用的非 P2P 播放节点。")
+      }
+      return url
     }
     return PlaybackSelection(
       video: video, audio: audio,
-      videoURL: selectedURL(video), audioURL: selectedURL(audio))
+      videoURL: try selectedURL(video), audioURL: try selectedURL(audio))
   }
   public static func isP2P(_ url: URL) -> Bool {
     let host = url.host?.lowercased() ?? ""

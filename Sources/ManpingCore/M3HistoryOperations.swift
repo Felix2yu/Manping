@@ -7,6 +7,46 @@ public enum HistoryBusiness: String, CaseIterable, Sendable {
     switch self { case .archive: "视频"; case .live: "直播"; case .article: "专栏" }
   }
 }
+public struct ContinueWatchingItem: Identifiable, Sendable, Equatable {
+  public let video: Video
+  public let progress: Int64
+  public let duration: Int64
+  public let viewedAt: Int64
+  public var id: String { video.bvid }
+  public var fraction: Double { duration > 0 ? min(1, Double(progress) / Double(duration)) : 0 }
+  public static func validStart(_ seconds: Double, duration: Int, cid: Int64?, expectedCID: Int64?) -> Double {
+    guard seconds.isFinite, seconds > 0, duration > 0, seconds < Double(duration),
+      cid == nil || cid == expectedCID else { return 0 }
+    return seconds
+  }
+  public static func entries(from items: [RPCHistoryItem], limit: Int = 30) -> [Self] {
+    guard limit > 0 else { return [] }
+    var latest: [String: RPCHistoryItem] = [:]
+    for item in items where item.business == "archive" {
+      guard case .video(let card, _) = item.content, !card.bvid.isEmpty else { continue }
+      if let current = latest[card.bvid] {
+        if item.viewedAt > current.viewedAt
+          || (item.viewedAt == current.viewedAt && item.id > current.id) {
+          latest[card.bvid] = item
+        }
+      } else { latest[card.bvid] = item }
+    }
+    return latest.values.compactMap { item in
+      guard case .video(let card, let progress) = item.content,
+        card.aid > 0, card.cid > 0, card.duration > 0,
+        progress > 0, progress < card.duration else { return nil }
+      var video = Video(bvid: card.bvid, title: card.title, cover: card.cover,
+        author: card.author?.name ?? "", duration: Int(card.duration), views: Int(card.views),
+        cid: card.cid, aid: card.aid, authorID: card.author?.mid, avatar: card.author?.avatar,
+        publishedAt: card.publishedAt)
+      let seconds = Int(progress)
+      video.subtitle = "看到 \(String(format: "%02d:%02d", seconds / 60, seconds % 60))"
+      return Self(video: video, progress: progress, duration: card.duration, viewedAt: item.viewedAt)
+    }.sorted { $0.viewedAt != $1.viewedAt ? $0.viewedAt > $1.viewedAt : $0.progress > $1.progress }
+      .prefix(limit).map { $0 }
+  }
+}
+
 public struct HistoryRecordKey: Hashable, Sendable {
   public let kid: Int64
   public let business: HistoryBusiness

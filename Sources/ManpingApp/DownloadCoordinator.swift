@@ -51,10 +51,26 @@ import SwiftUI
     guard let options = record.options, let store, tasks[record.id] == nil else { return }
     tasks[record.id] = Task {
       var current = record
+      var mediaPublished = false
       let temporary = AppModel.support.appendingPathComponent("Transfers").appendingPathComponent(record.id)
       let checkpoint = AppModel.support.appendingPathComponent("Completion").appendingPathComponent(record.id + ".json")
       defer { tasks[record.id] = nil; identities[record.id] = nil }
       do {
+        if current.state == "attachment_failed" {
+          guard !current.output.isEmpty, FileManager.default.fileExists(atPath: current.output) else {
+            throw BiliError.dependency("媒体文件已不存在，请重新下载视频。")
+          }
+          let snapshot = await service.authSnapshot()
+          identities[record.id] = snapshot
+          current.state = "downloading"; current.progress = 0; current.error = ""; try update(current)
+          let directory = URL(fileURLWithPath: options.directory).resolvingSymlinksInPath()
+          try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+          try await exportDanmaku(cid: options.cid, directory: directory,
+            stem: record.bvid + "-" + String(options.cid ?? 0), snapshot: snapshot)
+          current.state = "complete"; current.progress = 1; current.error = ""; try update(current)
+          try? FileManager.default.removeItem(at: temporary)
+          return
+        }
         if let recovered = try await DownloadCompletion.recover(checkpoint: checkpoint) {
           current.state = "complete"; current.progress = 1; current.output = recovered.path
           current.error = "已从完成记录恢复媒体；如需要附加弹幕，请单独导出。"
@@ -100,18 +116,21 @@ import SwiftUI
           try await DownloadWorker.merge(video: vFile, audio: aFile, output: staged, ffmpeg: AppModel.ffmpeg)
           try await checkIdentity(snapshot)
           output = try await DownloadCompletion.publish(staged: staged, to: output, checkpoint: checkpoint)
+          mediaPublished = true
         case .audio:
           guard let audio = manifest?.audio.first else { throw BiliError.invalidResponse("没有可下载的音频。") }
           let file = try await DownloadWorker.resumeTransfer(request: service.request(audio.url), to: temporary.appendingPathComponent("audio.m4a"), identity: "aid:\(video.aid ?? 0):cid:\(video.cid ?? 0):audio:\(audio.quality):codec:\(audio.codecID):bw:\(audio.bandwidth)") { [weak self] progress in Task { @MainActor in self?.updateProgress(record.id, progress) } }
           output = directory.appendingPathComponent(stem + ".m4a")
           try await checkIdentity(snapshot)
           output = try await DownloadCompletion.publish(staged: file, to: output, checkpoint: checkpoint)
+          mediaPublished = true
         case .cover:
           guard let cover = video.cover else { throw BiliError.invalidResponse("没有可下载的封面。") }
           let file = try await DownloadWorker.resumeTransfer(request: service.request(ImageCache.secured(cover)), to: temporary.appendingPathComponent("cover"))
           output = directory.appendingPathComponent(stem + "." + (["png", "jpeg", "jpg", "webp", "avif"].contains(cover.pathExtension.lowercased()) ? cover.pathExtension.lowercased() : "jpg"))
           try await checkIdentity(snapshot)
           output = try await DownloadCompletion.publish(staged: file, to: output, checkpoint: checkpoint)
+          mediaPublished = true
         case .danmaku:
           guard let cid = video.cid else { throw BiliError.invalidResponse("没有弹幕标识") }
           let xml = try await service.exportDanmakuXML(cid: cid, expectedIdentity: snapshot)
@@ -120,6 +139,7 @@ import SwiftUI
           try xml.write(to: staged, options: .atomic)
           try await checkIdentity(snapshot)
           output = try await DownloadCompletion.publish(staged: staged, to: output, checkpoint: checkpoint)
+          mediaPublished = true
         case .subtitle:
           guard let aid = video.aid, let cid = video.cid else { throw BiliError.invalidResponse("没有字幕媒体标识") }
           let tracks = DownloadSubtitleTrack.filtered(try await service.downloadSubtitleTracks(aid: aid, cid: cid, expectedIdentity: snapshot), filterAI: options.filterAISubtitle)
@@ -133,25 +153,34 @@ import SwiftUI
           try DownloadExport.subtitleSRT(cues).write(to: staged, options: .atomic)
           try await checkIdentity(snapshot)
           output = try await DownloadCompletion.publish(staged: staged, to: output, checkpoint: checkpoint)
+          mediaPublished = true
         }
         current.output = output.path
         if options.content == .video, options.includeDanmaku, let cid = video.cid {
-          let xml = try await service.exportDanmakuXML(cid: cid, expectedIdentity: snapshot)
-          try await checkIdentity(snapshot)
-          try DownloadExport.write(xml, to: directory.appendingPathComponent(stem + ".xml"))
+          try await exportDanmaku(cid: cid, directory: directory,
+            stem: record.bvid + "-" + String(options.cid ?? 0), snapshot: snapshot)
         }
         current.state = "complete"; current.progress = 1; current.output = output.path; try update(current)
         try? FileManager.default.removeItem(at: temporary)
-        if MacSettings.load(from: PerformanceEnvironment.defaults).bool(.openDownloadFolder) { NSWorkspace.shared.activateFileViewerSelecting([output]) }
+        if FileManager.default.fileExists(atPath: output.path), MacSettings.load(from: PerformanceEnvironment.defaults).bool(.openDownloadFolder) { NSWorkspace.shared.activateFileViewerSelecting([output]) }
       } catch {
-        current.state = !current.output.isEmpty ? "complete" : Task.isCancelled || error is CancellationError ? "cancelled" : "failed"
-        if !current.output.isEmpty { current.progress = 1 }
-        current.error = !current.output.isEmpty ? "媒体已保存；附加导出或任务记录失败：" + error.localizedDescription : error.localizedDescription
+        current.state = mediaPublished ? "attachment_failed" : Task.isCancelled || error is CancellationError ? "cancelled" : "failed"
+        if mediaPublished { current.progress = 1 }
+        current.error = mediaPublished ? "媒体已保存；附加弹幕导出或任务记录失败：" + error.localizedDescription : error.localizedDescription
         do { try update(current) } catch {
           if let index = records.firstIndex(where: { $0.id == current.id }) { records[index] = current }
           report("任务记录写入失败；恢复下载时会校验持久完成记录。")
         }
       }
+    }
+  }
+  private func exportDanmaku(cid: Int64?, directory: URL, stem: String, snapshot: AuthSnapshot) async throws {
+    guard let cid else { throw BiliError.invalidResponse("没有弹幕标识") }
+    let xml = try await service.exportDanmakuXML(cid: cid, expectedIdentity: snapshot)
+    try await checkIdentity(snapshot)
+    let destination = directory.appendingPathComponent(stem + ".xml")
+    if !FileManager.default.fileExists(atPath: destination.path) {
+      try DownloadExport.write(xml, to: destination)
     }
   }
   private func update(_ record: DownloadRecord) throws {

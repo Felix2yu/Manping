@@ -33,8 +33,18 @@ private enum HistoryError: LocalizedError {
   private(set) var baseURL = ""
   private var requested: Set<String> = []
   private var pending: Set<String> = []
+  private var outbox: [String: ReportBody] = [:]
+  private var sessions: [String: UUID] = [:]
   private var flushTask: Task<Void, Never>?
-  private let cacheURL = WatchHistoryCache.fileURL()
+  private var reportTask: Task<Void, Never>?
+  private var retryTask: Task<Void, Never>?
+  private let fixedCacheURL: URL?
+  private let fixedOutboxURL: URL?
+  private var cacheURL: URL?
+  private var outboxURL: URL?
+  private var accountID: Int64?
+  private var storageGeneration: UInt64 = 0
+  private let transport: @MainActor (URLRequest) async throws -> (Data, URLResponse)
   private var configuredOnce = false
 
   /// Bilibili's own history is the live increment; bili-history is the permanent base.
@@ -53,9 +63,30 @@ private enum HistoryError: LocalizedError {
     return "bili-history 暂不可达，正在使用 B 站官方历史。连上网络后可点「测试连接」立即恢复。"
   }
 
-  init(fetchOfficial: @escaping @MainActor () async -> [String: WatchRecord] = { [:] }) {
+  init(
+    fetchOfficial: @escaping @MainActor () async -> [String: WatchRecord] = { [:] },
+    cacheURL: URL? = WatchHistoryCache.fileURL(),
+    outboxURL: URL? = nil,
+    transport: @escaping @MainActor (URLRequest) async throws -> (Data, URLResponse) = {
+      try await URLSession.shared.data(for: $0)
+    }
+  ) {
     self.fetchOfficial = fetchOfficial
+    self.fixedCacheURL = cacheURL
+    let resolvedOutboxURL = outboxURL ?? cacheURL.map {
+      $0.deletingLastPathComponent().appendingPathComponent(
+        $0.lastPathComponent.replacingOccurrences(of: "watch-history", with: "watch-history-outbox"))
+    }
+    self.fixedOutboxURL = resolvedOutboxURL
+    self.cacheURL = cacheURL ?? WatchHistoryCache.fileURL()
+    self.outboxURL = resolvedOutboxURL ?? WatchHistoryCache.outboxFileURL()
+    self.transport = transport
     if let cacheURL { records = WatchHistoryCache.load(from: cacheURL) }
+    if let url = self.outboxURL,
+      let data = try? Data(contentsOf: url),
+      let saved = try? JSONDecoder().decode([String: ReportBody].self, from: data) {
+      outbox = saved
+    }
   }
 
   private var isBlocked: Bool {
@@ -72,7 +103,8 @@ private enum HistoryError: LocalizedError {
 
   /// Called from settings and at launch. The first call only adopts the settings; changing
   /// server or token afterwards means a different data set, so the saved cache is dropped.
-  func configure(enabled: Bool, baseURL: String, token: String? = nil) {
+  func configure(enabled: Bool, baseURL: String, token: String? = nil, accountID: Int64? = nil) {
+    if self.accountID != accountID { switchAccount(to: accountID) }
     let normalized = BiliHistoryConfig.normalizedBaseURL(baseURL) ?? ""
     let nextToken = token ?? self.token
     let addressChanged = self.baseURL != normalized || self.token != nextToken
@@ -81,22 +113,56 @@ private enum HistoryError: LocalizedError {
     self.baseURL = normalized
     self.token = nextToken
     if token == nil, tokenDraft != nextToken { tokenDraft = nextToken }
-    guard changed else { return }
+    guard changed else {
+      if canConnect { flushOutbox() }
+      return
+    }
     let shouldDropCache = configuredOnce && addressChanged
     configuredOnce = true
-    guard shouldDropCache else { return }
+    guard shouldDropCache else {
+      if canConnect { flushOutbox() }
+      return
+    }
+    storageGeneration &+= 1
     flushTask?.cancel(); flushTask = nil
-    pending.removeAll(); requested.removeAll(); records.removeAll(); testStatus = nil
+    reportTask?.cancel(); reportTask = nil
+    retryTask?.cancel(); retryTask = nil
+    officialTask?.cancel(); officialTask = nil
+    pending.removeAll(); requested.removeAll(); outbox.removeAll(); records.removeAll(); sessions.removeAll(); testStatus = nil
     failureCount = 0; blockedUntil = nil
+    persistOutbox()
     persist(immediate: true)
+    flushOutbox()
+  }
+
+  private func switchAccount(to nextAccountID: Int64?) {
+    persist(immediate: true)
+    persistOutbox()
+    storageGeneration &+= 1
+    flushTask?.cancel(); flushTask = nil
+    reportTask?.cancel(); reportTask = nil
+    retryTask?.cancel(); retryTask = nil
+    officialTask?.cancel(); officialTask = nil
+    accountID = nextAccountID
+    cacheURL = fixedCacheURL ?? WatchHistoryCache.fileURL(accountID: nextAccountID)
+    outboxURL = fixedOutboxURL ?? WatchHistoryCache.outboxFileURL(accountID: nextAccountID)
+    records = cacheURL.map { WatchHistoryCache.load(from: $0) } ?? [:]
+    outbox = loadOutbox()
+    pending.removeAll(); requested.removeAll(); sessions.removeAll()
+    failureCount = 0; blockedUntil = nil; officialBlockedUntil = nil; testStatus = nil
   }
 
   /// Wipes the on-disk states so the next appearance of each card reads the server again.
   func clearCache() {
+    storageGeneration &+= 1
     flushTask?.cancel(); flushTask = nil
-    pending.removeAll(); requested.removeAll(); records.removeAll()
+    reportTask?.cancel(); reportTask = nil
+    retryTask?.cancel(); retryTask = nil
+    officialTask?.cancel(); officialTask = nil
+    pending.removeAll(); requested.removeAll(); records.removeAll(); sessions.removeAll()
     failureCount = 0; blockedUntil = nil
     refreshOfficial(force: true)
+    flushOutbox()
     persist(immediate: true)
   }
 
@@ -118,11 +184,41 @@ private enum HistoryError: LocalizedError {
     }
   }
 
+  private func loadOutbox() -> [String: ReportBody] {
+    guard let outboxURL,
+      let data = try? Data(contentsOf: outboxURL),
+      let saved = try? JSONDecoder().decode([String: ReportBody].self, from: data) else { return [:] }
+    return saved
+  }
+
+  private func persistOutbox() {
+    guard let outboxURL else { return }
+    do {
+      try FileManager.default.createDirectory(at: outboxURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try JSONEncoder().encode(outbox).write(to: outboxURL, options: .atomic)
+    } catch {
+      // Records remain queued in memory and are persisted again after the next outcome.
+    }
+  }
+
   private func noteSuccess() { failureCount = 0; blockedUntil = nil }
 
   private func noteFailure() {
     failureCount += 1
     blockedUntil = Date().addingTimeInterval(BiliHistoryConfig.backoffSeconds(afterFailures: failureCount))
+    scheduleRetry()
+  }
+
+  private func scheduleRetry() {
+    retryTask?.cancel()
+    let delay = BiliHistoryConfig.backoffSeconds(afterFailures: failureCount)
+    retryTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(delay))
+      guard let self, !Task.isCancelled else { return }
+      self.blockedUntil = nil
+      await self.flushPending()
+      self.flushOutbox()
+    }
   }
 
   func setTokenDraft(_ value: String) {
@@ -139,10 +235,11 @@ private enum HistoryError: LocalizedError {
   /// shown right away but are revalidated once per launch, so another Mac's newer progress
   /// arrives on the next launch instead of being hidden by a stale disk entry forever.
   func request(_ bvid: String) {
-    guard canConnect, !bvid.isEmpty, !isBlocked,
+    guard canConnect, !bvid.isEmpty,
       !requested.contains(bvid), !pending.contains(bvid) else { return }
     ensureOfficialLoaded()
     pending.insert(bvid)
+    guard !isBlocked else { return }
     if pending.count >= 100 { flushTask?.cancel(); flushTask = nil; Task { await self.flushPending() }; return }
     guard flushTask == nil else { return }
     flushTask = Task { [weak self] in
@@ -162,16 +259,18 @@ private enum HistoryError: LocalizedError {
   func refreshOfficial(force: Bool = false) {
     if !force, let until = officialBlockedUntil, Date() < until { return }
     officialTask?.cancel()
+    let generation = storageGeneration
+    let sessionsAtRequest = sessions
     officialTask = Task { [weak self] in
       guard let self else { return }
       let fetched = await self.fetchOfficial()
-      guard !Task.isCancelled else { return }
+      guard !Task.isCancelled, generation == self.storageGeneration else { return }
       if fetched.isEmpty {
         // Signed out or offline: do not retry on every screen for a minute.
         self.officialBlockedUntil = Date().addingTimeInterval(60)
       } else {
         self.officialBlockedUntil = nil
-        for (bvid, record) in fetched {
+        for (bvid, record) in fetched where sessionsAtRequest[bvid] == self.sessions[bvid] {
           self.records[bvid] = WatchHistoryMerge.choose(self.records[bvid], record)
         }
       }
@@ -184,13 +283,16 @@ private enum HistoryError: LocalizedError {
 
   /// Mirrors the position already being sent to Bilibili into bili-history. The local
   /// cache updates first so the next card the user sees is already marked correctly.
-  func report(_ item: WatchProgressReporter.Item, seconds: Int) {
-    guard canConnect, !item.bvid.isEmpty, seconds >= 0 else { return }
+  func report(_ item: WatchProgressReporter.Item, seconds: Int, sessionID: UUID = UUID()) {
+    guard canConnect, !item.bvid.isEmpty, seconds >= 0,
+      sessions[item.bvid] == nil || sessions[item.bvid] == sessionID else { return }
+    let startedNewSession = sessions[item.bvid] == nil || sessions[item.bvid] != sessionID
+    if startedNewSession { sessions[item.bvid] = sessionID }
     let finished = item.duration > 0 && seconds >= item.duration
     let now = Int64(Date().timeIntervalSince1970)
     // Reuse the viewing session's timestamp from official history when it is close to now;
     // a raw device clock can be minutes off and would poison every merge by view_at.
-    let viewAt = (records[item.bvid]?.viewAt).flatMap { existing in
+    let viewAt = startedNewSession ? now : (records[item.bvid]?.viewAt).flatMap { existing in
       (existing > now - 7200 && existing < now + 7200) ? existing : nil
     } ?? now
     records[item.bvid] = WatchRecord(bvid: item.bvid, watched: true, progress: seconds,
@@ -200,12 +302,10 @@ private enum HistoryError: LocalizedError {
     let body = ReportBody(bvid: item.bvid, aid: item.aid, cid: item.cid, title: item.title,
       author: item.author, authorMid: item.authorID, cover: item.cover, duration: item.duration,
       progress: seconds, viewAt: viewAt)
+    outbox[item.bvid] = body
+    persistOutbox()
     guard !isBlocked else { return }
-    Task { [weak self] in
-      guard let self else { return }
-      do { _ = try await self.send(path: "report", body: body); self.noteSuccess() }
-      catch { self.noteFailure() }
-    }
+    flushOutbox()
   }
 
   @discardableResult func testConnection() async -> String {
@@ -219,7 +319,10 @@ private enum HistoryError: LocalizedError {
       let response = try JSONDecoder().decode(PingResponse.self, from: data)
       guard response.status == "success" else { throw HistoryError.api(response.message ?? "") }
       noteSuccess() // a manual probe is the user's way to end the backoff immediately
+      retryTask?.cancel(); retryTask = nil
       testStatus = "连接成功。"
+      await flushPending()
+      flushOutbox()
     } catch {
       testStatus = "连接失败：\(error.localizedDescription)"
     }
@@ -229,7 +332,7 @@ private enum HistoryError: LocalizedError {
   // MARK: Network
 
   private struct EmptyBody: Encodable {}
-  private struct ReportBody: Encodable {
+  private struct ReportBody: Codable, Equatable {
     let bvid: String
     let aid: Int64
     let cid: Int64
@@ -268,7 +371,7 @@ private enum HistoryError: LocalizedError {
   private func send<E: Encodable>(path: String, body: E) async throws -> Data {
     var request = try request(for: path)
     request.httpBody = try JSONEncoder().encode(body)
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let (data, response) = try await transport(request)
     guard let http = response as? HTTPURLResponse else { throw HistoryError.badAddress }
     guard (200..<300).contains(http.statusCode) else { throw HistoryError.http(http.statusCode) }
     return data
@@ -277,21 +380,57 @@ private enum HistoryError: LocalizedError {
   private func flushPending() async {
     flushTask = nil
     let ids = Array(pending.prefix(200))
-    guard !ids.isEmpty else { return }
-    for id in ids { pending.remove(id); requested.insert(id) }
-    guard var urlRequest = try? request(for: "query") else { noteFailure(); return }
+    guard !ids.isEmpty, canConnect, !isBlocked else { return }
+    let generation = storageGeneration
+    let sessionsAtRequest = sessions
+    for id in ids { pending.remove(id); requested.remove(id) }
+    guard var urlRequest = try? request(for: "query") else { failPending(ids); return }
     urlRequest.httpBody = try? JSONEncoder().encode(["bvids": ids])
     do {
-      let (data, response) = try await URLSession.shared.data(for: urlRequest)
+      let (data, response) = try await transport(urlRequest)
+      guard generation == storageGeneration else { return }
       guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-        noteFailure(); return
+        failPending(ids); return
       }
       let decoded = try JSONDecoder().decode(QueryResponse.self, from: data)
-      guard decoded.status == "success" else { noteFailure(); return }
-      for (bvid, record) in decoded.data ?? [:] where ids.contains(bvid) {
+      guard decoded.status == "success" else { failPending(ids); return }
+      for (bvid, record) in decoded.data ?? [:] where ids.contains(bvid)
+        && sessionsAtRequest[bvid] == self.sessions[bvid] {
         records[bvid] = WatchHistoryMerge.choose(records[bvid], record)
       }
+      requested.formUnion(ids)
       noteSuccess(); persist()
-    } catch { noteFailure() }
+    } catch {
+      guard generation == storageGeneration else { return }
+      failPending(ids)
+    }
+  }
+
+  private func failPending(_ ids: [String]) {
+    pending.formUnion(ids)
+    noteFailure()
+  }
+
+  private func flushOutbox() {
+    guard canConnect, reportTask == nil, !outbox.isEmpty, !isBlocked else { return }
+    let generation = storageGeneration
+    reportTask = Task { [weak self] in
+      guard let self else { return }
+      while generation == self.storageGeneration, !self.outbox.isEmpty {
+        guard !self.isBlocked, let entry = self.outbox.first else { break }
+        do {
+          _ = try await self.send(path: "report", body: entry.value)
+          guard generation == self.storageGeneration else { break }
+          if self.outbox[entry.key] == entry.value { self.outbox.removeValue(forKey: entry.key) }
+          self.persistOutbox()
+          self.noteSuccess()
+        } catch {
+          guard generation == self.storageGeneration else { break }
+          self.noteFailure()
+          break
+        }
+      }
+      if generation == self.storageGeneration { self.reportTask = nil }
+    }
   }
 }

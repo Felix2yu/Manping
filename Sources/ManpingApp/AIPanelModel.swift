@@ -79,6 +79,7 @@ import UniformTypeIdentifiers
   }
   func shutdown() {
     flight?.cancel(); flight = nil; loadTask?.cancel(); previewTask?.cancel()
+    pending = nil
     if let threadID, let service = runtime.conversations { Task { await service.cancel(threadID: threadID) } }
   }
   /// Fresh details for the same source (stats, title) replace the stored copy.
@@ -222,7 +223,11 @@ import UniformTypeIdentifiers
   func cancel() {
     flight?.cancel(); flight = nil
     if let threadID, let service = runtime.conversations { Task { await service.cancel(threadID: threadID) } }
-    pending = nil
+    finishPending()
+  }
+  private func finishPending() {
+    pending = nil; flight = nil
+    runtime.trimPanels()
   }
   func dismissFailure() { failure = nil }
   /// 「使用 AI 字幕」 on the failure card: turns the AI setting on and runs the request again.
@@ -251,12 +256,12 @@ import UniformTypeIdentifiers
         if let index = turns.firstIndex(where: { $0.id == request.replacing }) { turns = Array(turns.prefix(index)) + [turn] }
         else { turns.append(turn) }
       }
-      pending = nil; flight = nil
+      finishPending()
     case .failed(let message):
-      pending = nil; flight = nil
+      finishPending()
       failure = Failure(message: message, usageLimit: message == AIChatFailure.planUsageLimit.errorDescription, request: request)
     case .cancelled:
-      pending = nil; flight = nil
+      finishPending()
     }
   }
 

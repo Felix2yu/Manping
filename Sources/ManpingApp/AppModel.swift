@@ -91,6 +91,11 @@ import WebKit
       }
     }
   }
+  struct PartitionRequest: Equatable {
+    let tid: Int
+    let revision = UUID()
+  }
+  @Published var partitionRequest: PartitionRequest?
   enum PopularTab: String, CaseIterable {
     case recommended = "推荐"
     case popular = "热门"
@@ -131,6 +136,12 @@ import WebKit
   private var aiRuntime: AIRuntime?
   /// 只看 3 分钟 依次播放, independent of the AI panel and of the window showing the picture.
   let clipPlayback = ClipPlaybackController()
+  /// User-created local timestamps and notes, separate from chapters and AI citations.
+  let playbackBookmarks: PlaybackBookmarkStore
+  @Published var bookmarkNotice: String?
+  @Published private(set) var playbackBookmarkMediaKey: PlaybackBookmarkMediaKey?
+  @Published private(set) var bookmarksForCurrentMedia: [PlaybackBookmark] = []
+  private var bookmarkPlayer: PlayerModel?
   /// Amber marks on the progress bar for the answer the AI panel shows.
   @Published var aiTimelineMarks: AITimelineMarks?
   private var launchLiveRoom: Int64?
@@ -296,6 +307,7 @@ import WebKit
   /// When the next item starts. Published once per prompt; the prompt view animates the
   /// remaining time itself, so the countdown no longer re-renders the app ten times a second.
   @Published private(set) var nextPlaybackDeadline: Date?
+  private var endPrompted = false
   private var nextPlaybackTask: Task<Void, Never>?
   @Published var refreshToken = 0
   @Published var playbackPreferences = PlaybackPreferences(
@@ -334,7 +346,7 @@ import WebKit
       return await self.officialWatchRecords()
     })
     store.configure(enabled: appSettings.bool(.historySync), baseURL: appSettings.text(.historyServer),
-      token: BiliHistoryConfig.readToken())
+      token: BiliHistoryConfig.readToken(), accountID: accountMID)
     return store
   }()
   /// One page of the account's own history: bili-history only crawls hourly, this fills the gap.
@@ -349,10 +361,11 @@ import WebKit
     enabled: { [weak self] in
       guard let self else { return false }
       return Self.writesHistory && !self.usesUIFixtures && self.appSettings.bool(.reportProgress)
-    }, onReport: { [weak self] item, seconds in
+    }, onReport: { [weak self] item, seconds, sessionID in
       guard let self, !self.usesUIFixtures else { return }
-      self.watchHistory.report(item, seconds: seconds)
+      self.watchHistory.report(item, seconds: seconds, sessionID: sessionID)
     })
+  private(set) lazy var viewLaterActions = ViewLaterActionsModel(service: service)
   @Published var account = "登录"
   @Published private(set) var fixtureReady = false
   @Published var accountAvatar: URL?
@@ -362,6 +375,8 @@ import WebKit
     didSet {
       if oldValue != accountMID {
         restartUnreadPolling()
+        watchHistory.configure(enabled: appSettings.bool(.historySync), baseURL: appSettings.text(.historyServer),
+          token: BiliHistoryConfig.readToken(), accountID: accountMID)
         DanmakuShieldSync.shared.configure(service: service, mid: accountMID)
         followedLiveNow = []; followedLiveAt = .distantPast; followedLiveTask?.cancel(); followedLiveTask = nil
         followedLiveGeneration &+= 1
@@ -618,6 +633,9 @@ import WebKit
   func openSettings(_ group: MacSettingGroup? = nil) {
     SettingsWindowController.shared.show(model: self, group: group)
   }
+  func openSettings(page: SettingsPage) {
+    SettingsWindowController.shared.show(model: self, page: page)
+  }
   /// 「更多」 › 自定义控制条…: the settings window on 控制条; playback carries on.
   func openPlayerBarSettings() {
     SettingsWindowController.shared.show(model: self, page: .playerBar)
@@ -672,57 +690,72 @@ import WebKit
     return selected != nil ? player : nil
   }
   var canTakeScreenshot: Bool { screenshotTarget != nil }
+  @Published private(set) var screenshotNotice: String?
+  @Published private(set) var actionNotice: String?
+  @Published private(set) var screenshotBusy = false
   func takePlayerScreenshot() {
+    guard !screenshotBusy else { return }
     guard let target = screenshotTarget else { error = "开始播放视频、剧集或直播后才能截取画面。"; return }
+    screenshotBusy = true; screenshotNotice = nil; error = nil
     let settings = appSettings
     let ext = settings.text(.screenshotFormat)
     let name = "Manping-" + UUID().uuidString + "." + ext
-    // The frame is read back from our own renderer: mpv's screenshot cannot convert
-    // VideoToolbox frames ("format videotoolbox not supported by libswscale").
-    let save: (URL) -> Void = { [weak self] url in
-      if target.usesExternalMpv {
-        // External mpv keeps its own screenshot path (it decodes and owns the frame).
-        target.command(["screenshot-to-file", url.path, "video"])
-        if settings.text(.screenshotAction) != "save" {
-          Task { @MainActor [weak self] in
-            for _ in 0..<100 {
-              if let image = NSImage(contentsOf: url) {
-                if settings.text(.screenshotAction) == "copy" {
-                  NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([image])
-                } else { NSWorkspace.shared.open(url) }
-                return
-              }
-              try? await Task.sleep(for: .milliseconds(50))
-            }
-            self?.error = "截图文件尚未生成，请检查外部 mpv 的设置和保存目录。"
-          }
-        }
-        return
-      }
-      Task { @MainActor [weak self] in
-        guard let image = await target.captureFrame() else {
-          self?.error = "无法读取当前画面；请在视频开始播放后再截图。"; return
-        }
-        let type = (ext == "jpg" ? "public.jpeg" : "public.png") as CFString
-        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, type, 1, nil) else {
-          self?.error = "无法写入截图文件，请检查保存目录。"; return
-        }
-        CGImageDestinationAddImage(destination, image, ext == "jpg" ? [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary : nil)
-        guard CGImageDestinationFinalize(destination) else { self?.error = "无法写入截图文件，请检查保存目录。"; return }
-        switch settings.text(.screenshotAction) {
-        case "copy":
-          NSPasteboard.general.clearContents()
-          NSPasteboard.general.writeObjects([NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))])
-        case "save": break
-        default: NSWorkspace.shared.open(url)
-        }
-      }
-    }
     let path = settings.text(.screenshotDirectory)
     if path.isEmpty {
       let panel = NSSavePanel(); panel.nameFieldStringValue = name
-      panel.begin { response in MainActor.assumeIsolated { if response == .OK, let url = panel.url { save(url) } } }
-    } else { save(URL(fileURLWithPath: path).appendingPathComponent(name)) }
+      panel.begin { [weak self] response in
+        guard let self else { return }
+        guard response == .OK, let url = panel.url else { self.screenshotBusy = false; return }
+        self.saveScreenshot(from: target, to: url, format: ext, action: settings.text(.screenshotAction))
+      }
+    } else {
+      saveScreenshot(from: target, to: URL(fileURLWithPath: path).appendingPathComponent(name),
+        format: ext, action: settings.text(.screenshotAction))
+    }
+  }
+  private func saveScreenshot(from target: PlayerModel, to url: URL, format ext: String, action: String) {
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      defer { self.screenshotBusy = false }
+      do {
+        if target.usesExternalMpv {
+          try? FileManager.default.removeItem(at: url)
+          target.command(["screenshot-to-file", url.path, "video"])
+          var ready = false
+          for _ in 0..<100 {
+            try await Task.checkCancellation()
+            if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber,
+              size.intValue > 0 { ready = true; break }
+            try await Task.sleep(for: .milliseconds(50))
+          }
+          guard ready else { throw BiliError.dependency("外部 mpv 没有生成截图文件，请检查其保存目录和设置。") }
+        } else {
+          guard let image = await target.captureFrame() else {
+            throw BiliError.dependency("无法读取当前画面；请在视频开始播放后再截图。")
+          }
+          let type = (ext == "jpg" ? "public.jpeg" : "public.png") as CFString
+          guard let destination = CGImageDestinationCreateWithURL(url as CFURL, type, 1, nil) else {
+            throw BiliError.dependency("无法写入截图文件，请检查保存目录。")
+          }
+          CGImageDestinationAddImage(destination, image, ext == "jpg" ? [kCGImageDestinationLossyCompressionQuality: 0.92] as CFDictionary : nil)
+          guard CGImageDestinationFinalize(destination) else { throw BiliError.dependency("无法写入截图文件，请检查保存目录。") }
+        }
+        switch action {
+        case "copy":
+          guard let image = NSImage(contentsOf: url) else { throw BiliError.dependency("截图文件无法读取。") }
+          NSPasteboard.general.clearContents()
+          guard NSPasteboard.general.writeObjects([image]) else { throw BiliError.dependency("没能把截图写入剪贴板。") }
+          self.screenshotNotice = "截图已复制到剪贴板。"
+        case "save":
+          self.screenshotNotice = "截图已保存：\(url.path)"
+        default:
+          guard NSWorkspace.shared.open(url) else { throw BiliError.dependency("截图已保存，但没能打开文件。") }
+          self.screenshotNotice = "截图已保存并打开：\(url.path)"
+        }
+      } catch {
+        self.error = error.localizedDescription
+      }
+    }
   }
   @Published var shaderSelections: [String: String] = [:]
   let service: BiliService
@@ -753,6 +786,9 @@ import WebKit
     DownloadRecord(id: "fixture-failed", bvid: "BV1fixture03", title: "桌面计划 · 磁盘错误样本", state: "failed", progress: 0.12, error: "磁盘空间不足，请释放空间后恢复", options: DownloadOptions(cid: 1002, directory: "/tmp/Bili Downloads"))
   ]
   init() {
+    let bookmarkStore = (try? PlaybackBookmarkStore.recover()) ?? (try? PlaybackBookmarkStore())
+    playbackBookmarks = bookmarkStore ?? (try! PlaybackBookmarkStore(memoryOnly: true))
+    if let error = playbackBookmarks.loadError { self.error = "书签文件无法读取：\(error.localizedDescription)" }
     if DebugUIFixtures.enabled {
       service = BiliService(transport: DebugUITransport(), credentials: DebugUICredentialStore())
       let transport = M3FixtureRPCTransport(richUI: true)
@@ -774,9 +810,92 @@ import WebKit
   #if DEBUG
   init(probeService: BiliService, observeIdentity: Bool = true) {
     service = probeService
+    playbackBookmarks = try! PlaybackBookmarkStore(memoryOnly: true)
     if observeIdentity { observeQueueIdentity() }
   }
   #endif
+  // MARK: - Local playback bookmarks
+
+  private var currentBookmarkPlayer: PlayerModel? {
+    if livePlayback != nil { return nil }
+    return pgcPlayback?.player ?? player
+  }
+
+  private var currentBookmarkMedia: PlaybackBookmarkMediaKey? {
+    if livePlayback != nil { return nil }
+    if let episode = pgcPlayback?.episode {
+      return try? PlaybackBookmarkMediaKey(aid: episode.aid, cid: episode.cid, bvid: episode.bvid)
+    }
+    guard let selected else { return nil }
+    return try? PlaybackBookmarkMediaKey(aid: selected.aid, cid: selected.cid, bvid: selected.bvid)
+  }
+
+  var currentBookmarkTime: Double {
+    guard let player = currentBookmarkPlayer else { return 0 }
+    if player === pgcPlayback?.player, pgcPlayback?.usesFixtures == true { return pgcPlayback?.fixturePosition ?? 0 }
+    return player.time
+  }
+
+  /// Called by both player pages and PGC episode observations; the media bucket and player are
+  /// refreshed together so a pending editor can never save against the next episode.
+  func refreshPlaybackBookmarks() {
+    let targetPlayer = currentBookmarkPlayer
+    let targetMedia = currentBookmarkMedia
+    if playbackBookmarkMediaKey != targetMedia || targetPlayer !== bookmarkPlayer {
+      playbackBookmarkMediaKey = targetMedia
+      bookmarksForCurrentMedia = targetMedia.map { playbackBookmarks.bookmarks(for: $0) } ?? []
+      bookmarkPlayer = targetPlayer
+    } else if let targetMedia {
+      bookmarksForCurrentMedia = playbackBookmarks.bookmarks(for: targetMedia)
+    }
+    bookmarkNotice = nil
+  }
+
+  @discardableResult
+  func addPlaybackBookmark(at time: Double? = nil, note: String = "") throws -> PlaybackBookmark? {
+    guard let media = playbackBookmarkMediaKey else { return nil }
+    let seconds = time ?? currentBookmarkTime
+    guard seconds.isFinite, seconds >= 0 else { return nil }
+    let bookmark = try playbackBookmarks.add(time: seconds, note: note, to: media)
+    bookmarksForCurrentMedia = playbackBookmarks.bookmarks(for: media)
+    bookmarkNotice = "已添加 \(PlaybackTimeline.format(bookmark.time)) 的书签"
+    return bookmark
+  }
+
+  @discardableResult
+  func updatePlaybackBookmark(id: UUID, time: Double? = nil, note: String? = nil) throws -> PlaybackBookmark? {
+    guard let media = playbackBookmarkMediaKey else { return nil }
+    let bookmark = try playbackBookmarks.update(id: id, time: time, note: note, in: media)
+    bookmarksForCurrentMedia = playbackBookmarks.bookmarks(for: media)
+    bookmarkNotice = "书签已更新"
+    return bookmark
+  }
+
+  func deletePlaybackBookmark(_ bookmark: PlaybackBookmark) {
+    guard let media = playbackBookmarkMediaKey, bookmark.mediaKey == media else { return }
+    do {
+      try playbackBookmarks.remove(id: bookmark.id, from: media)
+      bookmarksForCurrentMedia = playbackBookmarks.bookmarks(for: media)
+      bookmarkNotice = "书签已删除"
+    } catch { bookmarkNotice = error.localizedDescription }
+  }
+
+  func seekToPlaybackBookmark(_ bookmark: PlaybackBookmark) {
+    guard bookmark.mediaKey == playbackBookmarkMediaKey else { return }
+    seekToPlaybackTime(bookmark.time)
+  }
+
+  func seekToPlaybackTime(_ time: Double) {
+    guard time.isFinite, time >= 0, let target = currentBookmarkPlayer else { return }
+    if target === pgcPlayback?.player {
+      pgcPlayback?.seek(time)
+    } else {
+      target.seek(time)
+    }
+  }
+
+  func dismissPlaybackBookmarkNotice() { bookmarkNotice = nil }
+
   func initialize(skipAuthentication: Bool = false) async {
     configureAI()
     // The account's shield list and the user's own rules both re-filter every open player.
@@ -1078,8 +1197,8 @@ import WebKit
   /// nil uses 设置 › 打开视频时. Either way the choice is applied once, for this open: later
   /// items (next part, playlist, related) stay where the picture is.
   func open(_ video: Video) { open(video, mode: nil) }
-  func open(_ video: Video, mode: MacOpenMode?) {
-    startVideo(video, preservingQueue: false)
+  func open(_ video: Video, startAt: Double, part: Int? = nil, mode: MacOpenMode? = nil) {
+    startVideo(video, preservingQueue: false, part: part, startAt: startAt)
     pendingOpenMode = mode.map { OpenPlacement(mode: $0) } ?? defaultOpenPlacement
     // An explicit window opens right away; the media fills it when it loads, leaving the
     // window as it is by then.
@@ -1088,6 +1207,7 @@ import WebKit
       pendingOpenMode = OpenPlacement(mode: mode, windowDisplay: nil)
     }
   }
+  func open(_ video: Video, mode: MacOpenMode?) { open(video, startAt: 0, mode: mode) }
   func resolvePGCLaunch() {
     if let room = launchLiveRoom { launchLiveRoom = nil; openLive(room); return }
     guard let selection = launchPGCSelection else { return }
@@ -1246,11 +1366,12 @@ import WebKit
         }
       }
   }
+  func openWebURL(_ url: URL) { ExternalWebLink.open(url) }
   /// Opens a live room from a card, row or pin: the web page when 「直播间在浏览器打开」 is on, the in-app player otherwise.
   func openLiveRoom(_ roomID: Int64) {
     guard roomID > 0 else { return }
     if appSettings.bool(.liveWebPlayer) {
-      if let url = URL(string: "https://live.bilibili.com/\(roomID)") { NSWorkspace.shared.open(url) }
+      if let url = URL(string: "https://live.bilibili.com/\(roomID)") { openWebURL(url) }
     } else {
       openLive(roomID)
     }
@@ -1268,13 +1389,18 @@ import WebKit
     // A newer link supersedes a short link still resolving.
     noteNavigation()
     switch link {
-    case .video(let bvid): open(Video(bvid: bvid, title: "视频"))
+    case .video(let bvid, let part, let startAt):
+      open(Video(bvid: bvid, title: "视频"), startAt: startAt ?? 0, part: part)
     case .archive(let aid): open(Video(bvid: "", title: "视频", aid: aid))
     case .episode(let id): openPGC(PGCSelection(episodeID: id))
     case .season(let id): openPGC(PGCSelection(seasonID: id))
     case .live(let room): openLive(room)
     case .article(let id): openOverlay(.article(id))
     case .space(let mid): openOverlay(.userSpace(mid))
+    case .search(let query): openOverlay(.search(query))
+    case .region(let tid):
+      navigate(to: .video)
+      partitionRequest = PartitionRequest(tid: tid)
     case .short(let url):
       // Follow the short link's redirects without cookies; only a bilibili.com target opens,
       // and only if the user has not gone somewhere else in the meantime.
@@ -1309,39 +1435,32 @@ import WebKit
     }
   }
   func openLibraryURL(_ url: URL) {
-    if ["www.bilibili.com", "bilibili.com"].contains(url.host?.lowercased() ?? ""),
-      url.user == nil, url.password == nil, ["http", "https"].contains(url.scheme ?? ""),
-      url.path.range(of: "^/read/cv[1-9][0-9]*/?$", options: .regularExpression) != nil,
-      let id = Int64(url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).dropFirst(7)) {
-      openOverlay(.article(id)); return
-    }
-    if ["www.bilibili.com", "bilibili.com"].contains(url.host?.lowercased() ?? ""),
-      url.user == nil, url.password == nil, ["http", "https"].contains(url.scheme ?? ""),
-      url.path.range(of: "^/bangumi/play/(ss|ep)[1-9][0-9]*/?$", options: .regularExpression) != nil {
-      let identifier = url.path.split(separator: "/").last.map(String.init) ?? ""
-      if let id = Int64(identifier.dropFirst(2)) {
-        openPGC(identifier.hasPrefix("ss") ? PGCSelection(seasonID: id) : PGCSelection(episodeID: id)); return
-      }
-    }
-    NSWorkspace.shared.open(url)
+    if let link = BiliLinkParser.parse(url) {
+      if case .short = link { openWebURL(url) } else { openLink(link) }
+    } else { openWebURL(url) }
   }
   /// The clip generation of a launch video whose anonymous load failed (not cancelled).
   private var anonymousLoadFailure: UUID?
-  private var deferredVideoRetry: (video: Video, generation: UUID)?
+  private var deferredVideoRetry: (video: Video, generation: UUID, startAt: Double)?
+  private var currentStartAt = 0.0
+  private var requestedPart: Int?
   private func retryVideoForIdentity(_ video: Video) {
+    let startAt = currentStartAt
     if pausedBrowsing.isBrowsing {
       pausedBrowsing.invalidate()
       player.suspendForBrowsing()
-      deferredVideoRetry = (video, clipGeneration)
+      deferredVideoRetry = (video, clipGeneration, startAt)
     } else {
-      startVideo(video, preservingQueue: false, identityRetry: true, initiallyPaused: !player.playbackIntended)
+      startVideo(video, preservingQueue: false, identityRetry: true,
+        initiallyPaused: !player.playbackIntended, startAt: startAt)
     }
   }
   private func retryDeferredVideo(resume: Bool, preservingOverlay: Bool = false) {
     guard let retry = deferredVideoRetry, retry.generation == clipGeneration else { return }
     let routes = overlays, forward = forwardRoutes
     deferredVideoRetry = nil
-    startVideo(retry.video, preservingQueue: false, identityRetry: true, initiallyPaused: !resume)
+    startVideo(retry.video, preservingQueue: false, identityRetry: true,
+      initiallyPaused: !resume, startAt: retry.startAt)
     if preservingOverlay, let route = playbackRoute {
       var restored = routes.filter { !Self.isPlayerRoute($0) }
       let index = min(routes.firstIndex(where: Self.isPlayerRoute) ?? restored.count, restored.count)
@@ -1351,7 +1470,10 @@ import WebKit
     forwardRoutes = forward.filter { !Self.isPlayerRoute($0) }
   }
   private func startVideo(_ video: Video, preservingQueue: Bool, identityRetry: Bool = false,
-    initiallyPaused: Bool = false) {
+    initiallyPaused: Bool = false, part: Int? = nil, startAt: Double = 0) {
+    currentStartAt = startAt.isFinite ? max(0, startAt) : 0
+    if !identityRetry { requestedPart = part }
+    let requestedPart = identityRetry ? self.requestedPart : part
     deferredVideoRetry = nil
     cdn.detach()
     noteNavigation()
@@ -1396,7 +1518,13 @@ import WebKit
       do {
         let reportIdentity = await service.authSnapshot()
         try await checkCurrentLoad(loadGeneration, expected: expected)
-        let details = try await service.videoDetails(video, expectedIdentity: expected).selectingPart(cid: video.cid)
+        var details = try await service.videoDetails(video, expectedIdentity: expected).selectingPart(cid: video.cid)
+        if let requestedPart {
+          guard let part = details.parts.first(where: { $0.page == requestedPart }) else {
+            throw BiliError.invalidResponse("链接指定的分 P 不存在。")
+          }
+          details = details.selectingPart(cid: part.cid)
+        }
         #if DEBUG
         if let debugAfterDetails { await debugAfterDetails() }
         #endif
@@ -1415,14 +1543,19 @@ import WebKit
         selectedStream = choice.video
         if usesUIFixtures { player.status = "本地样本 · 不加载在线媒体" }
         else {
-          let prepared = await cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: playbackPreferences.avoidP2P,
+          let resumeAt = ContinueWatchingItem.validStart(currentStartAt,
+            duration: details.video.duration, cid: video.cid, expectedCID: details.video.cid)
+          let result = await cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: playbackPreferences.avoidP2P,
             reportFailureTo: player)
           try await checkCurrentLoad(loadGeneration, expected: expected)
-          // nil: a quality change made during startup already loaded the newer stream.
-          if let prepared {
-            player.load(video: prepared.video, audio: prepared.audio, paused: !player.playbackIntended); Self.configurePlayerPreferences(player)
+          switch result {
+          case .prepared(let prepared):
+            player.load(video: prepared.video, audio: prepared.audio, start: resumeAt,
+              paused: !player.playbackIntended); Self.configurePlayerPreferences(player)
             await attachCDN(to: player, ticket: prepared.ticket)
             try await checkCurrentLoad(loadGeneration, expected: expected)
+          case .superseded, .failed:
+            return
           }
         }
         observePlaybackEnd()
@@ -1545,14 +1678,16 @@ import WebKit
         selectedStream = choice.video
         if usesUIFixtures { player.status = "本地样本 · 不加载在线媒体" }
         else {
-          let prepared = await cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: playbackPreferences.avoidP2P,
+          let result = await cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: playbackPreferences.avoidP2P,
             reportFailureTo: player)
           try await checkCurrentLoad(loadGeneration, expected: expected)
-          // nil: a quality change made during startup already loaded the newer stream.
-          if let prepared {
+          switch result {
+          case .prepared(let prepared):
             player.load(video: prepared.video, audio: prepared.audio); Self.configurePlayerPreferences(player)
             await attachCDN(to: player, ticket: prepared.ticket)
             try await checkCurrentLoad(loadGeneration, expected: expected)
+          case .superseded, .failed:
+            return
           }
         }
         observePlaybackEnd()
@@ -1769,20 +1904,21 @@ import WebKit
     eofObservation = nil
     guard selected != nil else { return }
     let generation = clipGeneration
-    var prompted = false
+    endPrompted = false
     eofObservation = player.clock.$time.combineLatest(player.$duration, player.$eofReached).sink { [weak self] position, duration, ended in
-      guard let self, !prompted, self.clipGeneration == generation,
+      guard let self, self.clipGeneration == generation,
         self.selected != nil, self.canPlayNext else { return }
-      let threshold = self.appSettings.bool(.skipNextPrompt) ? 0.1 : 2
-      guard ended || (duration > 5 && abs(position - duration) < threshold) else { return }
-      prompted = true
+      let atEnd = ended || (duration > 5 && abs(position - duration) < (self.appSettings.bool(.skipNextPrompt) ? 0.1 : 2))
+      if !atEnd { self.endPrompted = false; return }
+      guard !self.endPrompted else { return }
       self.player.endTemporarySpeed()
       self.requestNextPlayback()
     }
   }
   private func requestNextPlayback() {
     // 依次播放 pauses at the end of its last clip instead of moving on.
-    guard canPlayNext, !clipPlayback.isActive, pausedBrowsing.allowsAutomaticAdvance else { return }
+    guard canPlayNext, !clipPlayback.isActive, pausedBrowsing.allowsAutomaticAdvance, !endPrompted else { return }
+    endPrompted = true
     cancelNextPlayback()
     if appSettings.bool(.skipNextPrompt) { playNext(); return }
     nextPlaybackDeadline = Date().addingTimeInterval(8)
@@ -1800,6 +1936,7 @@ import WebKit
     if PerformanceOptions.anonymousRequested { return }
     let identity = identity ?? reportIdentity
     let target = pgcPlayback?.player ?? player
+    guard !target.terminalFailure else { return }
     if let episode = pgcPlayback?.episode, let aid = episode.aid, let cid = episode.cid {
       progressReporter.begin(.init(aid: aid, cid: cid, episode: episode.id, season: episode.seasonID), player: target, identity: identity)
     } else if pgcPlayback == nil, let video = selected, let aid = video.aid, let cid = video.cid {
@@ -2064,15 +2201,21 @@ import WebKit
     let generation = clipGeneration
     let request = Task { [weak self] in
       guard let self else { return }
-      guard let prepared = await self.cdn.prepare(video: stream, audio: audio,
-        avoidP2P: self.playbackPreferences.avoidP2P, allowProbe: false, preserveRecovery: recovering),
-        self.player === target, self.clipGeneration == generation, self.selectedStream?.id == stream.id else { return }
+      let result = await self.cdn.prepare(video: stream, audio: audio,
+        avoidP2P: self.playbackPreferences.avoidP2P, allowProbe: false, preserveRecovery: recovering,
+        reportFailureTo: target)
+      guard self.player === target, self.clipGeneration == generation, self.selectedStream?.id == stream.id else { return }
       #if DEBUG
       if let debugAfterQualityPrepare { await debugAfterQualityPrepare() }
       #endif
       guard self.player === target, self.clipGeneration == generation, self.selectedStream?.id == stream.id else { return }
-      target.load(video: prepared.video, audio: prepared.audio, start: target.time, paused: target.paused)
-      await self.attachCDN(to: target, ticket: prepared.ticket)
+      switch result {
+      case .prepared(let prepared):
+        target.load(video: prepared.video, audio: prepared.audio, start: target.time, paused: target.paused)
+        await self.attachCDN(to: target, ticket: prepared.ticket)
+      case .superseded, .failed:
+        return
+      }
     }
     #if DEBUG
     debugQualityRequest = request
@@ -2132,7 +2275,8 @@ import WebKit
   func enqueueDownload() { if selected != nil || pgcPlayback?.episode != nil { showingDownloadOptions = true } }
   func copyDownloadCommand(options: DownloadOptions) {
     let source = options.episodeID.map { "ep\($0)" } ?? selected.map { $0.bvid.isEmpty ? "av\($0.aid ?? 0)" : $0.bvid }
-    guard let source else { return }
+    guard let source else { error = "当前播放内容没有可用的下载标识。"; return }
+    actionNotice = nil; error = nil
     do {
       let settings = MacSettings.load(from: PerformanceEnvironment.defaults)
       let executable = settings.text(.bbdownPath).isEmpty ? "BBDown" : settings.text(.bbdownPath)
@@ -2140,7 +2284,11 @@ import WebKit
       let description = formats.first { $0.quality == options.quality }?.description
       if options.content == .video, description == nil { throw BiliError.invalidResponse("没有所选画质的 BBDown 格式描述，请刷新播放信息。") }
       let command = try BBDownCommand.build(source: source, options: options, executable: executable, ffmpeg: Self.ffmpeg.path, qualityDescription: description)
-      NSPasteboard.general.clearContents(); NSPasteboard.general.setString(command, forType: .string)
+      NSPasteboard.general.clearContents()
+      guard NSPasteboard.general.setString(command, forType: .string) else {
+        throw BiliError.dependency("没能把下载命令写入剪贴板，请重试。")
+      }
+      actionNotice = "下载命令已复制。命令使用网页地址且不含登录信息，请自行在终端运行。"
     } catch { self.error = error.localizedDescription }
   }
   func startDownload(options: DownloadOptions) {

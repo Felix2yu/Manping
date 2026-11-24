@@ -39,7 +39,9 @@ import SwiftUI
   private var commentFlight: Task<Void, Never>?
   private var mutation: Task<Void, Never>?
   private var observer: Task<Void, Never>?
-  var canInteract: Bool { expected?.token != nil && detail?.interactionStateAvailable == true && !busy && !loading }
+  var canInteract: Bool {
+    !busy && !loading && (expected?.token == nil || detail?.interactionStateAvailable == true)
+  }
   var canComment: Bool { expected?.token != nil && detail != nil && !busy && !loading }
   init(service: BiliService, rpc: (any BiliRPCService)?) {
     self.service = service; self.rpc = rpc
@@ -150,15 +152,21 @@ import SwiftUI
   }
   private enum Write: Sendable { case like(Bool), favorite(Bool), follow(Bool), comment(String, Int64, Int64), commentLike(RPCComment) }
   func toggleLike(onLogin: @escaping () -> Void) async {
+    guard detail != nil else { return }
+    guard expected?.token != nil else { onLogin(); return }
     guard detail?.interactionStateAvailable == true else { return }
     await write(.like(!liked), onLogin: onLogin)
   }
   func toggleFavorite(onLogin: @escaping () -> Void) async {
+    guard detail != nil else { return }
+    guard expected?.token != nil else { onLogin(); return }
     guard detail?.interactionStateAvailable == true else { return }
     await write(.favorite(!favorited), onLogin: onLogin)
   }
   func toggleFollow(onLogin: @escaping () -> Void) async {
-    guard detail?.interactionStateAvailable == true, (detail?.article.author.id ?? 0) > 0 else { return }
+    guard detail != nil, (detail?.article.author.id ?? 0) > 0 else { return }
+    guard expected?.token != nil else { onLogin(); return }
+    guard detail?.interactionStateAvailable == true else { return }
     await write(.follow(!following), onLogin: onLogin)
   }
   func send(onLogin: @escaping () -> Void) async {

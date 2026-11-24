@@ -142,6 +142,27 @@ final class M8AIServiceTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(backends.requests.count, 3)
   }
 
+  func testMemoryOnlyThreadsAreBoundedByLeastRecentUse() async throws {
+    let service = AIConversationService(store: try AIConversationStore(url: nil), materials: AIFixtureMaterialProvider(),
+      backends: AIRecordingBackends(), identity: .unchecked)
+    func source(_ index: Int) -> AISource {
+      .video(AIVideoInfo(aid: Int64(index + 100), cid: 2, bvid: "BV\(index)", title: "视频 \(index)", duration: 1104))
+    }
+    for index in 0..<64 {
+      _ = await collect(await service.start(preset: AIBuiltInPresets.question, source: source(index), question: "问题", options: options(save: false)))
+    }
+    let original = await service.thread(for: source(0))
+    XCTAssertNotNil(original)
+    _ = await collect(await service.start(preset: AIBuiltInPresets.question, source: source(64), question: "问题", options: options(save: false)))
+
+    let retained = await service.thread(for: source(0))
+    let evicted = await service.thread(for: source(1))
+    let newest = await service.thread(for: source(64))
+    XCTAssertNotNil(retained, "reading a thread makes it most recently used")
+    XCTAssertNil(evicted)
+    XCTAssertNotNil(newest)
+  }
+
   func testAnswerAndSegmentKeysSeparateEveryDeterminingInput() {
     let pack = AIContextPack.build(AIMaterialBundle(source: source), preset: AIBuiltInPresets.question, settings: AIMaterialSettings())
     let descriptor = AIBackendDescriptor(provider: .openAI, model: AIModel(id: "m", name: "m"), endpoint: "https://a", apiVersion: nil,

@@ -358,6 +358,10 @@ final class VideoLayer: CAOpenGLLayer, @unchecked Sendable {
     context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
     return context.makeImage()
   }
+  var parkingMemoryBytes: UInt64 {
+    MpvParkingBudget.estimate(bounds: bounds, contentsFormat: contentsFormat,
+      backingScale: contentsScale, floating: floating)
+  }
   var isLive: Bool { gate.lock(); defer { gate.unlock() }; return engine != nil }
   func statistics() -> String {
     gate.lock()

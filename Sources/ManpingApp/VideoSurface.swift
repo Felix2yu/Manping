@@ -68,23 +68,7 @@ final class VideoSurface: NSView {
     model.surface?.stopRendering()
     model.surface = self
     model.start()
-    if let engine = model.engine {
-      do {
-        let video: VideoLayer
-        if let pooled = MpvEnginePool.shared.layer(for: engine), pooled.isLive {
-          pooled.removeFromSuperlayer()
-          video = pooled
-        } else {
-          video = try VideoLayer(engine: engine)
-          MpvEnginePool.shared.adopt(video, for: engine)
-        }
-        videoLayer = video
-        video.setSmoothMotion(model.videoSmoothMotion)
-        layer?.addSublayer(video)
-        video.invalidateFrame()
-        renderReady = true
-      } catch { model.error = String(describing: error) }
-    }
+    attachRendererIfNeeded()
     metalView = DanmakuView(model: model)
     addSubview(metalView)
     for name in [
@@ -101,9 +85,35 @@ final class VideoSurface: NSView {
     displayTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated { self?.updateDisplay() }
     }
-    model.renderStarted()
+    attachRendererIfNeeded(startPending: true)
   }
   required init?(coder: NSCoder) { fatalError() }
+  func attachRendererIfNeeded(startPending: Bool = false) {
+    guard let engine = model.engine else { return }
+    if videoLayer == nil {
+      do {
+        let video: VideoLayer
+        if let pooled = MpvEnginePool.shared.layer(for: engine), pooled.isLive {
+          pooled.removeFromSuperlayer()
+          video = pooled
+        } else {
+          video = try VideoLayer(engine: engine)
+          MpvEnginePool.shared.adopt(video, for: engine)
+        }
+        videoLayer = video
+        video.setSmoothMotion(model.videoSmoothMotion)
+        layer?.addSublayer(video)
+        video.invalidateFrame()
+        needsLayout = true
+        renderReady = true
+      } catch {
+        model.error = String(describing: error)
+        return
+      }
+    }
+    guard startPending, model.surface === self else { return }
+    model.renderStarted()
+  }
   override func layout() {
     super.layout()
     CATransaction.begin()

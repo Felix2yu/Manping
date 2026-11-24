@@ -25,6 +25,37 @@ private final class PlaybackEOFGeneration: @unchecked Sendable {
   func store(_ value: Int) { lock.withLock { generation = value } }
 }
 
+enum MpvParkingBudget {
+  static let bytesPerMiB: UInt64 = 1 << 20
+  private static let bytesPerGiB: UInt64 = 1 << 30
+  private static let engineBytes: UInt64 = 32 * bytesPerMiB
+  private static let environmentKey = "MANPING_MPV_POOL_BUDGET_MIB"
+
+  static func configuredBytes(physicalMemory: UInt64, environment: [String: String]) -> UInt64 {
+    if let value = environment[environmentKey].flatMap(Double.init), value.isFinite, value >= 1,
+      value <= Double(UInt64.max / bytesPerMiB - 1) {
+      return UInt64(value * Double(bytesPerMiB))
+    }
+    return (physicalMemory <= 8 * bytesPerGiB ? 128 : 256) * bytesPerMiB
+  }
+
+  static func estimate(
+    bounds: CGSize, contentsFormat: CALayer.ContentsFormat, backingScale: CGFloat, floating: Bool
+  ) -> UInt64 {
+    guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else {
+      return engineBytes
+    }
+    let scale = backingScale.isFinite && backingScale > 0 ? backingScale : 1
+    let width = Int(min(16_384, max(1, (bounds.width * scale).rounded(.up))))
+    let height = Int(min(16_384, max(1, (bounds.height * scale).rounded(.up))))
+    let pixels = UInt64(width) * UInt64(height)
+    let layerBytesPerPixel: UInt64 = contentsFormat == .RGBA16Float ? 8 : 4
+    // One CA backing plus mpv's double-buffered floating-point framebuffer.
+    let renderBytesPerPixel: UInt64 = floating ? 8 : 4
+    return engineBytes + pixels * (layerBytesPerPixel + 2 * renderBytesPerPixel)
+  }
+}
+
 /// Keeps one closed mpv engine and its render layer (CGL context + mpv render context) for
 /// the next player. Creating a render context per video made the system OpenGL-on-Metal
 /// pipeline cache grow by ~0.27 MiB per open/close; reusing the pair avoids recompiling.
@@ -33,6 +64,9 @@ private final class PlaybackEOFGeneration: @unchecked Sendable {
   static let shared = MpvEnginePool()
   private struct Parked { let engine: OpaquePointer; let signature: String; let id: UUID }
   private var parked: Parked?
+  let parkingBudgetBytes = MpvParkingBudget.configuredBytes(
+    physicalMemory: ProcessInfo.processInfo.physicalMemory,
+    environment: ProcessInfo.processInfo.environment)
   /// A parked engine still holds its video-sized render buffers (around 230 MiB for 4K); release
   /// it if unused this long. Macs with 8 GB or less keep it only briefly.
   var idleLifetime: Duration = ProcessInfo.processInfo.environment["MANPING_MPV_POOL_IDLE_SECONDS"]
@@ -59,9 +93,10 @@ private final class PlaybackEOFGeneration: @unchecked Sendable {
   }
   func adopt(_ layer: VideoLayer, for engine: OpaquePointer) { layers[engine] = layer }
   func layer(for engine: OpaquePointer) -> VideoLayer? { layers[engine] }
-  /// Called when a player closes. Keeps at most one idle engine; destroys the rest.
+  /// Called when a player closes. Keeps at most one idle engine within budget; destroys the rest.
   func checkin(_ engine: OpaquePointer, signature: String, reusable: Bool) {
-    if reusable, parked == nil {
+    let withinBudget = layers[engine].map { $0.parkingMemoryBytes <= parkingBudgetBytes } ?? false
+    if reusable, parked == nil, withinBudget {
       let reference = EngineReference(engine)
       // Stop decoding and network I/O; the next loadfile replaces the playlist entry.
       queue.sync {
@@ -559,6 +594,7 @@ private final class PlaybackEOFGeneration: @unchecked Sendable {
     timer.resume()
     applyRuntime(previous: nil)
     PerformanceOptions.configureAudio(self)
+    surface?.attachRendererIfNeeded()
   }
   func load(video: URL, audio: URL?, start: Double = 0, paused: Bool = false) {
     let paused = paused || browsingSuspended
@@ -576,6 +612,8 @@ private final class PlaybackEOFGeneration: @unchecked Sendable {
     // Until the new file reports its size, the stage uses the shape the page knows.
     surface?.sourceAspect = nil
     if let external {
+      error = nil
+      if duration != 0 { duration = 0 }
       external.load(video: video, audio: audio, start: start, paused: paused)
       // External mpv keeps its own options; carry 仅播放声音 to it on every load as well.
       external.set("vid", audioOnly ? "no" : "auto")
@@ -592,7 +630,7 @@ private final class PlaybackEOFGeneration: @unchecked Sendable {
     // issued during loading resumes from here instead of from zero.
     time = start
     if duration != 0 { duration = 0 }
-    if surface?.renderReady == true { renderStarted() }
+    surface?.attachRendererIfNeeded(startPending: true)
   }
   func renderStarted() {
     guard let pending, let engine, !closing else { return }
@@ -618,6 +656,13 @@ private final class PlaybackEOFGeneration: @unchecked Sendable {
     terminalFailure = true
     terminalFailureAt = ProcessInfo.processInfo.systemUptime
     buffering = false
+    bufferedAhead = 0
+    time = 0
+    duration = 0
+    paused = true
+    chapters = []
+    danmakuClock.reset()
+    resetPlaybackEnd()
     error = message
     command(["stop"])
     surface?.setPlaybackActive(false)

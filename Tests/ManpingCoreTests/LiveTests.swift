@@ -37,7 +37,7 @@ final class LiveTests: XCTestCase {
     XCTAssertNil(LiveStreamSelector.ranked(playback, preferHEVC: false).first)
   }
 
-  func testSelectorPrefersQualityThenCodecThenFLVAndPutsPeerHostsLast() throws {
+  func testSelectorPrefersQualityThenCodecThenFLVAndExcludesPeerHostsWhenRequested() throws {
     let playback = try LivePlayback.parse(playInfo([
       stream("http_hls", "fmp4", [("avc", 10000, [10000], ["hls.bilivideo.com"]), ("av1", 10000, [10000], ["av1.bilivideo.com"])]),
       stream("http_stream", "flv", [("avc", 10000, [10000], ["cn-x-mcdn.bilivideo.cn", "d1--ov-gotcha05.bilivideo.com"]),
@@ -50,7 +50,13 @@ final class LiveTests: XCTestCase {
       streams: playback.streams.filter { $0.currentQuality == 10000 })
     let flv = try XCTUnwrap(LiveStreamSelector.ranked(without4K, preferHEVC: false).first)
     XCTAssertEqual([flv.formatName, flv.codecName], ["flv", "avc"])
-    XCTAssertEqual(flv.urls.map { $0.host }, ["d1--ov-gotcha05.bilivideo.com", "cn-x-mcdn.bilivideo.cn"], "PCDN lines last")
+    XCTAssertEqual(flv.urls.map { $0.host }, ["d1--ov-gotcha05.bilivideo.com"], "PCDN lines removed")
+    let withPeerFallback = LiveStreamSelector.ranked(without4K, preferHEVC: false, avoidPeerAssisted: false)
+    XCTAssertEqual(withPeerFallback.first?.urls.map { $0.host },
+      ["cn-x-mcdn.bilivideo.cn", "d1--ov-gotcha05.bilivideo.com"], "PCDN allowed and ordered last")
+    let peerOnly = LivePlayback(roomID: 1, status: .live, qualities: [],
+      streams: without4K.streams.filter { $0.urls.allSatisfy(LiveStreamSelector.isPeerAssisted) })
+    XCTAssertTrue(LiveStreamSelector.ranked(peerOnly, preferHEVC: false).isEmpty)
     let hevc = try XCTUnwrap(LiveStreamSelector.ranked(without4K, preferHEVC: true).first)
     XCTAssertEqual(hevc.codecName, "hevc")
     let mixed = try LivePlayback.parse(playInfo([

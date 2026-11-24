@@ -197,7 +197,7 @@ struct M4CommentTarget: Equatable, Sendable {
   }
   func isLiked(_ comment: RPCComment) -> Bool { likedOverrides[comment.id] ?? comment.liked }
   func likeCount(_ comment: RPCComment) -> Int64 { likeCounts[comment.id] ?? comment.likes }
-  func canLike(_ comment: RPCComment) -> Bool { !busy && identities[comment.id]?.token != nil }
+  func canLike(_ comment: RPCComment) -> Bool { !busy && identities[comment.id] != nil }
   var canSend: Bool {
     !busy && targetIdentity?.token != nil && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
       && draft.count <= 1000 && (replyingTo == nil || composeIdentity != nil)
@@ -205,6 +205,7 @@ struct M4CommentTarget: Equatable, Sendable {
   }
   func toggleLike(_ comment: RPCComment, requiresLogin: @escaping () -> Void) async {
     guard canLike(comment), let target, let expected = identities[comment.id] else { return }
+    guard expected.token != nil else { requiresLogin(); return }
     let liked = !isLiked(comment)
     await perform(expected: expected, requiresLogin: requiresLogin) { [auth] snapshot in
       try await auth.setCommentLiked(oid: target.oid, targetType: target.type,
