@@ -69,6 +69,12 @@ struct BrowseFeedState {
     reset()
   }
 
+  func remove(videoID: String) {
+    guard let key else { return }
+    state.items.removeAll { $0.id == videoID }
+    states[key] = state
+  }
+
   func cancel() {
     generation = UUID()
     request?.cancel()

@@ -66,6 +66,12 @@ struct DanmakuSettingsPopover: View {
     }
     .padding(16)
     .frame(width: 280)
+    .preferredColorScheme(.dark)
+    .background(Theme.backdrop(.dark).opacity(0.96), in: RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+        .strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
+    }
     .onAppear {
       load()
       // AppKit focuses the first text field of a new popover; nobody opens this to type.
@@ -298,7 +304,7 @@ private struct SpeedMarks: View {
       let span = range.upperBound - range.lowerBound
       ForEach(DanmakuSettingsPopover.speedMarks, id: \.seconds) { mark in
         let fraction = (DanmakuSettingsPopover.baseDuration / mark.seconds - range.lowerBound) / span
-        Text(mark.title).font(.system(size: 9)).foregroundStyle(Theme.tertiaryText(scheme)).fixedSize()
+        Text(mark.title).font(.system(size: 9)).foregroundStyle(Theme.secondaryText(scheme)).fixedSize()
           .position(x: inset + (geometry.size.width - 2 * inset) * CGFloat(min(1, max(0, fraction))), y: geometry.size.height / 2)
       }
     }.accessibilityHidden(true)

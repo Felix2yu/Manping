@@ -122,7 +122,11 @@ struct PlayerControlPanel<Content: View>: View {
     VStack(spacing: 6) { content }
       .padding(.horizontal, PlayerPanelLayout.padding).padding(.top, 8).padding(.bottom, 10)
       .foregroundStyle(.white)
-      .glassEffect(.regular.tint(.black.opacity(0.3)), in: RoundedRectangle(cornerRadius: PlayerPanelLayout.radius, style: .continuous))
+      .glassEffect(.regular.tint(.black.opacity(0.52)), in: RoundedRectangle(cornerRadius: PlayerPanelLayout.radius, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: PlayerPanelLayout.radius, style: .continuous)
+          .strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
+      }
       .environment(\.colorScheme, .dark)
       .onHover { chrome.setOverControls($0) }
       .padding(PlayerPanelLayout.inset)

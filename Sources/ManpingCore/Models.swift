@@ -17,12 +17,17 @@ public struct Video: Codable, Identifiable, Equatable, Sendable {
   public let subtitle: String?
   public let recommendationReason: String?
   public let viewsText: String?
+  public let partitionID: Int?
+  public let partitionName: String?
+  public let subpartitionID: Int?
+  public let subpartitionName: String?
   public init(
     bvid: String, title: String, cover: URL? = nil, author: String = "", duration: Int = 0,
     views: Int = 0, cid: Int64? = nil, description: String? = nil,
     aid: Int64? = nil, authorID: Int64? = nil, avatar: URL? = nil,
     publishedAt: Int64? = nil, subtitle: String? = nil, recommendationReason: String? = nil,
-    viewsText: String? = nil
+    viewsText: String? = nil, partitionID: Int? = nil, partitionName: String? = nil,
+    subpartitionID: Int? = nil, subpartitionName: String? = nil
   ) {
     self.aid = aid
     self.authorID = authorID
@@ -39,6 +44,10 @@ public struct Video: Codable, Identifiable, Equatable, Sendable {
     self.subtitle = subtitle
     self.recommendationReason = recommendationReason
     self.viewsText = viewsText
+    self.partitionID = partitionID
+    self.partitionName = partitionName
+    self.subpartitionID = subpartitionID
+    self.subpartitionName = subpartitionName
   }
   public static func parse(_ object: [String: Any]) throws -> Video {
     let bvid = object["bvid"] as? String ?? ""
@@ -48,6 +57,10 @@ public struct Video: Codable, Identifiable, Equatable, Sendable {
     let owner = object["owner"] as? [String: Any]
     let stat = object["stat"] as? [String: Any]
     let rawCover = (object["pic"] as? String) ?? ""
+    let partition = Self.partitionMetadata(
+      legacyID: object["tid"], legacyName: object["tname"],
+      currentID: object["tid_v2"], currentName: object["tname_v2"],
+      secondaryID: object["sub_tid"], secondaryName: object["sub_tname"])
     return Video(
       bvid: bvid,
       title: title.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression),
@@ -61,7 +74,28 @@ public struct Video: Codable, Identifiable, Equatable, Sendable {
       subtitle: object["subtitle"] as? String ?? object["pubdate_text"] as? String,
       recommendationReason: (object["rcmd_reason"] as? [String: Any])?["content"] as? String
         ?? (object["rcmd_reason_style"] as? [String: Any])?["text"] as? String
-        ?? object["rcmd_reason"] as? String)
+        ?? object["rcmd_reason"] as? String,
+      partitionID: partition.id, partitionName: partition.name,
+      subpartitionID: partition.secondaryID, subpartitionName: partition.secondaryName)
+  }
+
+  static func partitionMetadata(
+    legacyID: Any?, legacyName: Any?, currentID: Any? = nil, currentName: Any? = nil,
+    secondaryID: Any? = nil, secondaryName: Any? = nil
+  ) -> (id: Int?, name: String?, secondaryID: Int?, secondaryName: String?) {
+    func name(_ value: Any?) -> String? {
+      let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      return text.isEmpty ? nil : text
+    }
+    let legacy = JSONValue.positiveInt(legacyID)
+    let current = JSONValue.positiveInt(currentID)
+    let secondary = JSONValue.positiveInt(secondaryID)
+    if let current {
+      let legacyIsSecondary = legacy.map { $0 != current } ?? false
+      return (current, name(currentName), secondary ?? (legacyIsSecondary ? legacy : nil),
+        name(secondaryName) ?? (legacyIsSecondary ? name(legacyName) : nil))
+    }
+    return (legacy, name(legacyName), secondary, name(secondaryName))
   }
 }
 public enum BiliError: LocalizedError {
@@ -91,6 +125,10 @@ enum JSONValue {
     return (value as? NSNumber)?.int64Value
   }
   static func int(_ value: Any?) -> Int { Int(int64(value) ?? 0) }
+  static func positiveInt(_ value: Any?) -> Int? {
+    guard let value = int64(value), value > 0, value <= Int64(Int.max) else { return nil }
+    return Int(value)
+  }
   static func url(_ value: Any?) -> URL? {
     guard let raw = value as? String, !raw.isEmpty,
       let url = URL(string: raw.hasPrefix("//") ? "https:" + raw : raw),

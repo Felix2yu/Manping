@@ -17,8 +17,7 @@ struct M5LiveCard: View {
     VStack(alignment: .leading, spacing: Theme.cardTitleGap) {
       Button { openRoom() } label: {
         // A 16:9 box sized by the grid cell, like VideoCard; no GeometryReader per card.
-        Color.clear.aspectRatio(16 / 9, contentMode: .fit)
-          .overlay { CachedImage(url: room.cover) }
+        VideoCoverImage(url: room.cover)
           .overlay(alignment: .topLeading) { LiveBadge(status: .live).padding(8) }
           .overlay(alignment: .bottomLeading) {
             if !room.subtitle.isEmpty { MediaBadge(text: room.subtitle).lineLimit(1).padding(8) }
@@ -26,7 +25,6 @@ struct M5LiveCard: View {
           .overlay(alignment: .bottomTrailing) {
             if let viewers = room.viewers { MediaBadge(text: Self.viewerText(viewers), systemImage: "person.fill").padding(8).help("观看人数") }
           }
-          .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
       }.buttonStyle(.plain).accessibilityLabel("打开直播间：\(room.title)")
         .demoAnchor("live.\(room.id)")
       HStack(alignment: .top, spacing: 10) {

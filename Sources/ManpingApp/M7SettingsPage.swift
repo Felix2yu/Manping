@@ -26,6 +26,8 @@ extension MacSettingGroup {
 enum SettingsPage: Equatable {
   /// 控制条, after 播放: the player's control bar editor.
   case playerBar
+  /// 首页推荐的一级/二级分区与 UP 主过滤规则。
+  case recommendationFilters
   /// 致谢, below the categories.
   case acknowledgements
 }
@@ -127,6 +129,15 @@ private struct SettingsLayout: View {
               }.padding(.horizontal, 10).frame(height: 32).contentShape(Rectangle())
             }.buttonStyle(SidebarRowStyle(selected: selection.page == .playerBar))
           }
+          if group == .general {
+            Button { selection.page = .recommendationFilters } label: {
+              HStack(spacing: 10) {
+                Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 13)).frame(width: 20)
+                Text("推荐过滤").font(Theme.Font.body)
+                Spacer(minLength: 0)
+              }.padding(.horizontal, 10).frame(height: 32).contentShape(Rectangle())
+            }.buttonStyle(SidebarRowStyle(selected: selection.page == .recommendationFilters))
+          }
         }
         Spacer(minLength: 0)
         Divider().padding(.horizontal, 6)
@@ -153,6 +164,8 @@ private struct SettingsLayout: View {
           AcknowledgementsPage()
         case .playerBar:
           PlayerBarCustomizer()
+        case .recommendationFilters:
+          RecommendationFilterSettingsView(model: model)
         case nil:
           SettingsCategoryView(model: model, settings: settings, group: selection.group)
             .id(selection.group)
@@ -166,6 +179,7 @@ private struct SettingsLayout: View {
     switch selection.page {
     case .acknowledgements: "致谢"
     case .playerBar: "控制条"
+    case .recommendationFilters: "推荐过滤"
     case nil: selection.group.rawValue
     }
   }

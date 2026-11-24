@@ -41,6 +41,7 @@ extension EnvironmentValues {
 struct VideoContextMenu: View {
   let video: Video
   var extra: AnyView?
+  var filterRecommendation: ((RecommendationRuleKind) -> Void)?
   @Environment(\.cardActions) private var actions
   var body: some View {
     if let actions {
@@ -57,10 +58,73 @@ struct VideoContextMenu: View {
       Divider()
       Button("进入 UP 主空间") { actions.openSpace(mid) }
     }
+    if let filterRecommendation {
+      Divider()
+      RecommendationFilterMenu(video: video, onFilter: filterRecommendation)
+    }
     if let extra {
       Divider()
       extra
     }
+  }
+}
+
+struct VideoCoverImage: View {
+  let url: URL?
+
+  var body: some View {
+    Color.clear.aspectRatio(16 / 9, contentMode: .fit)
+      .overlay { CachedImage(url: url).clipped() }
+      .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+  }
+}
+
+struct VideoCover: View {
+  let url: URL?
+  var duration: Int? = nil
+  var views: Int? = nil
+  var viewsText: String? = nil
+  var recommendationReason: String? = nil
+  var bvid: String? = nil
+  var watchedCompact = false
+  @Environment(\.watchHistory) private var watchHistory
+
+  var body: some View {
+    VideoCoverImage(url: url)
+      .overlay(alignment: .topLeading) {
+        if let recommendationReason, !recommendationReason.isEmpty {
+          RecommendBadge(text: recommendationReason).padding(8).padding(.trailing, 40)
+        }
+      }
+      .overlay(alignment: .bottomTrailing) {
+        HStack(spacing: 6) {
+          if let duration, duration > 0 { MediaBadge(text: Self.durationText(duration)) }
+          if let playText { MediaBadge(text: playText, systemImage: "play") }
+        }.padding(8)
+      }
+      .overlay(alignment: .bottomLeading) {
+        if let watchHistory, let bvid { WatchedBadge(store: watchHistory, bvid: bvid, compact: watchedCompact) }
+      }
+      .overlay(alignment: .bottom) {
+        if let watchHistory, let bvid { WatchProgressBar(store: watchHistory, bvid: bvid) }
+      }
+      .onAppear { if let bvid { watchHistory?.request(bvid) } }
+  }
+
+  private var playText: String? {
+    if let viewsText, !viewsText.isEmpty { return viewsText }
+    guard let views, views > 0 else { return nil }
+    return Self.count(views)
+  }
+
+  static func durationText(_ seconds: Int) -> String {
+    String(format: "%02d:%02d", max(0, seconds) / 60, max(0, seconds) % 60)
+  }
+
+  static func count(_ value: Int) -> String {
+    if value >= 100_000_000 { return String(format: "%.1f亿", Double(value) / 100_000_000) }
+    if value >= 10_000 { return String(format: "%.1f万", Double(value) / 10_000) }
+    return String(value)
   }
 }
 
@@ -69,30 +133,15 @@ struct VideoCard: View {
   var action: () -> Void
   /// Page-specific items appended to the context menu.
   var menuExtra: AnyView? = nil
+  var filterRecommendation: ((RecommendationRuleKind) -> Void)?
   @Environment(\.colorScheme) private var scheme
-  @Environment(\.watchHistory) private var watchHistory
   var body: some View {
     // Cover and title play; the UP 主 name opens their space, as on Bilibili.
     VStack(alignment: .leading, spacing: 4) {
       Button(action: action) {
         VStack(alignment: .leading, spacing: Theme.cardTitleGap) {
-          Color.clear.aspectRatio(16 / 9, contentMode: .fit)
-            .overlay { CachedImage(url: video.cover) }
-            .overlay(alignment: .topLeading) {
-              if let reason = video.recommendationReason, !reason.isEmpty {
-                RecommendBadge(text: reason).padding(8).padding(.trailing, 40)
-              }
-            }
-            .overlay(alignment: .bottomTrailing) {
-              MediaBadge(text: String(format: "%02d:%02d", video.duration / 60, video.duration % 60)).padding(8)
-            }
-            .overlay(alignment: .bottomLeading) {
-              if let watchHistory { WatchedBadge(store: watchHistory, bvid: video.bvid) }
-            }
-            .overlay(alignment: .bottom) {
-              if let watchHistory { WatchProgressBar(store: watchHistory, bvid: video.bvid) }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+          VideoCover(url: video.cover, duration: video.duration, views: video.views, viewsText: video.viewsText,
+            recommendationReason: video.recommendationReason, bvid: video.bvid)
           Text(video.title).font(Theme.Font.headline).foregroundStyle(Theme.text(scheme))
             .lineLimit(2, reservesSpace: true).multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -101,14 +150,12 @@ struct VideoCard: View {
         .demoAnchor("card.\(video.title)")
       CardMetadataLine(author: video.author, authorID: video.authorID, rest: metadata, action: action)
     }.cardHover()
-      .onAppear { watchHistory?.request(video.bvid) }
-      .contextMenu { VideoContextMenu(video: video, extra: menuExtra) }
+      .contextMenu { VideoContextMenu(video: video, extra: menuExtra, filterRecommendation: filterRecommendation) }
   }
 
-  /// 「播放 · 时间」 after the UP 主; the subtitle stands in for the time when the feed gives one.
+  /// The subtitle stands in for the time when the feed gives one.
   private var metadata: String {
     var parts: [String] = []
-    parts.append(video.viewsText ?? Self.plays(video.views))
     if let subtitle = video.subtitle, !subtitle.isEmpty {
       parts.append(subtitle)
     } else if let publishedAt = video.publishedAt, publishedAt > 0 {
@@ -117,17 +164,39 @@ struct VideoCard: View {
     return parts.joined(separator: " · ")
   }
 
-  /// 「523 播放」「12.4 万播放」: a space between digits and Chinese, none after 万.
-  static func plays(_ value: Int) -> String {
-    value >= 10000 ? String(format: "%.1f 万播放", Double(value) / 10000) : "\(value) 播放"
-  }
-
   private static let relative: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
     formatter.locale = Locale(identifier: "zh_CN")
     formatter.unitsStyle = .short
     return formatter
   }()
+}
+
+private struct RecommendationFilterMenu: View {
+  let video: Video
+  let onFilter: (RecommendationRuleKind) -> Void
+  @ObservedObject private var store = RecommendationFilterStore.shared
+
+  var body: some View {
+    Menu("不再推荐") {
+      if let id = video.partitionID, let name = video.partitionName, !name.isEmpty {
+        filterButton("一级分区：\(name)", kind: .primaryPartition, id: Int64(id))
+      }
+      if let id = video.subpartitionID, let name = video.subpartitionName, !name.isEmpty {
+        filterButton("二级分区：\(name)", kind: .subpartition, id: Int64(id))
+      }
+      if let id = video.authorID, id > 0, !video.author.isEmpty {
+        filterButton("UP 主：\(video.author)", kind: .author, id: id)
+      }
+    }
+  }
+
+  private func filterButton(_ title: String, kind: RecommendationRuleKind, id: Int64) -> some View {
+    Button { onFilter(kind) } label: {
+      if store.filter.contains(kind, valueID: id) { Label(title, systemImage: "checkmark") }
+      else { Text(title) }
+    }
+  }
 }
 
 /// 已看 marker on a cover. Follows the store so a video marked after playback updates

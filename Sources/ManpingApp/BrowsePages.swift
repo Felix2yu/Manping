@@ -187,35 +187,51 @@ private extension PartitionOrder {
 /// and its visible cards. The feed's own changes still update it through `@ObservedObject`.
 struct BrowseVideoResults: View, Equatable {
   @ObservedObject var feed: BrowseFeedModel
+  @ObservedObject private var recommendationFilter = RecommendationFilterStore.shared
   let open: (Video) -> Void
+  let filtersRecommendations: Bool
   private let feedID: ObjectIdentifier
 
-  init(feed: BrowseFeedModel, open: @escaping (Video) -> Void) {
+  init(feed: BrowseFeedModel, open: @escaping (Video) -> Void, filtersRecommendations: Bool = false) {
     _feed = ObservedObject(wrappedValue: feed)
     self.open = open
+    self.filtersRecommendations = filtersRecommendations
     feedID = ObjectIdentifier(feed)
   }
 
-  nonisolated static func == (lhs: Self, rhs: Self) -> Bool { lhs.feedID == rhs.feedID }
+  nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.feedID == rhs.feedID && lhs.filtersRecommendations == rhs.filtersRecommendations
+  }
+
+  private var visibleItems: [Video] {
+    filtersRecommendations ? feed.state.items.filter { !recommendationFilter.filters($0) } : feed.state.items
+  }
 
   var body: some View {
     Group {
-      if feed.state.items.isEmpty && feed.state.isLoading {
+      if visibleItems.isEmpty && feed.state.isLoading {
         PageStateView(.loading, title: "正在加载视频…")
-      } else if feed.state.items.isEmpty, let error = feed.state.error {
+      } else if visibleItems.isEmpty, let error = feed.state.error {
         PageStateView(.error,
           title: "没能加载视频", message: error, icon: "wifi.exclamationmark", actionTitle: "重试"
         ) { feed.loadNext() }
-      } else if feed.state.items.isEmpty {
-        PageStateView(title: "这里还没有视频", message: "稍后刷新试试。", icon: "play.rectangle")
+      } else if visibleItems.isEmpty {
+        PageStateView(title: "这里还没有视频", message: filtersRecommendations ? "推荐已被过滤规则隐藏，可在设置 › 推荐过滤中调整。" : "稍后刷新试试。", icon: "play.rectangle")
+          .task(id: feed.state.nextCursor) {
+            if filtersRecommendations, feed.state.hasMore, !feed.state.isLoading, feed.state.error == nil {
+              feed.loadNext()
+            }
+          }
       } else {
         ScrollView {
           LazyVGrid(
             columns: [GridItem(.adaptive(minimum: Theme.gridMinimum), spacing: Theme.gridSpacing)],
             spacing: Theme.gridSpacing
           ) {
-            ForEach(feed.state.items) { video in
-              VideoCard(video: video) { open(video) }
+            ForEach(visibleItems) { video in
+              VideoCard(video: video, action: { open(video) }, filterRecommendation: filtersRecommendations ? { kind in
+                if recommendationFilter.add(video, kind: kind) { feed.remove(videoID: video.id) }
+              } : nil)
             }
           }.cardGridContent()
           if let error = feed.state.error {

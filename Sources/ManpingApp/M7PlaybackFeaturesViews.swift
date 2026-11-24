@@ -515,8 +515,7 @@ struct AudioOnlyBackdrop: View {
           .blur(radius: 40).opacity(0.45)
       }
       VStack(spacing: 14) {
-        CachedImage(url: cover).aspectRatio(16 / 9, contentMode: .fit).frame(maxWidth: 360)
-          .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+        VideoCoverImage(url: cover).frame(maxWidth: 360)
           .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
         Label("只听声音", systemImage: "headphones").font(Theme.Font.caption.weight(.semibold))
           .foregroundStyle(.white.opacity(0.8))

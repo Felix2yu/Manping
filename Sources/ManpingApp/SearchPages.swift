@@ -77,9 +77,7 @@ struct LibraryEntryCard: View {
     VStack(alignment: .leading, spacing: 4) {
       Button(action: action) {
         VStack(alignment: .leading, spacing: Theme.cardTitleGap) {
-          Color.clear.aspectRatio(16 / 9, contentMode: .fit)
-            .overlay { CachedImage(url: entry.cover) }
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
+          VideoCoverImage(url: entry.cover)
           Text(entry.title).font(Theme.Font.headline).lineLimit(2, reservesSpace: true)
             .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .topLeading)
         }.contentShape(Rectangle())

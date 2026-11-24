@@ -377,7 +377,8 @@ private struct PlayerControlBody: View {
       .background(Capsule().fill(
         active ? Theme.accent
           : configuration.isPressed ? .white.opacity(0.26)
-          : hovering || prominent ? .white.opacity(prominent ? 0.18 : 0.14) : .clear))
+          : hovering || prominent ? .white.opacity(prominent ? 0.18 : 0.14) : .black.opacity(0.18)))
+      .overlay(Capsule().strokeBorder(.white.opacity(isEnabled ? 0.16 : 0.06), lineWidth: 0.5))
       .contentShape(Capsule())
       .onHover { value in withAnimation(Theme.hoverAnimation) { hovering = value && isEnabled } }
   }

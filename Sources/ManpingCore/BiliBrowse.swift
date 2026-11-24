@@ -132,6 +132,11 @@ extension BiliService {
     guard let aid, aid > 0, let title = item["title"] as? String else {
       throw BiliError.invalidResponse("Missing App video identifier/title")
     }
+    let partition = Video.partitionMetadata(
+      legacyID: args["tid"] ?? item["tid"], legacyName: args["tname"] ?? item["tname"],
+      currentID: args["tid_v2"] ?? item["tid_v2"], currentName: args["tname_v2"] ?? item["tname_v2"],
+      secondaryID: args["sub_tid"] ?? item["sub_tid"],
+      secondaryName: args["sub_tname"] ?? item["sub_tname"])
     return Video(
       bvid: item["bvid"] as? String ?? "", title: title,
       cover: JSONValue.url(item["cover"] ?? item["pic"]),
@@ -145,7 +150,9 @@ extension BiliService {
       recommendationReason: (item["rcmd_reason_style"] as? [String: Any])?["text"] as? String
         ?? (item["rcmd_reason"] as? [String: Any])?["content"] as? String
         ?? item["rcmd_reason"] as? String,
-      viewsText: viewsText.flatMap { $0.isEmpty ? nil : $0 })
+      viewsText: viewsText.flatMap { $0.isEmpty ? nil : $0 },
+      partitionID: partition.id, partitionName: partition.name,
+      subpartitionID: partition.secondaryID, subpartitionName: partition.secondaryName)
   }
 
   // Matches BiliKernel's ToCountNumber units; these are approximate API display counts.

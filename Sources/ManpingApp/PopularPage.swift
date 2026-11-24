@@ -11,7 +11,7 @@ struct PopularPage: View {
     _feed = StateObject(wrappedValue: BrowseFeedModel(service: model.service))
   }
   var body: some View {
-    BrowseVideoResults(feed: feed, open: model.open).equatable()
+    BrowseVideoResults(feed: feed, open: model.open, filtersRecommendations: model.popularTab == .recommended)
       .pageToolbar(title: "首页", refreshing: feed.state.isLoading && !feed.state.items.isEmpty, refresh: { feed.refresh() }) {
         Button { model.playCuratedList() } label: {
           Label("播放精选", systemImage: "play.square.stack")

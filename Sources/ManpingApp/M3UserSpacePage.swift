@@ -240,7 +240,7 @@ struct M3UserSpacePage: View {
                       RoundedRectangle(cornerRadius: Theme.Radius.md).fill(Theme.fill(scheme)).padding(.horizontal, 10).offset(y: -8)
                       RoundedRectangle(cornerRadius: Theme.Radius.md).fill(Theme.card(scheme)).padding(.horizontal, 5).offset(y: -4)
                     }
-                    CachedImage(url: collection.cover).aspectRatio(16 / 9, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+                    VideoCoverImage(url: collection.cover)
                   }.overlay(alignment: .bottomTrailing) { Text("\(collection.count) \(kind == .season ? "集" : "个视频")").font(Theme.Font.caption2).padding(6).background(Theme.panel(scheme), in: Capsule()).padding(6) }
                     .overlay(alignment: .topLeading) { if kind == .series { Text("系列").font(Theme.Font.caption2).padding(6).background(Theme.panel(scheme), in: Capsule()).padding(6) } }
                   Text(collection.title).font(Theme.Font.headline).lineLimit(2)
@@ -257,7 +257,7 @@ struct M3UserSpacePage: View {
     VStack(alignment: .leading, spacing: 16) {
       Button("‹ 返回合集和系列") { selection.selectedCollection = nil }.buttonStyle(.plain).foregroundStyle(Theme.accentText(scheme))
       HStack(spacing: 16) {
-        CachedImage(url: collection.cover).frame(width: 160, height: 90).clipped().clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+        VideoCoverImage(url: collection.cover).frame(width: 160)
         VStack(alignment: .leading, spacing: 8) {
           Text(collection.title).font(Theme.Font.title)
           Text("\(collection.kind == .season ? "合集" : "系列") · \(collection.count) 个视频").font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(scheme))
@@ -470,8 +470,9 @@ private struct M3DynamicCard: View {
       LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: min(3, max(1, images.count))), spacing: 8) {
         ForEach(Array(images.enumerated()), id: \.offset) { _, url in
           Button { NSWorkspace.shared.open(url) } label: {
-            CachedImage(url: url).aspectRatio(1, contentMode: .fit).clipped()
-              .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
+            Color.clear.aspectRatio(1, contentMode: .fit)
+              .overlay { CachedImage(url: url) }
+              .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
           }.buttonStyle(.plain).help("查看原图")
         }
       }.frame(maxWidth: 600)
@@ -496,7 +497,7 @@ private struct M3DynamicCard: View {
   private func linkedContent(title: String, cover: URL?, url: URL?) -> some View {
     Button { if let url { model.openLibraryURL(url) } } label: {
       HStack(spacing: 12) {
-        if cover != nil { CachedImage(url: cover).frame(width: 120, height: 76).clipped() }
+        if cover != nil { VideoCoverImage(url: cover).frame(width: 128) }
         Text(title).font(Theme.Font.body).lineLimit(3)
         Spacer()
         Image(systemName: "arrow.up.right.square")

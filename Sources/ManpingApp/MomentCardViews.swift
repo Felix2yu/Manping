@@ -9,47 +9,37 @@ struct MomentVideoCard: View {
   let showComments: () -> Void
   @State private var showingDescription = false
   @Environment(\.colorScheme) private var scheme
-  @Environment(\.watchHistory) private var watchHistory
   private var media: MomentMedia? { MomentMedia.find(item.content) }
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack(spacing: 12) {
-        MomentAuthor(item: item, model: model)
-        if !item.text.isEmpty {
-          Button { showingDescription.toggle() } label: {
-            Image(systemName: "text.bubble").font(.system(size: 12)).frame(width: 26, height: 26)
-          }.buttonStyle(ChromeButtonStyle(icon: true, capsule: true)).help("动态描述")
-            .popover(isPresented: $showingDescription) {
-              MomentRichText(text: item.text, emotes: item.emotes, maxLines: nil).padding(16).frame(width: 400)
-            }
-        }
-      }
+    VStack(alignment: .leading, spacing: 10) {
       if let media {
         Button { media.open(model: model) } label: {
-          CachedImage(url: media.cover).aspectRatio(16 / 9, contentMode: .fit).clipped()
-            .overlay(alignment: .bottomTrailing) {
-              if let duration = media.duration { MediaBadge(text: Self.duration(duration)).padding(8) }
-            }
-            .overlay(alignment: .bottomLeading) {
-              if let watchHistory, let bvid = media.bvid { WatchedBadge(store: watchHistory, bvid: bvid) }
-            }
-            .overlay(alignment: .bottom) {
-              if let watchHistory, let bvid = media.bvid { WatchProgressBar(store: watchHistory, bvid: bvid) }
-            }
-            .onAppear { if let bvid = media.bvid { watchHistory?.request(bvid) } }
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
+          VideoCover(url: media.cover, duration: media.duration.map(Int.init), views: media.views)
         }.buttonStyle(CardPressStyle())
-        Button { media.open(model: model) } label: {
-          Text(media.title).font(Theme.Font.headline).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-        }.buttonStyle(.plain)
+        HStack(alignment: .top, spacing: 4) {
+          Button { media.open(model: model) } label: {
+            Text(media.title).font(Theme.Font.headline).lineLimit(2)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }.buttonStyle(.plain)
+          if !item.text.isEmpty { descriptionButton }
+        }
+      } else if !item.text.isEmpty {
+        descriptionButton
       }
-      Spacer(minLength: 0)
-      MomentOperationRow(item: item, feed: feed, model: model, showComments: showComments)
-    }.padding(16).frame(minHeight: 280, alignment: .topLeading)
+      MomentVideoMetadata(item: item, model: model, showComments: showComments)
+    }.padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
       .foregroundStyle(Theme.text(scheme)).cardSurface(scheme)
       .contextMenu { MomentMenu(item: item, model: model) }
   }
-  private static func duration(_ value: Int64) -> String { String(format: "%02lld:%02lld", value / 60, value % 60) }
+  @ViewBuilder private var descriptionButton: some View {
+    Button { showingDescription.toggle() } label: {
+      Image(systemName: "text.bubble").font(.system(size: 11)).frame(width: 24, height: 24)
+    }.buttonStyle(ChromeButtonStyle(icon: true, capsule: true)).help("动态描述")
+      .accessibilityLabel("动态描述")
+      .popover(isPresented: $showingDescription) {
+        MomentRichText(text: item.text, emotes: item.emotes, maxLines: nil).padding(16).frame(width: 400)
+      }
+  }
 }
 
 struct MomentFullCard: View {
@@ -73,18 +63,45 @@ struct MomentFullCard: View {
 private struct MomentAuthor: View {
   let item: RPCDynamic
   @ObservedObject var model: AppModel
+  var compact = false
   @Environment(\.colorScheme) private var scheme
   var body: some View {
-    HStack(spacing: 12) {
+    HStack(spacing: compact ? 6 : 12) {
       Button { if let mid = item.author?.mid, mid > 0 { model.openOverlay(.userSpace(mid)) } } label: {
-        CachedImage(url: item.author?.avatar).frame(width: 36, height: 36).clipShape(Circle())
-      }.buttonStyle(.plain).disabled((item.author?.mid ?? 0) <= 0)
-      VStack(alignment: .leading, spacing: 2) {
+        CachedImage(url: item.author?.avatar).frame(width: compact ? 24 : 36, height: compact ? 24 : 36).clipShape(Circle())
+      }.buttonStyle(.plain).accessibilityHidden(true).disabled((item.author?.mid ?? 0) <= 0)
+      VStack(alignment: .leading, spacing: compact ? 1 : 2) {
         Button { if let mid = item.author?.mid, mid > 0 { model.openOverlay(.userSpace(mid)) } } label: {
-          Text(item.author?.name ?? "动态").font(Theme.Font.headline).lineLimit(1)
-        }.buttonStyle(.plain).disabled((item.author?.mid ?? 0) <= 0)
+          Text(item.author?.name ?? "动态").font(compact ? Theme.Font.caption : Theme.Font.headline).lineLimit(1)
+        }.buttonStyle(.plain).help("进入 \(item.author?.name ?? "动态") 的空间")
+          .accessibilityLabel("进入 UP 主空间：\(item.author?.name ?? "动态")")
+          .disabled((item.author?.mid ?? 0) <= 0)
         Text(item.timeLabel).font(Theme.Font.caption2).foregroundStyle(Theme.tertiaryText(scheme)).lineLimit(1)
       }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+}
+
+private struct MomentVideoMetadata: View {
+  let item: RPCDynamic
+  @ObservedObject var feed: MomentFeedModel
+  @ObservedObject var model: AppModel
+  let showComments: () -> Void
+  var body: some View {
+    HStack(spacing: 6) {
+      MomentAuthor(item: item, model: model, compact: true)
+      Button { Task { await feed.toggleLike(item) { model.showingLogin = true } } } label: {
+        if feed.busy.contains(item.id) { ProgressView().controlSize(.mini) }
+        else { Image(systemName: feed.isLiked(item) ? "hand.thumbsup.fill" : "hand.thumbsup").font(.system(size: 11)) }
+      }.buttonStyle(ChromeButtonStyle(selected: feed.isLiked(item), icon: true, capsule: true))
+        .frame(width: 26, height: 26).disabled(!feed.canLike(item)).help("点赞")
+        .accessibilityLabel(feed.isLiked(item) ? "取消点赞" : "点赞")
+      Button(action: showComments) {
+        Image(systemName: "bubble.right").font(.system(size: 11))
+          .frame(width: 26, height: 26)
+      }.buttonStyle(ChromeButtonStyle(icon: true, capsule: true))
+        .disabled(M4CommentTarget(dynamic: item) == nil).help("评论")
+        .accessibilityLabel("查看评论")
     }
   }
 }
@@ -135,6 +152,7 @@ private enum MomentMedia {
   var title: String { switch self { case .video(let video): video.title; case .episode(let episode): episode.title } }
   var cover: URL? { switch self { case .video(let video): video.cover; case .episode(let episode): episode.cover } }
   var duration: Int64? { if case .video(let video) = self { return Int64(video.duration) }; return nil }
+  var views: Int? { if case .video(let video) = self { return video.views }; return nil }
   /// PGC episodes have no bvid, so bili-history only tracks ordinary videos here.
   var bvid: String? { if case .video(let video) = self { return video.bvid }; return nil }
   @MainActor func open(model: AppModel) {
@@ -169,7 +187,7 @@ private struct MomentContent: View {
               if let watchHistory, let bvid = media.bvid { WatchProgressBar(store: watchHistory, bvid: bvid) }
             }
             .onAppear { if let bvid = media.bvid { watchHistory?.request(bvid) } }
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
           Text(media.title).font(Theme.Font.body).lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
           Image(systemName: "play.circle").font(.system(size: 22)).foregroundStyle(Theme.secondaryText(scheme))
         }.padding(8).background(Theme.fill(scheme)).clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
@@ -214,8 +232,9 @@ private struct MomentImages: View {
     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: min(3, max(1, images.count))), spacing: 8) {
       ForEach(Array(images.enumerated()), id: \.offset) { index, url in
         Button { selected = index } label: {
-          CachedImage(url: url).aspectRatio(1, contentMode: .fit).clipped()
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous))
+          Color.clear.aspectRatio(1, contentMode: .fit)
+            .overlay { CachedImage(url: url) }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous))
         }.buttonStyle(CardPressStyle()).help("查看图片")
       }
     }.frame(maxWidth: 600)
