@@ -56,7 +56,7 @@ public struct RecommendationHiddenVideo: Identifiable, Codable, Equatable, Senda
   }
 }
 
-/// Local recommendation rules. They only hide matching rows from 首页推荐; the server's
+/// Local rules for recommendation surfaces. They hide matching entries locally; the server's
 /// recommendation cursor is untouched so filtered pages still advance normally.
 public struct RecommendationFilter: Codable, Equatable, Sendable {
   public private(set) var rules: [RecommendationFilterRule] = []

@@ -40,6 +40,8 @@ public struct RPCBrowseSource: Sendable {
       bvid: card.bvid, title: card.title, cover: card.cover, author: card.author?.name ?? "",
       duration: duration, views: views, cid: card.cid > 0 ? card.cid : nil,
       aid: card.aid, authorID: card.author?.mid, avatar: card.author?.avatar,
-      publishedAt: card.publishedAt, subtitle: card.subtitle, recommendationReason: card.recommendationReason)
+      publishedAt: card.publishedAt, subtitle: card.subtitle, recommendationReason: card.recommendationReason,
+      partitionID: card.partitionID, partitionName: card.partitionName,
+      subpartitionID: card.subpartitionID, subpartitionName: card.subpartitionName)
   }
 }

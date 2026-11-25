@@ -22,7 +22,7 @@ struct PopularPage: View {
   var body: some View {
     VStack(spacing: 0) {
       continueWatching
-      BrowseVideoResults(feed: feed, open: model.open, filtersRecommendations: model.popularTab == .recommended)
+      BrowseVideoResults(feed: feed, open: model.open, filtersRecommendations: model.popularTab != .ranking)
     }
       .pageToolbar(title: "首页", refreshing: feed.state.isLoading && !feed.state.items.isEmpty, refresh: { feed.refresh() }) {
         Button { model.playCuratedList() } label: {

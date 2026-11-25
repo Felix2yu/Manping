@@ -8,7 +8,7 @@ final class RecommendationFilterTests: XCTestCase {
       partitionID: primary, partitionName: "动画", subpartitionID: secondary, subpartitionName: "剪辑")
   }
 
-  func testRulesFilterOnlyMatchingHomeRecommendations() {
+  func testRulesFilterOnlyMatchingRecommendations() {
     var filter = RecommendationFilter()
     XCTAssertTrue(filter.add(RecommendationFilterRule(kind: .subpartition, valueID: 24, name: "剪辑")))
     XCTAssertTrue(filter.filters(video()))

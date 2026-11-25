@@ -219,7 +219,9 @@ enum BiliRPCAdapter {
         cover: url(item.cover),
         author: RPCUser(mid: item.mid, name: item.name, avatar: url(item.face)),
         duration: item.duration, views: Int64(item.play), uri: item.uri,
-        publishedAt: item.pubDate > 0 ? item.pubDate : nil)
+        publishedAt: item.pubDate > 0 ? item.pubDate : nil,
+        partitionID: JSONValue.positiveInt(item.rid),
+        partitionName: item.rname.isEmpty ? nil : item.rname)
     }
   }
   static func popular(_ reply: Bilibili_App_Show_Popular_V1_PopularReply) throws -> RPCPopularPage {
@@ -238,6 +240,9 @@ enum BiliRPCAdapter {
           throw BiliRPCError.invalidPayload("popular.aid")
         }
         let share = video.base.threePointV4.sharePlane
+        let partition = Video.partitionMetadata(
+          legacyID: video.base.args.tid, legacyName: video.base.args.tname,
+          currentID: video.base.args.rid, currentName: video.base.args.rname)
         let author = !share.author.isEmpty
           ? RPCUser(mid: share.authorID, name: share.author, avatar: video.hasUp ? url(video.up.avatar.cover) : nil)
           : video.hasUp
@@ -254,7 +259,9 @@ enum BiliRPCAdapter {
             duration: video.base.playerArgs.duration > 0 ? video.base.playerArgs.duration : durationSeconds(video.coverRightText1),
             views: countNumber(share.playNumber), uri: video.base.uri,
             subtitle: subtitle?.isEmpty == false ? subtitle : nil,
-            recommendationReason: video.rcmdReasonStyle.text.isEmpty ? nil : video.rcmdReasonStyle.text),
+            recommendationReason: video.rcmdReasonStyle.text.isEmpty ? nil : video.rcmdReasonStyle.text,
+            partitionID: partition.id, partitionName: partition.name,
+            subpartitionID: partition.secondaryID, subpartitionName: partition.secondaryName),
           index: video.base.idx,
           durationLabel: video.coverRightText1)
       case .largeCoverV1(let v):

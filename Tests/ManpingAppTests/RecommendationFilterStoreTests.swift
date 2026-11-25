@@ -17,6 +17,17 @@ import XCTest
     XCTAssertTrue(restored.filters(video))
   }
 
+  func testVisibleRecommendationsApplyRulesAcrossSources() {
+    let store = RecommendationFilterStore(defaults: MemoryPreferences())
+    let blocked = Video(bvid: "BV-blocked", title: "Blocked", author: "Creator", authorID: 42)
+    let retained = Video(bvid: "BV-retained", title: "Retained", author: "Other", authorID: 43)
+    XCTAssertEqual(store.add(video: blocked, kind: .author), .added)
+
+    XCTAssertEqual(store.visibleRecommendations([blocked, retained]), [retained])
+    XCTAssertTrue(store.visibleRecommendations([blocked]).isEmpty)
+    XCTAssertTrue(store.visibleRecommendations([]).isEmpty)
+  }
+
   func testContextRuleRemovesOnlyTheSelectedRow() async {
     let feed = BrowseFeedModel(service: BiliService(transport: RecommendationOffline(), credentials: RecommendationNoCredentials()))
     let removed = Video(bvid: "BV-removed", title: "Removed", aid: 1)

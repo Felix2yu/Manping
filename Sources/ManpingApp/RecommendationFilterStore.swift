@@ -113,6 +113,10 @@ import ManpingCore
 
   func filters(_ video: Video) -> Bool { filter.filters(video) }
 
+  func visibleRecommendations(_ videos: [Video]) -> [Video] {
+    videos.filter { !filters($0) }
+  }
+
   @discardableResult
   private func save() -> Bool {
     guard let data = try? JSONEncoder().encode(filter) else { return false }

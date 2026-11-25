@@ -74,14 +74,22 @@ public struct RPCVideoCard: Codable, Sendable, Equatable {
   public let publishedAt: Int64?
   public let subtitle: String?
   public let recommendationReason: String?
+  public let partitionID: Int?
+  public let partitionName: String?
+  public let subpartitionID: Int?
+  public let subpartitionName: String?
   public init(
     aid: Int64, bvid: String, cid: Int64, title: String, cover: URL?, author: RPCUser?,
     duration: Int64, views: Int64, uri: String, publishedAt: Int64? = nil,
-    subtitle: String? = nil, recommendationReason: String? = nil
+    subtitle: String? = nil, recommendationReason: String? = nil,
+    partitionID: Int? = nil, partitionName: String? = nil,
+    subpartitionID: Int? = nil, subpartitionName: String? = nil
   ) {
     self.aid = aid; self.bvid = bvid; self.cid = cid; self.title = title; self.cover = cover
     self.author = author; self.duration = duration; self.views = views; self.uri = uri
     self.publishedAt = publishedAt; self.subtitle = subtitle; self.recommendationReason = recommendationReason
+    self.partitionID = partitionID; self.partitionName = partitionName
+    self.subpartitionID = subpartitionID; self.subpartitionName = subpartitionName
   }
 }
 public struct RPCArticleCard: Codable, Sendable, Equatable {

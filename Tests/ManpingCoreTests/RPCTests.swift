@@ -770,6 +770,10 @@ final class RPCTests: XCTestCase, @unchecked Sendable {
     video.base.threePointV4.sharePlane.bvid = "BV-fixture-popular"
     video.base.threePointV4.sharePlane.author = "Owner"
     video.base.threePointV4.sharePlane.authorID = 789
+    video.base.args.rid = 1
+    video.base.args.rname = "动画"
+    video.base.args.tid = 24
+    video.base.args.tname = "剪辑"
     video.base.threePointV4.sharePlane.playNumber = "12.3万次"
     video.rightDesc2 = "UP主 · 8小时前"
     video.rcmdReasonStyle.text = "很多人点赞"
@@ -793,9 +797,15 @@ final class RPCTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(mapped.views, 123_000)
     XCTAssertEqual(mapped.subtitle, "8小时前")
     XCTAssertEqual(mapped.recommendationReason, "很多人点赞")
+    XCTAssertEqual(mapped.partitionID, 1)
+    XCTAssertEqual(mapped.partitionName, "动画")
+    XCTAssertEqual(mapped.subpartitionID, 24)
+    XCTAssertEqual(mapped.subpartitionName, "剪辑")
     let legacy = try JSONDecoder().decode(RPCVideoCard.self, from: Data(#"{"aid":123,"bvid":"","cid":321,"title":"A","duration":125,"views":100,"uri":""}"#.utf8))
     XCTAssertNil(legacy.publishedAt)
     XCTAssertNil(legacy.subtitle)
+    XCTAssertNil(legacy.partitionID)
+    XCTAssertNil(legacy.subpartitionID)
   }
 
   func testPopularTopEntranceStillAdvancesFinalPageCursor() throws {

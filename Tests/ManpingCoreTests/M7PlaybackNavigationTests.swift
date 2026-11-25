@@ -61,6 +61,19 @@ final class M7PlaybackNavigationTests: XCTestCase {
     XCTAssertEqual(PlaybackNavigation.previous(details: detail, current: current, playlist: nil, playlistIndex: nil,
       endWithPlaylist: false, autoNextRelated: true), .none)
   }
+  func testRelatedNavigationSkipsFilteredRecommendations() {
+    let detail = details(related: [recommendation, after])
+    XCTAssertEqual(PlaybackNavigation.next(details: detail, current: current, playlist: nil, playlistIndex: nil,
+      endWithPlaylist: true, autoNextRelated: true,
+      isRelatedFiltered: { $0.id == recommendation.id }), .video(after))
+    XCTAssertEqual(PlaybackNavigation.next(details: detail, current: current, playlist: nil, playlistIndex: nil,
+      endWithPlaylist: true, autoNextRelated: true,
+      isRelatedFiltered: { _ in true }), .none)
+    XCTAssertEqual(PlaybackNavigation.next(details: detail, current: current, playlist: nil, playlistIndex: nil,
+      endWithPlaylist: true, autoNextRelated: false,
+      isRelatedFiltered: { _ in false }), .none)
+  }
+
   func testCollectionsStayWithinSelectedGroupAndInvalidQueueIndexCannotMove() {
     let detail = details(collections: [.init(title: "First group", episodes: [before, current]),
       .init(title: "Second group", episodes: [after])], related: [recommendation])

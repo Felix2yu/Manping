@@ -43,12 +43,12 @@ struct RecommendationFilterSettingsView: View {
         } header: {
           Text("新增规则")
         } footer: {
-          Text("规则只影响首页推荐；收藏、稍后再看、历史记录、搜索和分区页不受影响。")
+          Text("规则影响首页推荐与热门、分区推荐、视频页相关推荐和精选播放；收藏、稍后再看、历史记录、搜索、排行榜及按最新/热度等指标排序的分区列表不受影响。")
         }
 
         Section("已有规则（\(store.filter.rules.count)）") {
           if store.filter.rules.isEmpty {
-            Text("还没有推荐过滤规则。可在首页推荐视频的右键菜单中快速添加。")
+            Text("还没有推荐过滤规则。可在推荐视频的右键菜单中快速添加。")
               .foregroundStyle(Theme.secondaryText(scheme))
           } else {
             ForEach(store.filter.rules) { rule in
@@ -70,7 +70,7 @@ struct RecommendationFilterSettingsView: View {
 
         Section {
           if store.filter.hiddenVideos.isEmpty {
-            Text("还没有隐藏的推荐视频。可在首页视频的“不再推荐 › 这个视频”中添加。")
+            Text("还没有隐藏的推荐视频。可在推荐视频的“不再推荐 › 这个视频”中添加。")
               .foregroundStyle(Theme.secondaryText(scheme))
           } else {
             ForEach(store.filter.hiddenVideos) { video in
@@ -89,7 +89,7 @@ struct RecommendationFilterSettingsView: View {
         } header: {
           Text("单视频反馈（\(store.filter.hiddenVideos.count)）")
         } footer: {
-          Text("清除后，这些视频会重新符合首页推荐条件；不会删除收藏、稍后再看或观看记录。")
+          Text("清除后，这些视频会重新符合推荐条件；不会删除收藏、稍后再看或观看记录。")
         }
       }.formStyle(.grouped).scrollContentBackground(.hidden)
         .padding(.horizontal, 30).padding(.top, 16).padding(.bottom, 24)

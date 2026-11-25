@@ -5,6 +5,7 @@ import SwiftUI
 struct VideoDetailPage: View {
   @ObservedObject var model: AppModel
   @ObservedObject var player: PlayerModel
+  @ObservedObject private var recommendationFilter = RecommendationFilterStore.shared
   let video: Video
   @StateObject private var interactions: VideoInteractionModel
   @StateObject private var comments: M4CommentModel
@@ -740,19 +741,34 @@ struct VideoDetailPage: View {
   }
 
   private func relatedSection(_ details: VideoDetails) -> some View {
-    VStack(alignment: .leading, spacing: 10) {
+    let recommendations = recommendationFilter.visibleRecommendations(details.related)
+    return VStack(alignment: .leading, spacing: 10) {
       if !details.relatedAvailable {
         Text("相关推荐暂不可用").foregroundStyle(Theme.tertiaryText(scheme)).padding(6)
-      } else if details.related.isEmpty {
+      } else if recommendations.isEmpty, !details.related.isEmpty {
+        Text("推荐内容已被过滤规则隐藏，可在设置 › 推荐过滤中调整。")
+          .foregroundStyle(Theme.tertiaryText(scheme)).padding(6)
+      } else if recommendations.isEmpty {
         Text("还没有相关推荐").foregroundStyle(Theme.tertiaryText(scheme)).padding(6)
       }
-      ForEach(details.related) { item in
+      ForEach(recommendations) { item in
         Button {
           model.open(item)
         } label: {
           MediaRow(cover: item.cover, title: item.title, subtitle: item.author, meta: "\(count(item.views)) 播放",
             duration: item.duration > 0 ? clock(Double(item.duration)) : nil)
         }.buttonStyle(SidebarRowStyle())
+          .contextMenu {
+            VideoContextMenu(video: item, filterRecommendation: { kind in
+              if !recommendationFilter.add(video: item, kind: kind).succeeded {
+                model.error = "没能更新推荐过滤，请检查偏好设置写入权限后重试。"
+              }
+            }, hideRecommendation: {
+              if !recommendationFilter.hide(video: item) {
+                model.error = "没能更新推荐反馈，请检查偏好设置写入权限后重试。"
+              }
+            })
+          }
       }
     }.font(Theme.Font.body).foregroundStyle(Theme.text(scheme))
   }

@@ -350,6 +350,10 @@ public actor M3FixtureRPCTransport: BiliRPCTransport {
     video.base.title = popularTitles[slot]; video.base.idx = Int64(index + 1)
     video.base.cover = "https://fixture.invalid/cover/\(slot)"
     video.base.uri = "https://www.bilibili.com/video/av\(100 + index)"
+    video.base.args.rid = 1
+    video.base.args.rname = "动画"
+    video.base.args.tid = 24
+    video.base.args.tname = "剪辑"
     let seconds = 186 + (index * 437) % 1260
     video.base.playerArgs.cid = Int64(1000 + index); video.base.playerArgs.duration = Int64(seconds)
     video.base.threePointV4.sharePlane.author = popularAuthors[index % popularAuthors.count]

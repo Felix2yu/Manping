@@ -12,7 +12,7 @@ public enum PlaybackNavigationAction: Sendable, Equatable {
 /// Queue actions are returned to its owner, which preserves identity and advances the existing queue.
 public enum PlaybackNavigation {
   public static func next(details: VideoDetails, current: Video, playlist: [Video]?, playlistIndex: Int?,
-    endWithPlaylist: Bool, autoNextRelated: Bool) -> PlaybackNavigationAction {
+    endWithPlaylist: Bool, autoNextRelated: Bool, isRelatedFiltered: (Video) -> Bool = { _ in false }) -> PlaybackNavigationAction {
     guard details.matches(current) else { return .none }
     if let index = partIndex(details: details, current: current), index + 1 < details.parts.count {
       return .part(details.parts[index + 1])
@@ -29,7 +29,7 @@ public enum PlaybackNavigation {
       let index = group.episodes.firstIndex(where: { sameVideo($0, current) }), index + 1 < group.episodes.count {
       return .video(group.episodes[index + 1])
     }
-    if autoNextRelated, let first = details.related.first { return .video(first) }
+    if autoNextRelated, let first = details.related.first(where: { !isRelatedFiltered($0) }) { return .video(first) }
     return .none
   }
 

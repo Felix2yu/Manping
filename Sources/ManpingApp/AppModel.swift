@@ -1850,7 +1850,8 @@ import WebKit
         endWithPlaylist: appSettings.bool(.endWithPlaylist), autoNextRelated: appSettings.bool(.autoNextRelated))
     }
     return PlaybackNavigation.next(details: details, current: current, playlist: playlist, playlistIndex: index,
-      endWithPlaylist: appSettings.bool(.endWithPlaylist), autoNextRelated: appSettings.bool(.autoNextRelated))
+      endWithPlaylist: appSettings.bool(.endWithPlaylist), autoNextRelated: appSettings.bool(.autoNextRelated),
+      isRelatedFiltered: { RecommendationFilterStore.shared.filters($0) })
   }
   var canPlayNext: Bool {
     if let pgcPlayback { return pgcPlayback.canPlayNext }
@@ -1923,7 +1924,11 @@ import WebKit
       guard generation == curatedGeneration, !Task.isCancelled else { return }
       curatedIdentity = PlaybackQueueIdentity(snapshot)
       do {
-        let videos = try await service.curatedPlaylist(expectedIdentity: snapshot)
+        let videos = RecommendationFilterStore.shared.visibleRecommendations(
+          try await service.curatedPlaylist(expectedIdentity: snapshot))
+        guard !videos.isEmpty else {
+          throw BiliError.invalidResponse("精选视频已被推荐过滤规则隐藏，可在设置 › 推荐过滤中调整。")
+        }
         try Task.checkCancellation()
         let current = await service.authSnapshot()
         guard generation == curatedGeneration, PlaybackQueueIdentity(current) == PlaybackQueueIdentity(snapshot) else { return }

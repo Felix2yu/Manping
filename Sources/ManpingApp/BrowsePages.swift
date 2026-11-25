@@ -49,7 +49,8 @@ struct VideoPartitionPage: View {
           PageStateView(.error, title: "没能打开分区", message: requestError, icon: "rectangle.grid.2x2")
         } else if let parent {
           header(parent: parent)
-          BrowseVideoResults(feed: feed, open: open).equatable()
+          BrowseVideoResults(feed: feed, open: open,
+            filtersRecommendations: !showsRanking && order == .recommended).equatable()
         } else if directory.isLoading {
           PageStateView(.loading, title: "正在加载分区…")
         } else if let error = directory.error {
@@ -239,7 +240,7 @@ struct BrowseVideoResults: View, Equatable {
     let offersUndo: Bool
 
     static let hidden = Self(title: "已从推荐中移除",
-      message: "这个视频已从首页推荐隐藏。可立即撤销，或稍后在设置 › 推荐过滤中清除。", offersUndo: true)
+      message: "这个视频已从推荐中隐藏。可立即撤销，或稍后在设置 › 推荐过滤中清除。", offersUndo: true)
     static let hideFailed = Self(title: "没能更新推荐反馈",
       message: "偏好设置写入失败，这个视频仍在推荐列表中。", offersUndo: false)
     static let undoFailed = Self(title: "没能撤销",
@@ -247,7 +248,7 @@ struct BrowseVideoResults: View, Equatable {
   }
 
   private var visibleItems: [Video] {
-    filtersRecommendations ? feed.state.items.filter { !recommendationFilter.filters($0) } : feed.state.items
+    filtersRecommendations ? recommendationFilter.visibleRecommendations(feed.state.items) : feed.state.items
   }
 
   var body: some View {
@@ -259,7 +260,7 @@ struct BrowseVideoResults: View, Equatable {
           title: "没能加载视频", message: error, icon: "wifi.exclamationmark", actionTitle: "重试"
         ) { feed.loadNext() }
       } else if visibleItems.isEmpty {
-        PageStateView(title: "这里还没有视频", message: filtersRecommendations ? "推荐已被过滤规则隐藏，可在设置 › 推荐过滤中调整。" : "稍后刷新试试。", icon: "play.rectangle")
+        PageStateView(title: "这里还没有视频", message: filtersRecommendations ? "推荐内容已被过滤规则隐藏，可在设置 › 推荐过滤中调整。" : "稍后刷新试试。", icon: "play.rectangle")
           .task(id: feed.state.nextCursor) {
             if filtersRecommendations, feed.state.hasMore, !feed.state.isLoading, feed.state.error == nil {
               feed.loadNext()
