@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import ManpingCore
 import XCTest
@@ -134,6 +135,78 @@ private actor HistoryTestTransport: AuthTransport {
     reporter.flush()
     try await waitForRequests(2, transport: transport)
     XCTAssertEqual(reports, 2)
+  }
+
+  func testSavedProgressSurvivesANewStoreAndResumesTheNextOpen() async throws {
+    let cacheURL = temporaryURL("resume-history-cache")
+    let outboxURL = temporaryURL("resume-history-outbox")
+    defer { try? FileManager.default.removeItem(at: cacheURL); try? FileManager.default.removeItem(at: outboxURL) }
+    let transport: @MainActor @Sendable (URLRequest) async throws -> (Data, URLResponse) = { request in
+      (Data(#"{"status":"success"}"#.utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
+        httpVersion: nil, headerFields: nil)!)
+    }
+    let store = WatchHistoryStore(cacheURL: cacheURL, outboxURL: outboxURL, transport: transport)
+    store.configure(enabled: true, baseURL: "https://fixture.invalid")
+    let item = WatchProgressReporter.Item(aid: 10, cid: 20, bvid: "BV1fixture", duration: 100)
+    store.report(item, seconds: 42)
+    store.flushLocal()
+    XCTAssertTrue((try? String(contentsOf: cacheURL, encoding: .utf8))?.contains("BV1fixture") == true)
+
+    let restored = WatchHistoryStore(cacheURL: cacheURL, outboxURL: outboxURL, transport: transport)
+    restored.configure(enabled: true, baseURL: "https://fixture.invalid")
+    XCTAssertEqual(restored.record(item.bvid)?.progress, 42)
+
+    _ = NSApplication.shared
+    let service = BiliService(transport: HistoryTestTransport(), credentials: HistoryTestStore())
+    let app = AppModel(probeService: service, observeIdentity: false)
+    app.debugSuppressPlaybackWindows = true
+    app.debugSetDefaultOpenMode(.mainWindow)
+    app.debugSetWatchHistory(restored)
+    defer { app.shutdown() }
+    let video = Video(bvid: item.bvid, title: "Resume fixture", cid: item.cid, aid: item.aid)
+    app.open(video, mode: .mainWindow)
+    await app.debugVideoLoadRequest?.value
+    XCTAssertEqual(app.debugRequestedStart, 42)
+    restored.report(item, seconds: 73, sessionID: UUID())
+    app.open(video, mode: .mainWindow)
+    await app.debugVideoLoadRequest?.value
+    XCTAssertEqual(app.debugRequestedStart, 73)
+  }
+
+  func testExplicitStartLinkOverridesTheSavedHistoryPosition() async throws {
+    _ = NSApplication.shared
+    let service = BiliService(transport: HistoryTestTransport(), credentials: HistoryTestStore())
+    let app = AppModel(probeService: service, observeIdentity: false)
+    app.debugSuppressPlaybackWindows = true
+    app.debugSetDefaultOpenMode(.mainWindow)
+    defer { app.shutdown() }
+    let store = WatchHistoryStore(cacheURL: nil, outboxURL: nil)
+    store.configure(enabled: true, baseURL: "https://fixture.invalid")
+    let item = WatchProgressReporter.Item(aid: 10, cid: 20, bvid: "BV1fixture", duration: 100)
+    store.report(item, seconds: 42)
+    app.debugSetWatchHistory(store)
+    let video = Video(bvid: item.bvid, title: "Resume fixture", cid: item.cid, aid: item.aid)
+    app.open(video, startAt: 7, part: 1, mode: .mainWindow)
+    await app.debugVideoLoadRequest?.value
+    XCTAssertEqual(app.debugRequestedStart, 7)
+  }
+
+  func testLocalProgressIsSavedWhileServerSyncIsDisabled() async throws {
+    let cacheURL = temporaryURL("local-history-cache")
+    defer { try? FileManager.default.removeItem(at: cacheURL) }
+    var requests = 0
+    let store = WatchHistoryStore(cacheURL: cacheURL, outboxURL: nil, transport: { request in
+      requests += 1
+      return self.response(request, body: #"{"status":"success"}"#)
+    })
+    store.configure(enabled: false, baseURL: "")
+    store.report(WatchProgressReporter.Item(aid: 10, cid: 20, bvid: "BV1fixture", duration: 100), seconds: 42)
+    XCTAssertEqual(store.record("BV1fixture")?.progress, 42)
+    try await wait { (try? String(contentsOf: cacheURL, encoding: .utf8))?.contains("BV1fixture") == true }
+    let restored = WatchHistoryStore(cacheURL: cacheURL, outboxURL: nil)
+    restored.configure(enabled: false, baseURL: "")
+    XCTAssertEqual(restored.record("BV1fixture")?.progress, 42)
+    XCTAssertEqual(requests, 0)
   }
 
   func testRewatchStartsANewSessionAndRejectsTheOldSession() {
