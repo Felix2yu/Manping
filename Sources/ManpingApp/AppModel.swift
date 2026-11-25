@@ -491,7 +491,7 @@ import WebKit
   }
   func writeCaptureState() {
     #if DEBUG
-    guard Bundle.main.bundleIdentifier == "io.github.pidean.manping.debug" else { return }
+    guard AppIdentity.isDebugApp else { return }
     let file = Bundle.main.bundleURL.deletingLastPathComponent()
       .appendingPathComponent("capture-\(ProcessInfo.processInfo.processIdentifier).state")
     try? (showingLogin ? "blocked" : "ready").write(to: file, atomically: true, encoding: .utf8)
@@ -745,8 +745,8 @@ import WebKit
     return selected != nil ? player : nil
   }
   var canTakeScreenshot: Bool { screenshotTarget != nil }
-  @Published private(set) var screenshotNotice: String?
-  @Published private(set) var actionNotice: String?
+  @Published var screenshotNotice: String?
+  @Published var actionNotice: String?
   @Published private(set) var screenshotBusy = false
   func takePlayerScreenshot() {
     guard !screenshotBusy else { return }
@@ -827,8 +827,7 @@ import WebKit
   private var loadTask: Task<Void, Never>?
   private var downloadStore: DownloadStore?
   static var support: URL {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("Manping")
+    AppIdentity.applicationSupportDirectory
   }
   static var ffmpeg: URL {
     let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ffmpeg")
@@ -1415,7 +1414,7 @@ import WebKit
         DispatchQueue.main.async {
           guard let self, let live, self.livePlayback === live else { return }
           if let web = URL(string: "https://live.bilibili.com/\(room.roomID)") {
-            self.watchActivity.begin(.init(link: "manping://live/\(room.roomID)", web: web, title: room.title,
+            self.watchActivity.begin(.init(link: "\(AppIdentity.urlScheme)://live/\(room.roomID)", web: web, title: room.title,
               author: room.anchorName))
           }
           self.systemMedia.attach(player: live.player, title: room.title,
@@ -1443,7 +1442,7 @@ import WebKit
   func openPGCFavorites(cinema: Bool) {
     openOverlay(.favorites); pgcFavoriteIntent = (cinema, UUID())
   }
-  /// Opens a pasted, dropped or `manping://` link in the app. Returns false when the text is not
+  /// Opens a pasted, dropped or `manpingx://` link in the app. Returns false when the text is not
   /// a Bilibili destination, so callers can say so instead of guessing.
   @discardableResult func openLink(_ text: String) -> Bool {
     guard let link = BiliLinkParser.parse(text) else { return false }
@@ -1463,6 +1462,7 @@ import WebKit
     case .space(let mid): openOverlay(.userSpace(mid))
     case .search(let query): openOverlay(.search(query))
     case .region(let tid):
+      guard let tid = Int(exactly: tid) else { return }
       navigate(to: .video)
       partitionRequest = PartitionRequest(tid: tid)
     case .short(let url):
@@ -2042,11 +2042,11 @@ import WebKit
     let author = pgcPlayback?.details?.season.title ?? selected?.author ?? ""
     if !usesUIFixtures {
       if let episode = pgcPlayback?.episode, let web = URL(string: "https://www.bilibili.com/bangumi/play/ep\(episode.id)") {
-        watchActivity.begin(.init(link: "manping://episode/\(episode.id)", web: web, title: title, author: author))
+        watchActivity.begin(.init(link: "\(AppIdentity.urlScheme)://episode/\(episode.id)", web: web, title: title, author: author))
       } else if pgcPlayback == nil, let video = selected {
         let id = video.bvid.hasPrefix("BV") ? video.bvid : video.aid.map { "av\($0)" } ?? ""
         if !id.isEmpty, let web = URL(string: "https://www.bilibili.com/video/\(id)") {
-          watchActivity.begin(.init(link: "manping://video/\(id)", web: web, title: title, author: author))
+          watchActivity.begin(.init(link: "\(AppIdentity.urlScheme)://video/\(id)", web: web, title: title, author: author))
         }
       }
       var previous: (@MainActor @Sendable () -> Void)?

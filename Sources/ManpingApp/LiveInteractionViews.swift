@@ -65,8 +65,9 @@ struct LiveComposer: View {
             get: { interaction.draft.text }, set: interaction.setText)
         )
         .textFieldStyle(.plain).font(Theme.Font.body).focused($focused).demoAnchor("live.composer")
-        .onSubmit { interaction.send() }.disabled(
-          !interaction.canInteract || interaction.muted != nil)
+        .onSubmit {
+          if interaction.canInteract { interaction.send() } else { login() }
+        }.disabled(interaction.muted != nil)
         if let limit = interaction.limit {
           Text("\(interaction.draft.text.count)/\(limit)").font(Theme.Font.caption2)
             .monospacedDigit()

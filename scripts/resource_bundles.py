@@ -9,8 +9,10 @@ import pathlib
 import plistlib
 import shutil
 
+from app_identity import BUNDLE_ID
+
 # The product's own bundle: SwiftPM name -> stable identifier.
-OWN = {'Manping_ManpingApp.bundle': 'io.github.pidean.manping.ManpingApp.resources'}
+OWN = {'Manping_ManpingApp.bundle': BUNDLE_ID + '.ManpingApp.resources'}
 # Dependencies of the executable that ship privacy manifests; their identifiers stay as built.
 THIRD_PARTY = ('SwiftProtobuf_SwiftProtobuf.bundle', 'swift-nio_NIOPosix.bundle')
 

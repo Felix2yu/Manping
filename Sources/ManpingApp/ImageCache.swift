@@ -2,6 +2,7 @@ import AppKit
 import CryptoKit
 import Foundation
 import ImageIO
+import ManpingCore
 import SwiftUI
 
 /// CGImage is immutable; decoding and all disk work stay off the main actor.
@@ -56,8 +57,8 @@ actor ImageCache {
   /// Keyed by the secured URL string so the synchronous lookup needs no hashing.
   private nonisolated let memory = DecodedImageMemory(limit: 64 * 1024 * 1024)
   private let diskLimit = 200 * 1024 * 1024
-  private let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-    .appendingPathComponent("Manping/Images", isDirectory: true)
+  private let directory = AppIdentity.cachesDirectory
+    .appendingPathComponent("Images", isDirectory: true)
 
   /// Bilibili APIs return many covers as plain `http://` (e.g. `http://i1.hdslb.com/...`), which ATS
   /// blocks. The image CDN serves the same paths over HTTPS, so upgrade instead of relaxing ATS.

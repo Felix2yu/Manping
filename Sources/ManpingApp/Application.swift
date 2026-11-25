@@ -12,7 +12,7 @@ import SwiftUI
   var diagnosticsTimer: Timer?
   var probes: [String: String] = [:]
   var representation: [String: Any] = [:]
-  /// `manping://…` links and Bilibili web links handed to the app (Finder, `open`, other apps).
+  /// `manpingx://…` links and Bilibili web links handed to the app (Finder, `open`, other apps).
   func application(_ application: NSApplication, open urls: [URL]) {
     var opened = false
     for url in urls.prefix(1) where model.openLink(url.absoluteString) { opened = true }
@@ -144,7 +144,7 @@ import SwiftUI
     NSApp.sendAction(action, to: self, from: sender)
   }
   @objc private func openDockLiveRoom(_ sender: NSMenuItem) { model.openLiveRoom(Int64(sender.tag)) }
-  /// Spotlight results this app indexed reopen through their `manping://` identifier.
+  /// Spotlight results this app indexed reopen through their `manpingx://` identifier.
   func application(_ application: NSApplication, continue userActivity: NSUserActivity,
     restorationHandler: @escaping ([any NSUserActivityRestoring]) -> Void) -> Bool {
     guard userActivity.activityType == CSSearchableItemActionType,
@@ -622,7 +622,7 @@ import SwiftUI
           MainActor.assumeIsolated { self?.model.player.seek(8) }
         }
       }
-      let output = options.values["--report"] ?? "/tmp/manping-diagnostic.json"
+      let output = options.values["--report"] ?? "/tmp/im.yufei.manping-diagnostic.json"
       let seconds = options.seconds
       diagnosticsTimer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) {
         [weak self] _ in
@@ -1060,8 +1060,8 @@ import SwiftUI
   @objc private func goForward() { model.goForward() }
   @objc private func openSettings() { model.openSettings() }
   @objc private func refreshPage() { Task { await model.refresh() } }
-  @objc private func openHelp() { ExternalWebLink.open(URL(string: "https://github.com/PIDEAN/Manping#readme")!) }
-  @objc private func openIssues() { ExternalWebLink.open(URL(string: "https://github.com/PIDEAN/Manping/issues")!) }
+  @objc private func openHelp() { ExternalWebLink.open(URL(string: "https://github.com/Felix2yu/Manping#readme")!) }
+  @objc private func openIssues() { ExternalWebLink.open(URL(string: "https://github.com/Felix2yu/Manping/issues")!) }
   /// 关于满屏: the standard panel with the app icon, name and version, plus credits to the
   /// upstream projects.
   @objc private func showAbout() {
@@ -1073,7 +1073,7 @@ import SwiftUI
       credits.append(NSAttributedString(string: text, attributes: attributes))
     }
     append("Manping · 原生 Apple Silicon 哔哩哔哩客户端\n")
-    append("项目主页", link: "https://github.com/PIDEAN/Manping")
+    append("项目主页", link: "https://github.com/Felix2yu/Manping")
     append("\n\n致谢\n")
     for entry in Acknowledgements.entries(in: .original) {
       append(entry.name, link: entry.url)

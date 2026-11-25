@@ -87,7 +87,8 @@ def scan_text(name, text, deny):
                         continue
                     # Dotted versions ("luajit 5.1.2.1", "libfoo.5.1.2.1.dylib") are not addresses.
                     before = line[max(0, match.start() - 12):match.start()]
-                    if re.search(r'(version|[A-Za-z]-|\d\.|[A-Za-z]\.)$', before, re.I) or 'luajit' in line.lower():
+                    if re.search(r'(version|[A-Za-z]-|\d\.|[A-Za-z]\.)$', before, re.I) or 'luajit' in line.lower() \
+                            or re.search(r'\b(?:ninja|meson)==\s*$', before, re.I):
                         continue
                 problems.append(f'{name}:{line_number}: {label}: {shown(value[:80])}')
         for word in deny:

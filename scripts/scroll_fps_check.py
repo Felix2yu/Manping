@@ -22,6 +22,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from app_identity import APP_NAME, EXECUTABLE_NAME, PERF_BUNDLE_ID  # noqa: E402
 from resource_bundles import copy_resource_bundles  # noqa: E402
 
 PERF_APP = ROOT / '.build/perf/满屏 Perf.app'
@@ -30,9 +31,9 @@ PERF_APP = ROOT / '.build/perf/满屏 Perf.app'
 def build_perf_app(template, app=PERF_APP):
     """Release-optimized binary in a copy of the Release runtime, under its own bundle id."""
     env = dict(os.environ, DEVELOPER_DIR='/Applications/Xcode.app/Contents/Developer')
-    subprocess.check_call(['swift', 'build', '-c', 'release'], cwd=ROOT, env=env)
-    bin_dir = Path(subprocess.check_output(['swift', 'build', '-c', 'release', '--show-bin-path'],
-        cwd=ROOT, env=env, text=True).strip())
+    subprocess.check_call(['swift', 'build', '-c', 'release', '--disable-automatic-resolution'], cwd=ROOT, env=env)
+    bin_dir = Path(subprocess.check_output(['swift', 'build', '-c', 'release', '--disable-automatic-resolution',
+        '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
     template = template.resolve()
     if not (template / 'Contents/Frameworks/libmpv.2.dylib').is_file():
         raise RuntimeError('A bundled runtime template with libmpv.2.dylib is required')
@@ -40,7 +41,7 @@ def build_perf_app(template, app=PERF_APP):
         shutil.rmtree(app)
     app.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(template, app)
-    shutil.copy2(bin_dir / 'Manping', app / 'Contents/MacOS/Manping')
+    shutil.copy2(bin_dir / EXECUTABLE_NAME, app / "Contents/MacOS" / EXECUTABLE_NAME)
     resources = app / 'Contents/Resources'
     copy_resource_bundles(bin_dir, resources)
     (resources / 'BundleManifest.json').unlink(missing_ok=True)
@@ -48,7 +49,7 @@ def build_perf_app(template, app=PERF_APP):
         info = plistlib.load(handle)
     # Never the Release identifier: window frames and other AppKit state must not reach its defaults.
     info['CFBundleDisplayName'] = '满屏 Perf'
-    info['CFBundleIdentifier'] = 'io.github.pidean.manping.perf'
+    info['CFBundleIdentifier'] = PERF_BUNDLE_ID
     info.pop('CFBundleURLTypes', None)
     with (app / 'Contents/Info.plist').open('wb') as handle:
         plistlib.dump(info, handle)
@@ -158,9 +159,9 @@ def main():
     if args.build and not args.build_to.resolve().is_relative_to((ROOT / '.build').resolve()):
         parser.error('--build-to must be under .build')
     app = build_perf_app(args.template, args.build_to.resolve()) if args.build else args.app.resolve()
-    if app.resolve() == (ROOT / 'dist/release/满屏.app').resolve() or app.resolve() == args.template.resolve():
+    if app.resolve() == (ROOT / 'dist/release' / APP_NAME).resolve() or app.resolve() == args.template.resolve():
         parser.error('Measure a separate app bundle, never the Release app the user is running')
-    binary = app / 'Contents/MacOS/Manping'
+    binary = app / 'Contents/MacOS' / EXECUTABLE_NAME
     if not binary.is_file():
         parser.error('Build the perf app first (--build)')
     output.mkdir(parents=True, exist_ok=True)

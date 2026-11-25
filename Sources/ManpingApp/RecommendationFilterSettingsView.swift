@@ -68,7 +68,7 @@ struct RecommendationFilterSettingsView: View {
           }
         }
 
-        Section("单视频反馈（\(store.filter.hiddenVideos.count)）") {
+        Section {
           if store.filter.hiddenVideos.isEmpty {
             Text("还没有隐藏的推荐视频。可在首页视频的“不再推荐 › 这个视频”中添加。")
               .foregroundStyle(Theme.secondaryText(scheme))
@@ -86,6 +86,8 @@ struct RecommendationFilterSettingsView: View {
             Text(videoFeedbackMessage).font(Theme.Font.caption).foregroundStyle(
               videoFeedbackMessage.hasPrefix("没能") ? Theme.danger(scheme) : Theme.secondaryText(scheme))
           }
+        } header: {
+          Text("单视频反馈（\(store.filter.hiddenVideos.count)）")
         } footer: {
           Text("清除后，这些视频会重新符合首页推荐条件；不会删除收藏、稍后再看或观看记录。")
         }
@@ -134,7 +136,7 @@ struct RecommendationFilterSettingsView: View {
   private var validationError: String? {
     switch kind {
     case .primaryPartition:
-      parentID == nil ? "请选择一级分区。" : nil
+      return parentID == nil ? "请选择一级分区。" : nil
     case .subpartition:
       if parentID == nil { return "请选择一级分区。" }
       return childID == nil ? "请选择二级分区。" : nil

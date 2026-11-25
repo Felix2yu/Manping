@@ -31,19 +31,25 @@ public struct ContinueWatchingItem: Identifiable, Sendable, Equatable {
         }
       } else { latest[card.bvid] = item }
     }
-    return latest.values.compactMap { item in
+    var entries: [Self] = []
+    entries.reserveCapacity(latest.count)
+    for item in latest.values {
       guard case .video(let card, let progress) = item.content,
         card.aid > 0, card.cid > 0, card.duration > 0,
-        progress > 0, progress < card.duration else { return nil }
-      var video = Video(bvid: card.bvid, title: card.title, cover: card.cover,
+        progress > 0, progress < card.duration else { continue }
+      let seconds = Int(progress)
+      let video = Video(bvid: card.bvid, title: card.title, cover: card.cover,
         author: card.author?.name ?? "", duration: Int(card.duration), views: Int(card.views),
         cid: card.cid, aid: card.aid, authorID: card.author?.mid, avatar: card.author?.avatar,
-        publishedAt: card.publishedAt)
-      let seconds = Int(progress)
-      video.subtitle = "看到 \(String(format: "%02d:%02d", seconds / 60, seconds % 60))"
-      return Self(video: video, progress: progress, duration: card.duration, viewedAt: item.viewedAt)
-    }.sorted { $0.viewedAt != $1.viewedAt ? $0.viewedAt > $1.viewedAt : $0.progress > $1.progress }
-      .prefix(limit).map { $0 }
+        publishedAt: card.publishedAt,
+        subtitle: "看到 \(String(format: "%02d:%02d", seconds / 60, seconds % 60))")
+      entries.append(Self(video: video, progress: progress, duration: card.duration, viewedAt: item.viewedAt))
+    }
+    entries.sort { lhs, rhs in
+      if lhs.viewedAt == rhs.viewedAt { return lhs.progress > rhs.progress }
+      return lhs.viewedAt > rhs.viewedAt
+    }
+    return Array(entries.prefix(limit))
   }
 }
 

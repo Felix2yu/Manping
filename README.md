@@ -25,7 +25,7 @@ Manping (满屏, "full screen") is a native, unofficial Bilibili client for macO
 - **Live**: live rooms inside the app with chat, super chats and gift effects; send danmaku, like, wear a fan medal or send backpack gifts. Paid gifts are locked by default, and every interaction is manual.
 - **AI** (optional): chapter summaries, highlights and Q&A whose timestamps jump the player. Nothing is sent until you ask; use your own provider or Apple Intelligence on device.
 
-The interface is in Simplified Chinese. Requires macOS 27 on Apple silicon; download from [Releases](https://github.com/PIDEAN/Manping/releases). Manping is not affiliated with Bilibili; content belongs to its creators and the platform. Licensed under GPL-3.0.
+The interface is in Simplified Chinese. Requires macOS 27 on Apple silicon; download from [Releases](https://github.com/Felix2yu/Manping/releases). Manping is not affiliated with Bilibili; content belongs to its creators and the platform. Licensed under GPL-3.0.
 
 </details>
 
@@ -131,28 +131,38 @@ The interface is in Simplified Chinese. Requires macOS 27 on Apple silicon; down
 ## Mac 体验
 
 - **系统集成**：控制中心与媒体键、Dock 菜单与未读角标、菜单栏常驻图标、系统通知、聚焦搜索看过的内容、接力到其他设备、实况文本（暂停时选取画面文字）、系统翻译。
-- **链接直达**：⌘L 打开哔哩哔哩链接（会先读取剪贴板），把链接拖到窗口上，或用 `manping://` 链接（video、episode、season、live、article、space）。
+- **链接直达**：⌘L 打开哔哩哔哩链接（会先读取剪贴板），把链接拖到窗口上，或用 `manpingx://` 链接（video、episode、season、live、article、space）。
 - **省电**：由你决定（设置 › 播放 › 省电，或播放器「更多」菜单）。默认在用电池或机身发热时把弹幕降到最高 60 帧；低电量模式或严重发热时再限制为最多 40 行、舞台背景改为纯色；降低画面处理质量（mpv fast 配置）默认关闭。每一项都可以单独关掉，也可以设为始终省电或完全关闭。省电只调整弹幕和画面处理，不影响解码、加载与缓冲。
 
 ### 快捷键
 
 | 操作 | 快捷键 | 操作 | 快捷键 |
 |---|---|---|---|
-| 播放 / 暂停 | 空格 | 快退 / 快进 | ← / → |
-| 上一个 / 下一个 | ⇧⌘[ / ⇧⌘] | 显示弹幕 | ⇧⌘D |
-| 小窗 | ⇧⌘P | 在独立窗口播放 | ⌥⌘P |
-| 截取画面 | ⇧⌘S | 进入全屏幕 | ⌃⌘F |
+| 播放 / 暂停 | 空格 | 快退 / 快进 | ← / →（单击 5 秒，长按 → 倍速） |
+| 点赞 / 取消点赞 | Q（长按三连） | 投币 / 收藏 / 三连 | W / E / 长按 R |
+| 视频简介 / 评论 | X / C | 发弹幕 / 弹幕开关 | Enter / D |
+| 分享 / 复制分享链接 | V / 双击 V | 静音 | M |
+| 音量增加 / 降低 | ↑ / ↓ 或 ⇧↑ / ⇧↓ | 全屏 / 退出全屏 | F / Esc |
+| 提高 / 降低倍速 | ⇧→ / ⇧←（0.5–2×） | 一倍速 / 二倍速 | ⇧1 / ⇧2 |
+| 多 P 上一 P / 下一 P | [ / ] 或 < / > | 小窗 / 窗口最大化 | S / G |
+| 显示播放器 / 切换窗口 | B / Ctrl+Tab | 从其他窗口回主界面 | A |
+| 上一个 / 下一个（队列、合集等） | ⇧⌘[ / ⇧⌘] | 显示弹幕（菜单） | ⇧⌘D |
+| 小窗（菜单） | ⇧⌘P | 在独立窗口播放 | ⌥⌘P |
+| 截取画面 | ⇧⌘S | 进入全屏幕（菜单） | ⌃⌘F |
 | 返回 / 前进 | ⌘[ / ⌘] | 刷新 | ⌘R |
 | 首页 … 专栏 | ⌘1 – ⌘6 | 动态 … 消息 | ⌥⌘1 – ⌥⌘6 |
 | 搜索 | ⌘F | 热搜 | ⌘K |
 | 打开链接 | ⌘L | 显示 / 隐藏侧边栏 | ⌃⌘S |
 | 设置 | ⌘, | | |
 
+文本编辑和中文输入法组字期间不会触发播放快捷键。`[ / ]` 只切换多 P 或剧集，不会误入相关推荐；官方观看历史的相邻导航暂未绑定。
+
 ## 安装
 
-1. 从 [Releases](https://github.com/PIDEAN/Manping/releases) 下载 `满屏.app` 的压缩包并解压，拖到「应用程序」文件夹；或者按下文从源码构建。
-2. 发布包用项目自己的固定证书签名，没有经过 Apple 公证。第一次打开时 macOS 会提示无法验证开发者，请在 系统设置 › 隐私与安全性 中点「仍要打开」。
-3. 用哔哩哔哩手机 App 扫码登录。从 0.1.3 起，登录凭据、代理密码和 AI 密钥都加密保存在本机，不再放进钥匙串，升级后不会再弹出钥匙串密码框。从 0.1.2 或更早的版本升级时，第一次启动和第一次使用 AI 会各请求一次钥匙串密码，用来把旧数据搬过来；搬完后不再询问。
+1. 从 [Releases](https://github.com/Felix2yu/Manping/releases) 下载 `满屏.app` 的压缩包并解压，拖到「应用程序」文件夹；或者按下文从源码构建。
+2. 本机覆盖安装已构建的版本时，先退出满屏，再运行 `python3 scripts/install_local_app.py --replace`。脚本会校验 Bundle ID 与签名，保留旧应用备份后再替换；不会迁移原应用的数据。
+3. 发布包按固定证书顺序签名，没有经过 Apple 公证；未配置证书时会回退到临时签名。第一次打开时 macOS 可能提示无法验证开发者，请在 系统设置 › 隐私与安全性 中点「仍要打开」。
+4. 用哔哩哔哩手机 App 扫码登录。登录凭据、代理密码和 AI 密钥都加密保存在本机；新应用使用独立身份和数据目录，不读取原应用的设置或凭据。
 
 ## 隐私
 
@@ -160,23 +170,20 @@ The interface is in Simplified Chinese. Requires macOS 27 on Apple silicon; down
 
 | 数据 | 位置 |
 |---|---|
-| 登录凭据、代理密码、AI 服务密钥、ChatGPT 套餐令牌 | `~/Library/Application Support/Manping/Secrets/`（见下文「凭据怎么保存」） |
-| 设置、固定的直播间与 UP 主、弹幕屏蔽规则、账号屏蔽词缓存 | `~/Library/Preferences/io.github.pidean.manping.plist` |
-| AI 服务配置（不含密钥）、下载记录 | `~/Library/Application Support/Manping/` |
-| AI 回答与对话 | `~/Library/Application Support/Manping/ai.sqlite`（期限可设，可清除：设置 › AI › 对话与保存） |
-| bili-history 观看状态与进度 | `~/Library/Application Support/Manping/watch-history.json`（全部保留，可清除：设置 › 隐私 › bili-history › 清除缓存） |
-| 图片缓存 | `~/Library/Caches/` 下的应用缓存 |
+| 登录凭据、代理密码、AI 服务密钥、ChatGPT 套餐令牌 | `~/Library/Application Support/im.yufei.manping/Secrets/`（见下文「凭据怎么保存」） |
+| 设置、固定的直播间与 UP 主、弹幕屏蔽规则、账号屏蔽词缓存 | `~/Library/Preferences/im.yufei.manping.plist` |
+| AI 服务配置（不含密钥）、下载记录 | `~/Library/Application Support/im.yufei.manping/` |
+| AI 回答与对话 | `~/Library/Application Support/im.yufei.manping/ai.sqlite`（期限可设，可清除：设置 › AI › 对话与保存） |
+| bili-history 观看状态与进度 | `~/Library/Application Support/im.yufei.manping/watch-history.json`（全部保留，可清除：设置 › 隐私 › bili-history › 清除缓存） |
+| 图片缓存 | `~/Library/Caches/im.yufei.manping/Images/` |
 | 聚焦索引（看过的内容，90 天过期） | 系统聚焦；可在 设置 › 隐私 › 聚焦搜索与接力 中关闭并清除 |
 
 ### 凭据怎么保存
 
-- 登录凭据、代理密码和 AI 密钥用 AES-GCM 加密后保存在 `~/Library/Application Support/Manping/Secrets/`。这个目录只有你的账户能读写，也不会进入 Time Machine 备份。
+- 登录凭据、代理密码和 AI 密钥用 AES-GCM 加密后保存在 `~/Library/Application Support/im.yufei.manping/Secrets/`。这个目录只有你的账户能读写，也不会进入 Time Machine 备份。
 - 解密密钥和这台 Mac 绑定，目录被复制到别的电脑上无法解开。
 - 它防不住已经以你的身份在这台 Mac 上运行的恶意软件；在这一点上，它和不弹窗的钥匙串条目一样。
-- 退出登录会清除账号凭据。想清除全部凭据，请按顺序操作：
-  1. 退出满屏。
-  2. 在「钥匙串访问」中搜索 `io.github.pidean.manping`，删除找到的全部条目。这些是 0.1.2 及更早版本留下的，满屏只在第一次用到时才搬走，不删的话以后还会被导入。
-  3. 删除 `Secrets` 目录（保留它旁边的 `Secrets-retired-keychain-items.json`）。
+- 退出登录会清除账号凭据。想清除全部凭据，先退出满屏，再删除 `~/Library/Application Support/im.yufei.manping/Secrets/`；应用不会读取或删除原应用的钥匙串项目。
 
 ### 会发送到外部的数据
 
@@ -201,7 +208,9 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 swift build && swift test                       # 编译与测试（只用离线样本，不访问账号）
 python3 scripts/build_mpv.py                     # 首次：构建固定版本并打补丁的 libmpv
 python3 scripts/bundle.py --output "dist/release/满屏.app"
-open "dist/release/满屏.app"
+python3 scripts/install_local_app.py --dry-run
+python3 scripts/install_local_app.py --replace
+open "/Applications/满屏.app"
 ```
 
 开发常用命令：
@@ -238,6 +247,8 @@ README 中的截图和动图都用内置的离线样本录制，不登录账号�
 
 - **[Bili.Copilot](https://github.com/Richasy/Bili.Copilot)**（哔哩助理 Windows 版）· Richasy · GPL-3.0
   满屏由它移植而来：界面结构与功能对照、AI 提示词原文、画面增强着色器资源包、用户等级与大会员图标都来自它。满屏因此同样采用 GPL-3.0。
+- **[Manping](https://github.com/PIDEAN/Manping)** · PIDEAN · GPL-3.0
+  本项目的 macOS 上游；在其基础上进行了大量界面、播放、同步与本地体验改造。
 - **[bili-kernel](https://github.com/Richasy/bili-kernel)** · Richasy · GPL-3.0 — 22 个 gRPC 协议定义与接口适配，登录与接口参数。
 - **[agent-kernel](https://github.com/Richasy/agent-kernel)** · Richasy · MIT — AI 服务的配置字段、默认端点、预置模型目录与百度千帆签名。
 - **[Bili CDN Switcher](https://github.com/liiliiliil/bili-cdn-switcher)** · Bili CDN Switcher contributors · MIT — CDN 候选节点、两阶段测速与卡顿判定（用 Swift 重写）。

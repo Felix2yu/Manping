@@ -20,7 +20,7 @@ final class VideoLayer: CAOpenGLLayer, @unchecked Sendable {
   private let pixel: CGLPixelFormatObj
   let floating: Bool
   private let renderQueue = DispatchQueue(
-    label: "io.github.pidean.manping.video.render", qos: .userInteractive)
+    label: AppIdentity.bundleIdentifier + ".video.render", qos: .userInteractive)
   private var displaySource: DispatchSourceTimer?
   /// During playback frames are pumped on the display's vsync (a CVDisplayLink thread), so a
   /// 120 fps stream on a 120 Hz panel is not phase-drifting against a fixed 8 ms poll.
@@ -359,7 +359,7 @@ final class VideoLayer: CAOpenGLLayer, @unchecked Sendable {
     return context.makeImage()
   }
   var parkingMemoryBytes: UInt64 {
-    MpvParkingBudget.estimate(bounds: bounds, contentsFormat: contentsFormat,
+    MpvParkingBudget.estimate(bounds: bounds.size, contentsFormat: contentsFormat,
       backingScale: contentsScale, floating: floating)
   }
   var isLive: Bool { gate.lock(); defer { gate.unlock() }; return engine != nil }

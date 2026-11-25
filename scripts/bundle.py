@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an arm64, recursively closed, ad-hoc signed .app without Homebrew runtime paths."""
+"""Build an arm64, recursively closed, signed .app without Homebrew runtime paths."""
 import argparse
 import hashlib
 import json
@@ -11,20 +11,19 @@ import subprocess
 import tempfile
 import uuid
 
+from app_identity import (
+    APP_NAME,
+    BUNDLE_ID,
+    DISPLAY_NAME,
+    EXECUTABLE_NAME,
+    LOCAL_SIGNING_NAME,
+    RELEASE_SIGNING_DIRECTORY,
+    RELEASE_SIGNING_NAME,
+    URL_SCHEME,
+)
 from resource_bundles import copy_resource_bundles
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-
-# The original product name; Finder, Launchpad and Spotlight show the bundle file name.
-APP_NAME = '满屏.app'
-
-
-
-SIGNING_NAME = "Manping Local Signing"
-# Release signing kept outside the repository and outside the login keychain's search list:
-# a dedicated keychain file and its password (docs/Signing.md, 正式发布签名).
-RELEASE_SIGNING = pathlib.Path.home() / "Library/Application Support/Manping Signing"
-RELEASE_IDENTITY = "Manping Release Signing"
 
 
 def signing_args():
@@ -32,21 +31,21 @@ def signing_args():
 
     Ad-hoc signatures change with every build, so macOS treats each build as a new app and asks
     for the Keychain password again. In order: MANPING_SIGN_IDENTITY (with an optional
-    MANPING_SIGN_KEYCHAIN), the release signing keychain, a self-signed "Manping Local Signing"
-    certificate in the login keychain (see docs/Signing.md), else ad-hoc.
+    MANPING_SIGN_KEYCHAIN), the release signing keychain, a self-signed local certificate
+    (see docs/Signing.md), else ad-hoc.
     """
     explicit = os.environ.get("MANPING_SIGN_IDENTITY")
     if explicit:
         keychain = os.environ.get("MANPING_SIGN_KEYCHAIN")
         return ['--sign', explicit] + (['--keychain', keychain] if keychain else [])
-    keychain = RELEASE_SIGNING / "signing.keychain-db"
-    password = RELEASE_SIGNING / "keychain-password"
+    keychain = RELEASE_SIGNING_DIRECTORY / "signing.keychain-db"
+    password = RELEASE_SIGNING_DIRECTORY / "keychain-password"
     if keychain.exists() and password.exists():
         subprocess.check_call(['security', 'unlock-keychain', '-p', password.read_text().strip(), str(keychain)])
-        return ['--sign', RELEASE_IDENTITY, '--keychain', str(keychain)]
+        return ['--sign', RELEASE_SIGNING_NAME, '--keychain', str(keychain)]
     listed = subprocess.run(["security", "find-identity", "-p", "codesigning"],
         capture_output=True, text=True).stdout
-    return ['--sign', SIGNING_NAME if f'"{SIGNING_NAME}"' in listed else "-"]
+    return ['--sign', LOCAL_SIGNING_NAME if f'"{LOCAL_SIGNING_NAME}"' in listed else "-"]
 
 def run(*args, capture=False):
     return subprocess.check_output(args, text=True).strip() if capture else subprocess.check_call(args)
@@ -162,25 +161,41 @@ def main():
     lock = json.loads(lock_path.read_text())
     if args.update_lock:
         previous = {item['source']: item for item in lock['libraries']}
-        lock['libraries'] = [dict(previous.get(item['source'], {}), **item)
-            for path, item in sorted(actual.items(), key=lambda pair: pair[1]['library']) if path != ffmpeg_input]
-        lock['mpvPatchedBuild'] = metadata
+        previous_libraries = {item['library']: item for item in lock['libraries']}
+        libraries = []
+        cellar = pathlib.Path('/opt/homebrew/Cellar')
+        for path, item in sorted(actual.items(), key=lambda pair: pair[1]['library']):
+            if path == ffmpeg_input: continue
+            metadata = previous.get(item['source']) or previous_libraries.get(item['library'], {})
+            source = pathlib.Path(item['source'])
+            if not {'formula', 'version'} <= metadata.keys() and source.is_relative_to(cellar):
+                relative = source.relative_to(cellar)
+                metadata = {'formula': relative.parts[0], 'version': relative.parts[1]}
+            libraries.append(dict(metadata, **item))
+        lock['libraries'] = libraries
+        lock['mpvPatchedBuild'] = json.loads(mpv_manifest.read_text())
         lock['ffmpegExecutable'] = {'source': portable(ffmpeg_input), 'sha256': sha256(ffmpeg_input)}
+        cellar_version = next(
+            (source.relative_to(cellar).parts[1] for source in actual if source.is_relative_to(cellar / 'ffmpeg')),
+            None)
+        if cellar_version is not None:
+            lock['ffmpeg'] = cellar_version
         lock_path.write_text(json.dumps(lock, indent=2) + '\n')
-    verify_lock(lock, actual, metadata, ffmpeg_input)
+    verify_lock(lock, actual, json.loads(mpv_manifest.read_text()), ffmpeg_input)
     if args.verify_inputs:
         print(json.dumps({'libraries': len(lock['libraries']), 'ffmpegInputVerified': True, 'mpvBuildVerified': True}))
         return
     config = 'debug' if args.debug else 'release'
-    build = ['swift', 'build', '--scratch-path', str(args.scratch_path.resolve()), '-c', config, '--arch', 'arm64']
+    build = ['swift', 'build', '--scratch-path', str(args.scratch_path.resolve()), '-c', config,
+             '--arch', 'arm64', '--disable-automatic-resolution']
     run(*build)
     bin_dir = pathlib.Path(run(*build, '--show-bin-path', capture=True))
     mac = app / 'Contents' / 'MacOS'
     frameworks = app / 'Contents' / 'Frameworks'
     resources = app / 'Contents' / 'Resources'
     for folder in [mac, frameworks, resources]: folder.mkdir(parents=True, exist_ok=True)
-    executable = mac / 'Manping'
-    shutil.copy2(bin_dir / 'Manping', executable)
+    executable = mac / EXECUTABLE_NAME
+    shutil.copy2(bin_dir / EXECUTABLE_NAME, executable)
     ffmpeg = mac / 'ffmpeg'
     shutil.copy2(args.ffmpeg, ffmpeg)
     copy_resource_bundles(bin_dir, resources)
@@ -196,7 +211,25 @@ def main():
         if not (icon_build / produced).is_file(): raise RuntimeError('actool did not produce ' + produced)
         shutil.copy2(icon_build / produced, resources / produced)
     shutil.rmtree(icon_build)
-    plist = {'CFBundleName':'满屏', 'CFBundleDisplayName':'满屏', 'CFBundleExecutable':'Manping', 'CFBundleIdentifier':'io.github.pidean.manping', 'CFBundleVersion':'6', 'CFBundleShortVersionString':'0.1.5', 'CFBundlePackageType':'APPL', 'LSMinimumSystemVersion':'27.0', 'NSHighResolutionCapable':True, 'CFBundleIconFile':'AppIcon', 'CFBundleIconName':'AppIcon', 'NSAppTransportSecurity':{'NSAllowsArbitraryLoads':False}, 'CFBundleURLTypes':[{'CFBundleURLName':'io.github.pidean.manping.link', 'CFBundleURLSchemes':['manping'], 'CFBundleTypeRole':'Viewer'}]}
+    plist = {
+        'CFBundleName': DISPLAY_NAME,
+        'CFBundleDisplayName': DISPLAY_NAME,
+        'CFBundleExecutable': EXECUTABLE_NAME,
+        'CFBundleIdentifier': BUNDLE_ID,
+        'CFBundleVersion': '6',
+        'CFBundleShortVersionString': '0.1.5',
+        'CFBundlePackageType': 'APPL',
+        'LSMinimumSystemVersion': '27.0',
+        'NSHighResolutionCapable': True,
+        'CFBundleIconFile': 'AppIcon',
+        'CFBundleIconName': 'AppIcon',
+        'NSAppTransportSecurity': {'NSAllowsArbitraryLoads': False},
+        'CFBundleURLTypes': [{
+            'CFBundleURLName': BUNDLE_ID + '.link',
+            'CFBundleURLSchemes': [URL_SCHEME],
+            'CFBundleTypeRole': 'Viewer',
+        }],
+    }
     with (app / 'Contents' / 'Info.plist').open('wb') as handle: plistlib.dump(plist, handle)
     copied = {}
     origins = {}
@@ -240,15 +273,15 @@ def main():
                 if raw.startswith('/opt/homebrew') or raw.startswith(str(ROOT)): run('install_name_tool','-delete_rpath',raw,str(target))
     collect(mpv,'libmpv.2.dylib')
     if mpv_manifest.exists(): shutil.copy2(mpv_manifest, resources / 'MpvBuild.json')
-    rewrite(pathlib.Path(args.ffmpeg).resolve(),ffmpeg)
-    rewrite(bin_dir/'Manping',executable)
+    rewrite(pathlib.Path(args.ffmpeg).resolve(), ffmpeg)
+    rewrite(bin_dir / EXECUTABLE_NAME, executable)
     if {str(path) for path in copied} != {str(path) for path in actual if path != ffmpeg_input}:
         raise RuntimeError('Built executable changed the verified dependency closure')
     SIGN = signing_args()
     manifest = []
     inputs = {target: source for source, target in copied.items()}
     inputs[ffmpeg] = ffmpeg_input
-    inputs[executable] = bin_dir / 'Manping'
+    inputs[executable] = bin_dir / EXECUTABLE_NAME
     for binary in [*frameworks.glob("*.dylib"),ffmpeg,executable]:
         for dep in links(binary):
             if not system(dep) and not dep.startswith('@rpath/'): raise RuntimeError(f'External runtime dependency remains: {dep}')
@@ -262,7 +295,7 @@ def main():
     if (ROOT/'Dependencies.lock.json').exists(): shutil.copy2(ROOT/'Dependencies.lock.json',resources/'Dependencies.lock.json')
     (resources/'DependencyOrigins.json').write_text(json.dumps(origins,indent=2)+'\n')
     for item in manifest:
-        item['signaturePhase'] = 'nested-signed' if item['bundledPath'] != 'Contents/MacOS/Manping' else 'before-app-resource-seal'
+        item['signaturePhase'] = 'nested-signed' if item['bundledPath'] != f'Contents/MacOS/{EXECUTABLE_NAME}' else 'before-app-resource-seal'
     (resources / 'BundleManifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     run('codesign','--force',*SIGN,str(app))
     for item in manifest:

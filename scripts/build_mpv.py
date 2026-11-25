@@ -52,16 +52,20 @@ def main():
     # establish that unrelated files in a reused source tree are clean.
     source = fresh_source(archive, work)
     environment = ROOT / '.build/mpv-tools'
+    python = environment / 'bin/python'
     meson = environment / 'bin/meson'
-    if not meson.exists():
-        run('python3', '-m', 'venv', str(environment))
-        run(str(environment / 'bin/pip'), 'install', 'meson==1.10.1')
+    ninja = environment / 'bin/ninja'
+    if not meson.exists() or not ninja.exists():
+        if not python.exists():
+            run('python3', '-m', 'venv', str(environment))
+        run(str(environment / 'bin/pip'), 'install', 'meson==1.10.1', 'ninja==1.11.1.1')
+    build_environment = dict(os.environ, PATH=str(environment / 'bin') + os.pathsep + os.environ['PATH'])
     build = ROOT / '.build/mpv-build'
     if build.exists(): shutil.rmtree(build)
     options = ['-Dbuildtype=release', '-Dlibmpv=true', '-Dcplayer=false', '-Dbuild-date=false', '-Dmanpage-build=disabled', '-Dhtml-build=disabled', '-Dvapoursynth=disabled', '-Dmacos-cocoa-cb=disabled', '-Dvulkan=disabled', '-Dswift-flags=']
     setup = ['setup', str(build), str(source), *options]
-    run(str(meson), *setup)
-    run(str(meson), 'compile', '-C', str(build), '-j', '8')
+    run(str(meson), *setup, env=build_environment)
+    run(str(meson), 'compile', '-C', str(build), '-j', '8', env=build_environment)
     library = build / 'libmpv.2.dylib'
     run('lipo', '-verify_arch', 'arm64', str(library))
     metadata = {'version': '0.41.0', 'sourceSHA256': ARCHIVE_SHA, 'deduplicatedTextureCoordinates': True,

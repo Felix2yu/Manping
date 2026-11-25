@@ -15,7 +15,7 @@ public enum BiliLink: Equatable, Sendable {
   case short(URL)
 }
 
-/// Recognises web links (www/m/live/space.bilibili.com, b23.tv), this app's `manping://` scheme
+/// Recognises web links (www/m/live/space.bilibili.com, b23.tv), this app's `manpingx://` scheme
 /// and bare identifiers (BV…, av…, ep…, ss…, cv…). Anything else is not ours.
 public enum BiliLinkParser {
   private static let webHosts: Set<String> = ["bilibili.com", "www.bilibili.com", "m.bilibili.com"]
@@ -36,8 +36,8 @@ public enum BiliLinkParser {
 
   public static func parse(_ url: URL) -> BiliLink? {
     guard url.user == nil, url.password == nil, let scheme = url.scheme?.lowercased() else { return nil }
-    if scheme == "manping" || scheme == "bilibili" {
-      // manping://video/BV…, bilibili://live/123, manping://search?keyword=…
+    if scheme == AppIdentity.urlScheme || scheme == "bilibili" {
+      // manpingx://video/BV…, bilibili://live/123, manpingx://search?keyword=…
       let parts = ([url.host ?? ""] + url.pathComponents.filter { $0 != "/" }).filter { !$0.isEmpty }
       guard !parts.isEmpty else { return nil }
       let (kind, value) = (parts[0].lowercased(), parts.count >= 2 ? parts[1] : "")

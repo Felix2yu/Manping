@@ -1,14 +1,15 @@
 import AppKit
 import CoreSpotlight
+import ManpingCore
 import UniformTypeIdentifiers
 
 /// What is playing, offered to the rest of Apple's devices and to Spotlight:
 /// - Handoff: a browsing-web activity with the bilibili.com page, so an iPhone, iPad or another
 ///   Mac continues in Safari (or the Bilibili app through its universal links).
 /// - Spotlight: recently watched items, searchable by title and author; picking one reopens it
-///   here through its `manping://` link. Cleared on sign-out or when the setting is turned off.
+///   here through its `manpingx://` link. Cleared on sign-out or when the setting is turned off.
 @MainActor final class WatchActivity {
-  nonisolated static let domain = "io.github.pidean.manping.watched"
+  nonisolated static let domain = AppIdentity.bundleIdentifier + ".watched"
   private var activity: NSUserActivity?
   var indexesSpotlight = true
 

@@ -114,8 +114,7 @@ public enum WatchHistoryCache {
 
   static func cacheFileURL(_ name: String, accountID: Int64?, variant: String? = LocalSecretVault.appVariant) -> URL? {
     guard let variant else { return nil } // tests and tools: memory only
-    let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("Manping", isDirectory: true)
+    let base = AppIdentity.applicationSupportDirectory
     let account = accountID.map { "-\($0)" } ?? "-guest"
     return base.appendingPathComponent("\(name)\(account)\(variant).json")
   }

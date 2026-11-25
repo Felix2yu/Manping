@@ -19,7 +19,7 @@ from pathlib import Path
 
 MEDIA = Path(__file__).resolve().parent
 OUT = MEDIA / ".assets"
-UA = {"User-Agent": "ManpingReadmeMedia/1.0 (https://github.com/PIDEAN/Manping)"}
+UA = {"User-Agent": "ManpingReadmeMedia/1.0 (https://github.com/Felix2yu/Manping)"}
 API = "https://commons.wikimedia.org/w/api.php"
 
 

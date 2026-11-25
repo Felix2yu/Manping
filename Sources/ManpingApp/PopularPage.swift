@@ -12,8 +12,12 @@ struct PopularPage: View {
   init(model: AppModel) {
     self.model = model
     _feed = StateObject(wrappedValue: BrowseFeedModel(service: model.service))
-    _history = StateObject(wrappedValue: HistoryPageModel(service: model.service,
-      rpc: try? model.standardRPCService()))
+    let installation = InstallationIdentity.library
+    let rpc: LibraryRPCService?
+    if let transport = model.libraryRPCTransport {
+      rpc = LibraryRPCService(auth: model.service, transport: transport, installationID: installation)
+    } else { rpc = try? LibraryRPCService(auth: model.service, installationID: installation) }
+    _history = StateObject(wrappedValue: HistoryPageModel(service: model.service, rpc: rpc))
   }
   var body: some View {
     VStack(spacing: 0) {

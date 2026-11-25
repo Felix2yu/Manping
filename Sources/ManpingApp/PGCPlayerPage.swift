@@ -333,7 +333,7 @@ struct PGCPlayerPage: View {
             override: playback.usesFixtures ? playback.fixturePosition : nil, seek: playback.seek)
         }
         PlaybackBookmarkList(model: model, clock: player.clock, override: playback.usesFixtures ? playback.fixturePosition : nil,
-          seek: model.seekToPlaybackBookmark)
+          seek: playback.seek)
         operations(details)
       } else if let error = playback.error { InlineErrorText(message: error) }
       else { ProgressView("正在加载信息…") }

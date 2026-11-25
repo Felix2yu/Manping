@@ -644,7 +644,7 @@ struct PlayerBarRow<Leading: View>: View {
   /// are not on the bar, then 「自定义控制条…」. Popovers whose button is not on the bar open here.
   private func moreMenu(fit: PlayerBarFit, onBar: Set<PlayerBarItem>) -> some View {
     let offBar = PlayerBarItem.allCases.filter { page.supported.contains($0) && !onBar.contains($0) }
-    let supportsBookmarks = livePlayback == nil && model.playbackBookmarkMediaKey != nil
+    let supportsBookmarks = page.bookmarkTime != nil && model.playbackBookmarkMediaKey != nil
     let visible = Set(fit.visible)
     let folded = fit.hidden.count
     return Menu {
@@ -823,7 +823,7 @@ struct PlayerShaderItems: View {
 /// Engine errors ("mpv loadfile failed: -13") go to the log; viewers get one sentence and 「重试」.
 /// Messages the app already wrote for people (Chinese text) are shown as they are.
 enum PlayerErrorText {
-  private static let log = Logger(subsystem: "io.github.pidean.manping", category: "player")
+  private static let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "player")
   static func isForPeople(_ raw: String) -> Bool { raw.range(of: "\\p{Han}", options: .regularExpression) != nil }
   static func title(_ raw: String) -> String { isForPeople(raw) ? raw : "这个视频没能开始播放" }
   static func detail(_ raw: String) -> String? { isForPeople(raw) ? nil : "可以重试，或在 播放器设置 › 网络与节点 中换一个节点。" }

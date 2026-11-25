@@ -675,7 +675,7 @@ private struct AcknowledgementsPage: View {
   }
 }
 
-private func open(_ link: String) {
+@MainActor private func open(_ link: String) {
   if let url = URL(string: link) { ExternalWebLink.open(url) }
 }
 

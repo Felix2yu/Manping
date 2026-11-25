@@ -91,7 +91,7 @@ public final class MediaRelay: @unchecked Sendable {
   private let cacheLimit: Int
   /// A soft budget for starting retries, not a deadline for an already active transfer.
   private let retryStartBudget: Duration
-  private let queue = DispatchQueue(label: "io.github.pidean.manping.media-relay")
+  private let queue = DispatchQueue(label: AppIdentity.bundleIdentifier + ".media-relay")
   private let lock = NSLock()
   private var listener: NWListener?
   private var port: UInt16 = 0

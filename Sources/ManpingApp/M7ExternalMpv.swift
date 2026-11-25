@@ -18,7 +18,7 @@ struct M7ExternalMpvState: Sendable {
 /// All Process and Unix socket ownership stays on this serial queue. Media URLs are sent
 /// as JSON data after startup, never interpolated into a shell or process command line.
 final class M7ExternalMpv: @unchecked Sendable {
-  private let queue = DispatchQueue(label: "io.github.pidean.manping.external-mpv", qos: .userInitiated)
+  private let queue = DispatchQueue(label: AppIdentity.bundleIdentifier + ".external-mpv", qos: .userInitiated)
   private let update: @Sendable (M7ExternalMpvState) -> Void
   private var process: Process?
   private var directory: URL?
@@ -214,7 +214,7 @@ final class M7ExternalMpv: @unchecked Sendable {
     }
     guard object["event"] as? String == "property-change", let name = object["name"] as? String else {
       if let error = object["error"] as? String, error != "success", awaitingLoad,
-        let loadRequestID, (object["request_id"] as? NSNumber)?.intValue == loadRequestID {
+        let requestID = loadRequestID, (object["request_id"] as? NSNumber)?.intValue == requestID {
         state.error = "外部 mpv 无法加载视频：" + String(error.prefix(120))
         awaitingLoad = false; loadRequestID = nil
         update(state)

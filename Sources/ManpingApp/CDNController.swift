@@ -152,7 +152,7 @@ struct ProxyHealthFetcher: CDNRangeFetching {
       let key = path.availableInterfaces.map { "\($0.type)" }.joined(separator: "+") + (path.isExpensive ? "/metered" : "")
       Task { @MainActor [weak self] in self?.networkChanged(key, satisfied: path.status == .satisfied) }
     }
-    pathMonitor.start(queue: DispatchQueue(label: "io.github.pidean.manping.cdn.path"))
+    pathMonitor.start(queue: DispatchQueue(label: AppIdentity.bundleIdentifier + ".cdn.path"))
   }
 
   /// Re-applies the smart cache after Player received the user's runtime cache options.

@@ -189,8 +189,7 @@ public final class PlaybackBookmarkStore: @unchecked Sendable {
 
   public static var defaultURL: URL? {
     guard let variant = LocalSecretVault.appVariant else { return nil }
-    return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("Manping", isDirectory: true)
+    return AppIdentity.applicationSupportDirectory
       .appendingPathComponent("playback-bookmarks\(variant).json")
   }
 

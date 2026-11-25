@@ -98,7 +98,9 @@ import SwiftUI
     busy.insert(mid); errors[mid] = nil
     let task = Task { [weak self, service] in
       do {
-        let initial = expected ?? await service.authSnapshot()
+        let initial: AuthSnapshot
+        if let expected { initial = expected }
+        else { initial = await service.authSnapshot() }
         let snapshot = try await service.authorizeAppInteraction(expectedIdentity: initial)
         try Task.checkCancellation()
         guard let self, self.generation == revision else { throw CancellationError() }

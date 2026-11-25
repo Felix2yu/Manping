@@ -480,8 +480,7 @@ public actor AIConfigurationStore {
   }
   /// Debug builds keep their own file: its credential binding must match their own secrets folder.
   public static var defaultFileURL: URL {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("Manping", isDirectory: true)
+    AppIdentity.applicationSupportDirectory
       .appendingPathComponent("ChatClientConfiguration\(LocalSecretVault.appVariant ?? "").json")
   }
   public static func fixture(configurations: [AIProvider: AIProviderConfiguration] = [:],

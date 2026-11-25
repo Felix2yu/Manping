@@ -15,16 +15,10 @@ extension AuthCredentialStore {
 }
 
 public final class CredentialStore: AuthCredentialStore, Sendable {
-  /// The entries this store uses.
-  enum Item: Sendable { case session, legacyCookies, legacyToken }
-  /// One entry holds cookies, token and the proxy password. Before 0.1.3 these were Keychain items
-  /// (one prompt per item after every update); `LocalSecretVault` moves each one over on first read.
-  private static func entry(_ item: Item) -> (name: String, legacy: LocalSecretVault.LegacyItem) {
+  enum Item: Sendable { case session }
+  private static func entry(_ item: Item) -> String {
     switch item {
-    case .session: ("bilibili.session", .init(service: "io.github.pidean.manping.session.v2", account: "bilibili"))
-    // Pre-2026-10-18 layout: read once to migrate, removed on logout.
-    case .legacyCookies: ("bilibili.cookies.v1", .init(service: "io.github.pidean.manping.cookies", account: "bilibili"))
-    case .legacyToken: ("bilibili.token.v1", .init(service: "io.github.pidean.manping.token.v1", account: "bilibili"))
+    case .session: "bilibili.session"
     }
   }
   fileprivate struct Session: Codable {
@@ -46,21 +40,21 @@ public final class CredentialStore: AuthCredentialStore, Sendable {
     let storage: Storage
     fileprivate let lock = NSRecursiveLock()
     /// The last session read or written by any instance; later reads in the same launch (the
-    /// proxy password after the account) then need no second authorization.
+    /// proxy password after the account) then need no second vault read.
     fileprivate var session: Session?
     init(storage: Storage) { self.storage = storage }
   }
   private static let vault = Shared(storage: Storage(
-    read: { let entry = CredentialStore.entry($0); return try LocalSecretVault.shared.read(entry.name, legacy: entry.legacy) },
-    write: { let entry = CredentialStore.entry($0); try LocalSecretVault.shared.write(entry.name, $1, legacy: entry.legacy) },
-    delete: { let entry = CredentialStore.entry($0); try LocalSecretVault.shared.delete(entry.name, legacy: entry.legacy) }))
+    read: { try LocalSecretVault.shared.read(CredentialStore.entry($0)) },
+    write: { let entry = CredentialStore.entry($0); try LocalSecretVault.shared.write(entry, $1) },
+    delete: { try LocalSecretVault.shared.delete(CredentialStore.entry($0)) }))
   private let shared: Shared
 
   public init() { shared = Self.vault }
   init(shared: Shared) { self.shared = shared }
 
   public func loadAll() throws -> (cookies: [HTTPCookie], token: AppToken?) {
-    let session = try shared.lock.withLock { try readSession() ?? migrate() }
+    let session = try shared.lock.withLock { try readSession() ?? Session(cookies: Data("[]".utf8), token: nil) }
     let token = session.token.flatMap { $0.isComplete ? $0 : nil }
     return (try Self.decodeCookies(session.cookies), token)
   }
@@ -88,17 +82,8 @@ public final class CredentialStore: AuthCredentialStore, Sendable {
 
   public func clear() throws {
     try shared.lock.withLock {
-      // Attempt every removal even if one fails.
-      var failure: Error?
-      // An empty session item stops a later launch from migrating old items that could not be
-      // deleted, which would bring back the account the user just signed out of. Signing out of
-      // Bilibili keeps the proxy password.
       let proxySecret = (try? readSession())?.proxySecret
-      do { try write(Session(cookies: Data("[]".utf8), token: nil, proxySecret: proxySecret)) } catch { failure = error }
-      for item in [Item.legacyToken, .legacyCookies] {
-        do { try shared.storage.delete(item) } catch { failure = error }
-      }
-      if let failure { throw failure }
+      try write(Session(cookies: Data("[]".utf8), token: nil, proxySecret: proxySecret))
     }
   }
 
@@ -117,15 +102,6 @@ public final class CredentialStore: AuthCredentialStore, Sendable {
     // Unreadable contents count as signed out; the next save replaces them.
     let session = (try? JSONDecoder().decode(Session.self, from: data)) ?? Session(cookies: Data("[]".utf8), token: nil)
     shared.session = session
-    return session
-  }
-  /// First launch after the layout change: read the two old items once and write the new one.
-  /// Call with `shared.lock` held.
-  private func migrate() throws -> Session {
-    let cookies = try shared.storage.read(.legacyCookies) ?? Data("[]".utf8)
-    let token = try shared.storage.read(.legacyToken).flatMap { try? JSONDecoder().decode(AppToken.self, from: $0) }
-    let session = Session(cookies: cookies, token: token)
-    if token != nil || cookies != Data("[]".utf8) { try? write(session) }
     return session
   }
   /// Call with `shared.lock` held.

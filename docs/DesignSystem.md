@@ -194,7 +194,7 @@
 - 阅读：正文栏最宽 680，16 pt，行高约 1.75，A− / A+（14–22），2 pt 阅读进度（流光）。
 - 评论：头像 32，名字 12 半粗，正文 13；置顶与 UP 主用 accent 胶囊；楼中楼原地展开。
 - 每个功能至少一个可见入口；播放功能同时在控制条或「更多」菜单，以及菜单栏「播放」中。
-- 链接入口：⌘L、拖入链接、`manping://`（video / episode / season / live / article / space）。
+- 链接入口：⌘L、拖入链接、`manpingx://`（video / episode / season / live / article / space）。
 
 ### 主窗口 UGC 暂停浏览
 

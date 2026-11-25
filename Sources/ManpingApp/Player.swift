@@ -40,7 +40,7 @@ enum MpvParkingBudget {
   }
 
   static func estimate(
-    bounds: CGSize, contentsFormat: CALayer.ContentsFormat, backingScale: CGFloat, floating: Bool
+    bounds: CGSize, contentsFormat: CALayerContentsFormat, backingScale: CGFloat, floating: Bool
   ) -> UInt64 {
     guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else {
       return engineBytes
@@ -81,7 +81,7 @@ enum MpvParkingBudget {
   }
   /// Render layers created for live or parked engines, so a new surface can re-host them.
   private var layers: [OpaquePointer: VideoLayer] = [:]
-  private let queue = DispatchQueue(label: "io.github.pidean.manping.mpv.pool", qos: .userInitiated)
+  private let queue = DispatchQueue(label: AppIdentity.bundleIdentifier + ".mpv.pool", qos: .userInitiated)
   private(set) var reuses = 0
   /// Returns the parked engine when it was created with the same library and profile.
   func checkout(signature: String) -> OpaquePointer? {
@@ -280,7 +280,7 @@ enum MpvParkingBudget {
       surface?.danmakuTimelineChanged()
     }
   }
-  private let queue = DispatchQueue(label: "io.github.pidean.manping.mpv.commands", qos: .userInitiated)
+  private let queue = DispatchQueue(label: AppIdentity.bundleIdentifier + ".mpv.commands", qos: .userInitiated)
   private var poll: DispatchSourceTimer?
   private(set) var mediaIsolationVerified = false
   private(set) var engine: OpaquePointer?

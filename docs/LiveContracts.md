@@ -198,7 +198,7 @@ IDs remain tombstoned. `LiveEffectiveSettings` has independent flags; pure mode 
 effects but preserves chat text, while hide-gifting removes gift messages and gift effects.
 
 Nine live settings are registered in the existing catalog. Debug `PerformanceEnvironment`
-explicitly uses `io.github.pidean.manping.debug`; performance fixtures retain their PID-specific
+explicitly uses `im.yufei.manping.debug`; performance fixtures retain their PID-specific
 suite. Unit tests use injected UUID suites. Release defaults were not written.
 
 Run screenshot scenarios outside the sandbox:

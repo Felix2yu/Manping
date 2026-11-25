@@ -40,6 +40,9 @@ public enum Acknowledgements {
     .init(name: "Bili.Copilot", author: "Richasy", license: "GPL-3.0", url: "https://github.com/Richasy/Bili.Copilot",
       contribution: "满屏由哔哩助理 Windows 版移植而来：界面结构与功能对照、AI 提示词原文、画面增强着色器资源包、用户等级与大会员图标。本项目因此采用 GPL-3.0。",
       group: .original),
+    .init(name: "Manping", author: "PIDEAN", license: "GPL-3.0", url: "https://github.com/PIDEAN/Manping",
+      contribution: "本项目的 macOS 上游；在其基础上进行了大量界面、播放、同步与本地体验改造。",
+      group: .original),
     .init(name: "bili-kernel", author: "Richasy", license: "GPL-3.0", url: "https://github.com/Richasy/bili-kernel",
       contribution: "22 个 gRPC 协议定义与接口适配，以及登录与接口参数。", group: .original),
     .init(name: "agent-kernel", author: "Richasy", license: "MIT", url: "https://github.com/Richasy/agent-kernel",
@@ -55,7 +58,7 @@ public enum Acknowledgements {
       contribution: "解码、封装与下载合并。", group: .playback),
     .init(name: "libplacebo", author: "VideoLAN", license: "LGPL-2.1-or-later", url: "https://code.videolan.org/videolan/libplacebo",
       contribution: "GPU 渲染与色彩管理。", group: .playback),
-    .init(name: "随附动态库", author: "各自作者", license: "各自许可", url: "https://github.com/PIDEAN/Manping/tree/main/ThirdPartyNotices/Libraries",
+    .init(name: "随附动态库", author: "各自作者", license: "各自许可", url: "https://github.com/Felix2yu/Manping/tree/main/ThirdPartyNotices/Libraries",
       contribution: "其余随附的动态库：" + bundledLibraries.joined(separator: "、") + "。许可全文见 ThirdPartyNotices/Libraries。",
       group: .playback),
 

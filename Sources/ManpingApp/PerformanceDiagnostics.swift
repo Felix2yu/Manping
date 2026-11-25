@@ -187,7 +187,7 @@ enum PerformanceOptions {
   /// fixed, not per pid: measurements run one instance at a time, the launch-time
   /// removePersistentDomain clears any leftovers of the previous run, and the system reclaims
   /// the temp directory.
-  static let suite = NSTemporaryDirectory() + "io.github.pidean.manping.performance"
+  static let suite = NSTemporaryDirectory() + AppIdentity.bundleIdentifier + ".performance"
   static let defaults: any PreferencesStore = {
     #if DEBUG
       // Playback A/B actions must not carry a smoothing choice into the next fixture run.
@@ -204,7 +204,7 @@ enum PerformanceOptions {
         return MemoryPreferences()
       }
     #endif
-    // The Debug app's bundle identifier is already io.github.pidean.manping.debug, so .standard
+    // The Debug app's bundle identifier is already im.yufei.manping.debug, so .standard
     // is its own domain; a suite named after the app's own identifier is nil.
     guard PerformanceOptions.requested else { return UserDefaults.standard }
     let defaults = UserDefaults(suiteName: suite)!
@@ -915,7 +915,7 @@ enum PerformanceCoverData {
       var duration = 0.0
       var mode = "video"
       switch target {
-      case .video(let bvid, _, _):
+      case .video(let bvid):
         let video = try await service.detail(bvid, expectedIdentity: expected)
         let manifest = try await service.playback(video, expectedIdentity: expected)
         duration = manifest.duration

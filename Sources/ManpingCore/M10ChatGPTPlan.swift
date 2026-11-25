@@ -56,22 +56,19 @@ public protocol ChatGPTPlanStore: Sendable {
 }
 
 /// `LocalSecretVault` entries, separate from the API-key provider entries and the Bilibili session.
-/// Before 0.1.3 these were Keychain items; each moves over on its first read.
 public final class ChatGPTPlanLocalStore: ChatGPTPlanStore, Sendable {
   private let vault: LocalSecretVault
   public init(vault: LocalSecretVault = .shared) { self.vault = vault }
-  private func entry(_ account: String) -> (name: String, legacy: LocalSecretVault.LegacyItem) {
-    ("ai.chatgpt." + account, .init(service: "io.github.pidean.manping.ai.chatgpt.v1", account: account))
+  private func entry(_ account: String) -> String {
+    "ai.chatgpt." + account
   }
   private func read(_ account: String) throws -> Data? {
-    let entry = entry(account)
-    guard let data = try vault.read(entry.name, legacy: entry.legacy) else { return nil }
+    guard let data = try vault.read(entry(account)) else { return nil }
     guard data.count <= 256 * 1024 else { throw AIConfigurationError.corruptConfiguration }
     return data
   }
   private func write(_ data: Data, account: String) throws {
-    let entry = entry(account)
-    try vault.write(entry.name, data, legacy: entry.legacy)
+    try vault.write(entry(account), data)
   }
   public func loadHostID() throws -> String? { try read("host").flatMap { String(data: $0, encoding: .utf8) } }
   public func saveHostID(_ value: String) throws { try write(Data(value.utf8), account: "host") }
@@ -86,8 +83,7 @@ public final class ChatGPTPlanLocalStore: ChatGPTPlanStore, Sendable {
   public func loadPendingClientID() throws -> String? { try read("pending_client").flatMap { String(data: $0, encoding: .utf8) } }
   public func savePendingClientID(_ value: String?) throws {
     guard let value else {
-      let entry = entry("pending_client")
-      try vault.delete(entry.name, legacy: entry.legacy)
+      try vault.delete(entry("pending_client"))
       return
     }
     try write(Data(value.utf8), account: "pending_client")

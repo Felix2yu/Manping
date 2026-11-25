@@ -53,7 +53,7 @@ public struct AIStoredAnswer: Codable, Sendable, Equatable {
   public let createdAt: Date
 }
 
-/// Application-wide AI storage (`Application Support/Manping/ai.sqlite`): threads, answers and
+/// Application-wide AI storage (`Application Support/im.yufei.manping/ai.sqlite`): threads, answers and
 /// segment summaries, every row owned by an account (`mid:<n>`) or `anonymous`.
 ///
 /// Reads and writes carry a `Ticket` (owner + generation) and are checked under the same lock as
@@ -72,8 +72,7 @@ public final class AIConversationStore: @unchecked Sendable {
   public static let anonymous = "anonymous"
   public static func owner(mid: Int64?) -> String { mid.map { $0 > 0 ? "mid:\($0)" : anonymous } ?? anonymous }
   public static var defaultURL: URL {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("Manping", isDirectory: true).appendingPathComponent("ai.sqlite")
+    AppIdentity.applicationSupportDirectory.appendingPathComponent("ai.sqlite")
   }
   private var db: OpaquePointer?
   private let lock = NSLock()

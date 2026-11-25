@@ -5,6 +5,8 @@ from pathlib import Path
 import plistlib
 import subprocess
 
+from app_identity import DEBUG_BUNDLE_ID
+
 RECORD = "DebugBuild.json"
 BUILD_COMMAND = "MANPING_SIGN_IDENTITY=- python3 scripts/build_debug_app.py"
 
@@ -12,7 +14,7 @@ BUILD_COMMAND = "MANPING_SIGN_IDENTITY=- python3 scripts/build_debug_app.py"
 def source_manifest(root):
     root = Path(root)
     inputs = [root / name for name in (
-        "Package.swift", "Package.resolved", "scripts/build_debug_app.py",
+        "Package.swift", "Package.resolved", "scripts/app_identity.py", "scripts/build_debug_app.py",
         "scripts/debug_build_fingerprint.py", "scripts/resource_bundles.py")]
     for directory in ("Sources", "Resources"):
         inputs.extend(path for path in (root / directory).rglob("*")
@@ -42,7 +44,7 @@ def validate_build_record(record, current):
 def require_fresh_debug_app(root, app):
     app = Path(app)
     with (app / "Contents/Info.plist").open("rb") as handle:
-        if plistlib.load(handle).get("CFBundleIdentifier") != "io.github.pidean.manping.debug":
+        if plistlib.load(handle).get("CFBundleIdentifier") != DEBUG_BUNDLE_ID:
             raise RuntimeError("In-app capture requires the isolated Manping Debug bundle")
     try:
         record = json.loads((app / "Contents/Resources" / RECORD).read_text())

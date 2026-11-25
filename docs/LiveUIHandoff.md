@@ -131,7 +131,7 @@
 
 ## 场景隔离与重新验收
 
-- `PreferencesStore` 使用组合实现：正常 DEBUG／Release 的 provider 仍是 `UserDefaults.standard`，Debug bundle domain 就是 `io.github.pidean.manping.debug`，绝不能创建以自身 bundle identifier 命名的 suite（该构造会返回 nil）。性能诊断保留原独立 suite；直播 UI 场景使用没有任何 UserDefaults 后端的 `MemoryPreferences`，不以随机落盘 suite 再删除模拟隔离。
+- `PreferencesStore` 使用组合实现：正常 DEBUG／Release 的 provider 仍是 `UserDefaults.standard`，Debug bundle domain 就是 `im.yufei.manping.debug`，绝不能创建以自身 bundle identifier 命名的 suite（该构造会返回 nil）。性能诊断保留原独立 suite；直播 UI 场景使用没有任何 UserDefaults 后端的 `MemoryPreferences`，不以随机落盘 suite 再删除模拟隔离。
 - 原始参数含 `--ui-live-scene` 就在 AppModel 初始化前选内存 store，未知名称或缺值也不会先写用户配置。内存种子无通知，后续 typed／URL 写入与 remove／register 只更新字典，变更通知在锁外投递到 main queue。MacSettings、ProxySettings、CDNStore 和 App 中现有 provider 使用者共用这个对象；搜索框的 installation ID 也写入该 provider。没有清空或重写用户原有偏好。
 - fixture 可达的 shell／live player 侧栏使用显式 State／Binding 与内存通知同步；正常窗口继续使用 AppStorage。`defaultAppStorage` 仅接收实际持久 UserDefaults，fixture 设置没有依赖 AppStorage 写回。主窗、设置窗与独立播放窗均禁用 fixture frame autosave；两类置顶 store 也注入同一 provider，fixture 内点击置顶不写用户的置顶数据。
 - 59 个场景完整保留；只有 `sidebar-hidden`、`fullscreen`、`narrow`、`fullscreen-unknown`、`sidebar-unknown` 默认收起右侧栏，其余显式展开。`settings-live`／`settings-paid`／`settings-pure` 启动目标直接映射 `settings:live` 并执行 `openSettings(.live)`，不依赖截图 getter 的副作用。

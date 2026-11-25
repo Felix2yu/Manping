@@ -73,7 +73,7 @@ struct VideoContextMenu: View {
       Text(error).foregroundStyle(.red)
     }
     if let notice = viewLater?.notice { Text(notice).foregroundStyle(Theme.accent) }
-    if let url = CardActions.webURL(video) {
+    if let actions, let url = CardActions.webURL(video) {
       Button("拷贝链接") { actions.copyWebLink(url) }
       Button("在浏览器中打开") { actions.openWeb(url) }
     }

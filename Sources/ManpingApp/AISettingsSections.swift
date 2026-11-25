@@ -196,7 +196,7 @@ struct AISettingsSections: View {
         } label: { MenuLabel(title: Self.retentionTitle(presets.retentionDays)) }.appMenuStyle()
       }
       Hairline().padding(.leading, 16)
-      row(usageText, runtime.storeError ?? "保存在 ~/Library/Application Support/Manping/ai.sqlite，退出登录时一并清除。") {
+      row(usageText, runtime.storeError ?? "保存在 ~/Library/Application Support/im.yufei.manping/ai.sqlite，退出登录时一并清除。") {
         Button("清除全部") { confirmClearAll = true }.buttonStyle(AppButtonStyle(role: .destructive, size: .small))
           .disabled(runtime.conversations == nil)
       }

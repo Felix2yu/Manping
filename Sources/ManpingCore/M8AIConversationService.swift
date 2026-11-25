@@ -282,7 +282,7 @@ public actor AIConversationService {
       memoryThreads.removeValue(forKey: oldest)
     }
   }
-  private static let log = Logger(subsystem: "io.github.pidean.manping", category: "ai")
+  private static let log = Logger(subsystem: AppIdentity.bundleIdentifier, category: "ai")
   nonisolated static func message(_ error: Error) -> String {
     if let error = error as? LocalizedError, let text = error.errorDescription { return text }
     return "AI 请求失败，请稍后重试。"

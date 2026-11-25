@@ -7,16 +7,16 @@ public protocol AISecretStore: Sendable {
 }
 
 /// AI credentials use separate per-provider entries in `LocalSecretVault`, never the Bilibili
-/// account entry. Before 0.1.3 they were Keychain items; each moves over on its first read.
+/// account entry.
 public final class AILocalSecretStore: AISecretStore, Sendable {
   private let vault: LocalSecretVault
   public init(vault: LocalSecretVault = .shared) { self.vault = vault }
-  private func entry(_ provider: AIProvider) -> (name: String, legacy: LocalSecretVault.LegacyItem) {
-    ("ai.provider." + provider.rawValue, .init(service: "io.github.pidean.manping.ai.provider.v1", account: provider.rawValue))
+  private func entry(_ provider: AIProvider) -> String {
+    "ai.provider." + provider.rawValue
   }
   public func load(_ provider: AIProvider) throws -> AIProviderSecrets? {
-    let entry = entry(provider)
-    guard let data = try vault.read(entry.name, legacy: entry.legacy) else { return nil }
+    let name = entry(provider)
+    guard let data = try vault.read(name) else { return nil }
     guard data.count <= 256 * 1024,
       let object = try? JSONSerialization.jsonObject(with: data) as? [String: String], let key = object["key"] else {
       throw AIConfigurationError.corruptConfiguration
@@ -29,12 +29,11 @@ public final class AILocalSecretStore: AISecretStore, Sendable {
     var object = ["key": secrets.key]
     object["secret"] = secrets.secret; object["codestral_key"] = secrets.codestralKey
     object["configuration_binding"] = secrets.configurationBinding
-    let entry = entry(provider)
-    try vault.write(entry.name, try JSONSerialization.data(withJSONObject: object), legacy: entry.legacy)
+    let name = entry(provider)
+    try vault.write(name, try JSONSerialization.data(withJSONObject: object))
   }
   public func delete(_ provider: AIProvider) throws {
-    let entry = entry(provider)
-    try vault.delete(entry.name, legacy: entry.legacy)
+    try vault.delete(entry(provider))
   }
 }
 

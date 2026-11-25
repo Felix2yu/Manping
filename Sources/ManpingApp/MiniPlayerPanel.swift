@@ -194,7 +194,7 @@ final class MiniPlayerPanel: NSPanel, DanmakuFitting {
     super.init(contentRect: NSRect(x: 0, y: 0, width: 480, height: 270),
       styleMask: [.borderless, .resizable, .nonactivatingPanel], backing: .buffered, defer: false)
     title = "小窗"
-    identifier = NSUserInterfaceItemIdentifier("io.github.pidean.manping.mini-player")
+    identifier = NSUserInterfaceItemIdentifier(AppIdentity.bundleIdentifier + ".mini-player")
     isFloatingPanel = true
     level = .floating
     collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]

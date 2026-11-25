@@ -213,7 +213,7 @@ final class DanmakuEngine: NSObject, CAMetalDisplayLinkDelegate, @unchecked Send
       link.invalidate()
       self.link = nil
     }
-    thread.name = "io.github.pidean.manping.danmaku.render"
+    thread.name = AppIdentity.bundleIdentifier + ".danmaku.render"
     thread.qualityOfService = .userInteractive
     thread.start()
   }
@@ -846,7 +846,7 @@ final class GlyphWorkshop: @unchecked Sendable {
     var queued: Set<Character> = []
   }
   private let state = OSAllocatedUnfairLock(initialState: State())
-  private let queue = DispatchQueue(label: "io.github.pidean.manping.danmaku.glyphs", qos: .utility)
+  private let queue = DispatchQueue(label: AppIdentity.bundleIdentifier + ".danmaku.glyphs", qos: .utility)
   /// Bitmaps kept per raster; about 27 KB each at 24 pt on Retina.
   private let capacity = 3_000
 

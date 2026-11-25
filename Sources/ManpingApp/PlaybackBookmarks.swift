@@ -34,12 +34,107 @@ struct PlaybackBookmarkDraft: Identifiable, Equatable {
   @State private var error: String?
   @FocusState private var focused: Bool
 
+  init(model: AppModel, draft: PlaybackBookmarkDraft, time: Double, delete: (() -> Void)?,
+       dismiss: @escaping () -> Void, currentTime: (() -> Double)? = nil) {
+    self.model = model
+    self.draft = draft
+    self.time = time
+    self.delete = delete
+    self.dismiss = dismiss
+    self.currentTime = currentTime
+    _note = State(initialValue: draft.note)
+    _timeText = State(initialValue: PlaybackTimeline.format(time))
+  }
+
+  var body: some View { editor }
+  private var content: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      heading
+      timeRow
+      noteSection
+      if let error {
+        Text(error).font(Theme.Font.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+      }
+      footer
+    }
+  }
+
+  private var editor: some View {
+    content
+      .padding(20).frame(width: 440)
+      .background(Theme.card(.light))
+      .defaultFocus($focused, draft.note.isEmpty)
+  }
+
+  private var heading: some View {
+    VStack(alignment: .leading, spacing: 5) {
+      Text(title).font(Theme.Font.headline)
+      Text("书签和笔记仅保存在这台设备上。").font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(.light))
+    }
+  }
+
+  private var timeRow: some View {
+    HStack(spacing: 10) {
+      Text("时间点").font(Theme.Font.body)
+      TextField("00:00", text: timeBinding)
+        .textFieldStyle(AppTextFieldStyle())
+        .frame(width: 110)
+        .focused($focused)
+      Spacer()
+      Button("使用当前时间", action: useCurrentTime)
+        .buttonStyle(AppButtonStyle(size: .small))
+    }
+  }
+
+  private var noteSection: some View {
+    VStack(alignment: .leading, spacing: 7) {
+      HStack {
+        Text("笔记（可选）").font(Theme.Font.body)
+        Spacer()
+        Text("\(note.count)/\(PlaybackBookmark.maximumNoteLength)")
+          .font(Theme.Font.caption2.monospacedDigit()).foregroundStyle(Theme.tertiaryText(.light))
+      }
+      TextEditor(text: $note)
+        .font(Theme.Font.body)
+        .scrollContentBackground(.hidden)
+        .frame(minHeight: 110, maxHeight: 180)
+        .padding(8)
+        .background(Theme.fill(.light), in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.sm).strokeBorder(Theme.separator(.light), lineWidth: 0.5))
+        .accessibilityLabel("书签笔记")
+    }
+  }
+
+  private var footer: some View {
+    HStack(spacing: 10) {
+      if let delete {
+        Button("删除", role: .destructive) {
+          delete()
+          dismiss()
+        }
+        .buttonStyle(AppButtonStyle(size: .small))
+      }
+      Spacer()
+      Button("取消", action: dismiss).buttonStyle(AppButtonStyle(size: .small))
+      Button(isEditing ? "保存修改" : "添加书签", action: save)
+        .buttonStyle(AppButtonStyle(role: .primary, size: .small))
+        .disabled(!matchesCurrentMedia)
+    }
+  }
+
+  private func useCurrentTime() {
+    let seconds = currentTime?() ?? model.currentBookmarkTime
+    currentSeconds = seconds
+    editingSeconds = nil
+    timeText = PlaybackTimeline.format(seconds)
+  }
+
   private var isEditing: Bool {
     if case .edit = draft.mode { return true }
     return false
   }
   private var matchesCurrentMedia: Bool {
-    guard let mediaKey else { return false }
+    guard let mediaKey = draft.mediaKey else { return false }
     return mediaKey == model.playbackBookmarkMediaKey
   }
   private var title: String { isEditing ? "编辑书签" : "添加书签" }
@@ -50,65 +145,6 @@ struct PlaybackBookmarkDraft: Identifiable, Equatable {
       timeText = value
       editingSeconds = nil
       currentSeconds = nil
-    }
-  }
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      VStack(alignment: .leading, spacing: 5) {
-        Text(title).font(Theme.Font.headline)
-        Text("书签和笔记仅保存在这台设备上。").font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(.light))
-      }
-      HStack(spacing: 10) {
-        Text("时间点").font(Theme.Font.body)
-        TextField("00:00", text: timeBinding).textFieldStyle(AppTextFieldStyle()).frame(width: 110)
-          .focused($focused)
-        Spacer()
-        Button("使用当前时间") {
-          let seconds = currentTime?() ?? model.currentBookmarkTime
-          currentSeconds = seconds
-          editingSeconds = nil
-          timeText = PlaybackTimeline.format(seconds)
-        }
-        .buttonStyle(AppButtonStyle(size: .small))
-      }
-      VStack(alignment: .leading, spacing: 7) {
-        HStack {
-          Text("笔记（可选）").font(Theme.Font.body)
-          Spacer()
-          Text("\(note.count)/\(PlaybackBookmark.maximumNoteLength)")
-            .font(Theme.Font.caption2.monospacedDigit()).foregroundStyle(Theme.tertiaryText(.light))
-        }
-        TextEditor(text: $note).font(Theme.Font.body).scrollContentBackground(.hidden)
-          .frame(minHeight: 110, maxHeight: 180)
-          .padding(8).background(Theme.fill(.light), in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
-          .overlay(RoundedRectangle(cornerRadius: Theme.Radius.sm).strokeBorder(Theme.separator(.light), lineWidth: 0.5))
-          .accessibilityLabel("书签笔记")
-      }
-      if let error {
-        Text(error).font(Theme.Font.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-      }
-      HStack(spacing: 10) {
-        if let delete {
-          Button("删除", role: .destructive) {
-            delete(); dismiss()
-          }.buttonStyle(AppButtonStyle(size: .small))
-        }
-        Spacer()
-        Button("取消", action: dismiss).buttonStyle(AppButtonStyle(size: .small))
-        Button(isEditing ? "保存修改" : "添加书签", action: save)
-          .buttonStyle(AppButtonStyle(role: .primary, size: .small))
-          .disabled(!matchesCurrentMedia)
-      }
-    }
-    .padding(20).frame(width: 440)
-    .background(Theme.background(.light))
-    .onAppear {
-      note = draft.note
-      editingSeconds = nil
-      currentSeconds = nil
-      timeText = PlaybackTimeline.format(time)
-      focused = draft.note.isEmpty
     }
   }
 

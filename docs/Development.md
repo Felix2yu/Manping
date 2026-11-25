@@ -70,13 +70,22 @@ python3 scripts/verify_bundle.py --static-only
 
 若在另一台机器上 Homebrew 依赖的实际 SHA 或绝对源路径与锁文件不同，`--verify-inputs` 会明确失败。核对依赖版本和来源后，可显式运行 `python3 scripts/bundle.py --update-lock --verify-inputs` 记录该机器的输入；不要把校验失败当作成功。
 
-打包脚本在独立 `.build/release-bundle/` scratch 目录运行 `swift build -c release --arch arm64`，避免与 Debug 共用 Xcode 构建数据库；可用 `--scratch-path` 指定另一项目内目录。脚本递归收集 libmpv/FFmpeg 动态库闭包、检查 arm64、重写 install name/RPATH、复制 CA 根证书与许可证，然后按现有方式逐库及 `.app` ad-hoc 签名，最后 `codesign --verify --deep --strict`。包内不依赖 Homebrew 运行路径。HTTPS 保持 ATS/TLS 验证，封面 HTTP 地址统一升级 HTTPS；不放宽 ATS。`dist/release/BundleManifest.json` 记录最终签名后二进制哈希。
+打包脚本在独立 `.build/release-bundle/` scratch 目录运行 `swift build -c release --arch arm64`，避免与 Debug 共用 Xcode 构建数据库；可用 `--scratch-path` 指定另一项目内目录。脚本递归收集 libmpv/FFmpeg 动态库闭包、检查 arm64、重写 install name/RPATH、复制 CA 根证书与许可证，然后按 [Signing.md](Signing.md) 的固定证书顺序逐库及 `.app` 签名，最后 `codesign --verify --deep --strict`。包内不依赖 Homebrew 运行路径。HTTPS 保持 ATS/TLS 验证，封面 HTTP 地址统一升级 HTTPS；不放宽 ATS。`dist/release/BundleManifest.json` 记录最终签名后二进制哈希。
+
+## 覆盖安装到应用程序目录
+
+```bash
+python3 scripts/install_local_app.py --dry-run
+python3 scripts/install_local_app.py --replace
+```
+
+安装脚本要求目标应用已退出，校验 `im.yufei.manping` 与签名，暂存后再次校验再替换 `/Applications/满屏.app`。旧应用保留为隐藏备份，替换失败自动恢复；不迁移原应用数据，不自动提权或终止进程。
 
 ## 登录与同一构建的实网验收
 
-登录支持扫码与网页 Cookie，账号凭据加密保存在 `Application Support/Manping/Secrets/`（`LocalSecretVault`，0.1.3 起取代 Keychain，见 [Signing.md](Signing.md)）。调试版使用独立的 `Secrets-debug` 与 `ChatClientConfiguration-debug.json`，不读取正式版凭据，也不迁移钥匙串；`swift test` 等非 App 进程只用内存存储。退出/换号会清理该账号状态并取消在途请求；生成的下载命令不含凭据。账号写操作只在用户主动操作时发送，开发验收仅测试 fixture。
+登录支持扫码与网页 Cookie，账号凭据加密保存在 `Application Support/im.yufei.manping/Secrets/`（`LocalSecretVault`，见 [Signing.md](Signing.md)）。调试版使用独立的 `Secrets-debug` 与 `ChatClientConfiguration-debug.json`，不读取正式版凭据；`swift test` 等非 App 进程只用内存存储。新身份不读取、迁移或删除原应用的设置、文件与钥匙串项目。退出/换号会清理该账号状态并取消在途请求；生成的下载命令不含凭据。账号写操作只在用户主动操作时发送，开发验收仅测试 fixture。
 
-每次 ad-hoc 构建签名变化，防火墙软件可能需要重新放行。不要绕过系统弹窗；等使用者在场时只构建、签名一次，再集中运行只读验收：
+使用固定证书时，防火墙软件只需放行一次；没有配置证书的临时签名仍可能要求重新放行。不要绕过系统弹窗；等使用者在场时只构建、签名一次，再集中运行只读验收：
 
 ```sh
 python3 scripts/build_debug_app.py
@@ -91,7 +100,7 @@ AI 配置保留原版 22 个 provider 并新增 MiniMax、MiMo、OpenCode Zen、
 
 ### 用 ChatGPT 套餐（Sign in with ChatGPT）
 
-设置 → AI 服务 → 「ChatGPT 套餐」卡片 → **Continue with ChatGPT**。按 OpenAI 面向开源／本地应用的官方流程（[文档](https://developers.openai.com/siwc/token-sharing-open-source)）：首次登录动态注册本应用（`dynamic_agent_client` → 签发的 `oaiapp_…`），浏览器授权后回到 `http://127.0.0.1:<端口>/auth/callback`，PKCE + RS256 ID token 校验，必须授予 `chatgpt.tokens.use.direct`。令牌只存本地加密凭据库（`Secrets/`，旧 Keychain 条目在首次读取时迁移），刷新令牌轮换且单飞刷新；推理走公开 Responses API（`store:false`、`stream:true`），用量计入 ChatGPT Plus／Pro 套餐，额度用尽时提示「Manage usage」而不会改走其它计费渠道。退出登录会撤销刷新令牌。
+设置 → AI 服务 → 「ChatGPT 套餐」卡片 → **Continue with ChatGPT**。按 OpenAI 面向开源／本地应用的官方流程（[文档](https://developers.openai.com/siwc/token-sharing-open-source)）：首次登录动态注册本应用（`dynamic_agent_client` → 签发的 `oaiapp_…`），浏览器授权后回到 `http://127.0.0.1:<端口>/auth/callback`，PKCE + RS256 ID token 校验，必须授予 `chatgpt.tokens.use.direct`。令牌只存本地加密凭据库（`Secrets/`），刷新令牌轮换且单飞刷新；推理走公开 Responses API（`store:false`、`stream:true`），用量计入 ChatGPT Plus／Pro 套餐，额度用尽时提示「Manage usage」而不会改走其它计费渠道。退出登录会撤销刷新令牌。
 
 ### Claude
 

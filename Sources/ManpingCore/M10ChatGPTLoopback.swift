@@ -5,7 +5,7 @@ import Network
 /// per the Sign in with ChatGPT redirect rules), answers with a static page, then closes.
 public final class ChatGPTLoopbackReceiver: ChatGPTCallbackReceiving, @unchecked Sendable {
   public static let path = "/auth/callback"
-  private let queue = DispatchQueue(label: "io.github.pidean.manping.chatgpt.callback")
+  private let queue = DispatchQueue(label: AppIdentity.bundleIdentifier + ".chatgpt.callback")
   private let lock = NSLock()
   private var listener: NWListener?
   private var received: URLComponents?
