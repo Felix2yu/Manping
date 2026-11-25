@@ -10,11 +10,24 @@ public enum M6ArticleFixture {
         ["id": 2, "name": "生活", "children": [["id": 21, "name": "日常记录"], ["id": 22, "name": "摄影游记"]]],
         ["id": 3, "name": "科技", "children": [["id": 31, "name": "数码"], ["id": 32, "name": "科普"]]]]
     case "/x/article/rank/categories": payload = [["id": 1, "name": "动画"], ["id": 2, "name": "生活"]]
-    case "/x/article/rank/list": payload = (0..<5).map { article(id: 100 + $0, category: Int(parameters["cid"] ?? "1") ?? 1) }
+    case "/x/article/rank/list":
+      let category = Int(parameters["cid"] ?? "1") ?? 1
+      if FixturePerformance.isEnabled(target: "article") {
+        let indices = FixturePerformance.indices(page: Int(parameters["pn"] ?? "1") ?? 1, pageSize: 20) ?? 0..<0
+        payload = indices.map { article(id: 100 + $0, category: category) }
+      } else {
+        payload = (0..<5).map { article(id: 100 + $0, category: category) }
+      }
     case "/x/article/recommends/plus", "/x/article/recommends":
       let page = Int(parameters["pn"] ?? "1") ?? 1
       let category = Int(parameters["cid"] ?? "0") ?? 0
-      let values = page > 2 ? [] : (0..<(page == 1 ? 20 : 4)).map { article(id: (page - 1) * 20 + $0 + 100, category: category) }
+      let values: [[String: Any]]
+      if FixturePerformance.isEnabled(target: "article") {
+        let indices = FixturePerformance.indices(page: page, pageSize: 20) ?? 0..<0
+        values = indices.map { article(id: 100 + $0, category: category) }
+      } else {
+        values = page > 2 ? [] : (0..<(page == 1 ? 20 : 4)).map { article(id: (page - 1) * 20 + $0 + 100, category: category) }
+      }
       payload = path.hasSuffix("/plus") ? ["articles": values, "ranks": [article(id: 900, category: 1)]] as [String: Any] : values
     case "/x/article/viewinfo":
       payload = ["like": 0, "favorite": false, "attention": false, "coin": 0,
@@ -36,10 +49,12 @@ public enum M6ArticleFixture {
   }
   private static func article(id: Int, category: Int) -> [String: Any] {
     let titles = ["读懂一段旅程：在日常中发现新的风景", "一帧动画背后的色彩与构图", "散步时，我遇见了这座城市", "那些值得记下来的普通时刻"]
-    return ["id": id, "title": titles[id % titles.count],
+    let performance = FixturePerformance.isEnabled(target: "article")
+    let index = max(0, id - 100)
+    return ["id": id, "title": performance ? "\(titles[id % titles.count]) · \(index + 1)" : titles[id % titles.count],
       "summary": "从一个细节出发，慢慢理解画面和故事。这是一篇用于本地界面验证的合成专栏，没有真实账号或作者数据。",
-      "origin_image_urls": ["https://fixture.invalid/cover/\(id % 8)"],
-      "author": ["mid": 700, "name": "山间记录者", "face": "https://fixture.invalid/cover/1"],
+      "origin_image_urls": [performance ? FixturePerformance.cover(index) : "https://fixture.invalid/cover/\(id % 8)"],
+      "author": ["mid": 700, "name": "山间记录者", "face": performance ? FixturePerformance.cover(index) : "https://fixture.invalid/cover/1"],
       "publish_time": 1_700_000_000 + id * 60, "words": 1580,
       "category": ["id": category, "name": category == 1 ? "动画" : "生活"],
       "stats": ["view": 126_800 + id * 100, "like": 3200, "favorite": 860, "reply": 48, "coin": 120]]

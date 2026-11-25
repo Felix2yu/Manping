@@ -32,6 +32,8 @@ struct VideoDetailPage: View {
   @State private var fixtureTime = 0.0
   @State private var showingVolume = false
   @State private var composeShown = false
+  @FocusState private var danmakuFocused: Bool
+  @State private var shortcutRegistration = UUID()
   @State private var chaptersShown = false
   @State private var videoShot: VideoShot?
 
@@ -82,7 +84,7 @@ struct VideoDetailPage: View {
     model.playbackQueue.count > 0 ? .queue : (model.usesEpisodicFixture ? .parts : .info)
   }
 
-  var body: some View {
+  private var pageContent: some View {
     PlayerPageLayout(showsPanel: !sidebarHidden, immersive: immersive) {
       playerPanel
     } panel: {
@@ -95,59 +97,66 @@ struct VideoDetailPage: View {
         PlayerToolbarActions(model: model, sidebarHidden: $sidebarHidden)
       }
     }
-    // Keyed by bvid: `Video.id` switches from BV to av when details arrive, which used to
-    // re-run this and throw the user back to the default tab.
-    .task(id: video.bvid.isEmpty ? video.id : video.bvid) {
-      model.refreshPlaybackBookmarks()
-      detailLoadError = nil
-      userPickedSection = false
-      section = model.launchVideoTab.flatMap(Section.init(launchTab:)) ??
-        defaultSection
-      fixtureTime = model.usesEpisodicFixture ? 152 : 0
-      interactions.reset(aid: details?.video.aid)
-    }
-    .onChange(of: details?.video.aid) { _, aid in interactions.reset(aid: aid) }
-    .onChange(of: model.refreshToken) { _, _ in detailLoadError = nil }
-    .onChange(of: model.playbackQueue.count) { _, count in
-      if count == 0 && section == .queue { section = .info }
-    }
-    .onChange(of: details?.collections.map(\.id)) { _, _ in
-      if model.launchVideoTab == nil, !userPickedSection { section = defaultSection }
-    }
-    .onChange(of: model.error) { _, error in
-      if details == nil, let error { detailLoadError = error }
-    }
-    .onChange(of: interactions.identityGeneration) { _, _ in
-      showingFavorites = false; showingCoin = false; showingTriple = false
-    }
-    .onChange(of: model.selected?.cid) { _, _ in fixtureTime = 0; model.refreshPlaybackBookmarks() }
-    .task(id: model.selected?.cid) {
-      videoShot = nil
-      guard !model.usesUIFixtures, let selected = model.selected, let cid = selected.cid else { return }
-      videoShot = try? await model.service.videoShot(bvid: selected.bvid, aid: selected.aid, cid: cid)
-    }
-    .onDisappear { comments.cancel(); interactions.shutdown(); restoreTemporarySpeed() }
-    #if DEBUG
-    .task {
-      // Screenshot checks of the mini window (`MANPING_UI_MINI_PLAYER`), once per launch.
-      guard model.usesUIFixtures, MiniPlayerCoordinator.debugLaunch, !MiniPlayerCoordinator.debugLaunched else { return }
-      MiniPlayerCoordinator.debugLaunched = true
-      try? await Task.sleep(for: .seconds(1.5))
-      model.toggleCompactPlayer()
-    }
-    .task {
-      // Screenshot checks of the stage (`--ui-player-placement detached|fullscreen`), once per launch.
-      guard model.usesUIFixtures, let placement = PlayerStageDebug.takePlacement() else { return }
-      try? await Task.sleep(for: .seconds(1.5))
-      if placement == "fullscreen" { model.togglePlayerFullScreen() } else { model.togglePlaybackWindow() }
-    }
-    #endif
-    .alert(
+  }
+
+  private var pageLifecycle: some View {
+    pageContent
+      // Keyed by bvid: `Video.id` switches from BV to av when details arrive.
+      .task(id: video.bvid.isEmpty ? video.id : video.bvid) {
+        model.refreshPlaybackBookmarks()
+        detailLoadError = nil
+        userPickedSection = false
+        section = model.launchVideoTab.flatMap(Section.init(launchTab:)) ??
+          defaultSection
+        fixtureTime = model.usesEpisodicFixture ? 152 : 0
+        interactions.reset(aid: details?.video.aid)
+      }
+      .onChange(of: details?.video.aid) { _, aid in interactions.reset(aid: aid) }
+      .onChange(of: model.refreshToken) { _, _ in detailLoadError = nil }
+      .onChange(of: model.playbackQueue.count) { _, count in
+        if count == 0 && section == .queue { section = .info }
+      }
+      .onChange(of: details?.collections.map(\.id)) { _, _ in
+        if model.launchVideoTab == nil, !userPickedSection { section = defaultSection }
+      }
+      .onChange(of: model.error) { _, error in
+        if details == nil, let error { detailLoadError = error }
+      }
+      .onChange(of: interactions.identityGeneration) { _, _ in
+        showingFavorites = false; showingCoin = false; showingTriple = false
+      }
+      .onChange(of: model.selected?.cid) { _, _ in
+        fixtureTime = 0; model.refreshPlaybackBookmarks(); installPlaybackShortcuts()
+      }
+      .task(id: model.selected?.cid) {
+        videoShot = nil
+        guard !model.usesUIFixtures, let selected = model.selected, let cid = selected.cid else { return }
+        videoShot = try? await model.service.videoShot(bvid: selected.bvid, aid: selected.aid, cid: cid)
+      }
+      .onAppear { installPlaybackShortcuts() }
+      .onChange(of: video.bvid) { _, _ in installPlaybackShortcuts() }
+      .onChange(of: composeShown) { _, shown in danmakuFocused = shown }
+      .onDisappear { handleDisappearance() }
+      #if DEBUG
+      .task {
+        guard model.usesUIFixtures, MiniPlayerCoordinator.debugLaunch, !MiniPlayerCoordinator.debugLaunched else { return }
+        MiniPlayerCoordinator.debugLaunched = true
+        try? await Task.sleep(for: .seconds(1.5))
+        model.toggleCompactPlayer()
+      }
+      .task {
+        guard model.usesUIFixtures, let placement = PlayerStageDebug.takePlacement() else { return }
+        try? await Task.sleep(for: .seconds(1.5))
+        if placement == "fullscreen" { model.togglePlayerFullScreen() } else { model.togglePlaybackWindow() }
+      }
+      #endif
+  }
+
+  var body: some View {
+    pageLifecycle
+      .alert(
       "操作结果",
-      isPresented: Binding(
-        get: { interactions.message != nil },
-        set: { if !$0 { interactions.message = nil } }
-      )
+      isPresented: interactionMessageBinding
     ) {
       Button("确定") { interactions.message = nil }
     } message: {
@@ -166,6 +175,41 @@ struct VideoDetailPage: View {
     .onChange(of: model.showingLogin) { _, show in if show { showingCoin = false; showingFavorites = false } }
     .sheet(isPresented: $showingCoin) { coinSheet }
     .sheet(isPresented: $showingFavorites) { favoriteSheet }
+  }
+
+  private func handleDisappearance() {
+    if model.playbackPageShortcuts?.registrationID == shortcutRegistration { model.playbackPageShortcuts = nil }
+    comments.cancel(); interactions.shutdown(); restoreTemporarySpeed()
+  }
+  private var interactionMessageBinding: Binding<Bool> {
+    Binding(get: { interactions.message != nil }, set: { if !$0 { interactions.message = nil } })
+  }
+  private func installPlaybackShortcuts() {
+    let mediaID = "video:\(video.bvid):\(model.selected?.cid ?? 0)"
+    model.playbackPageShortcuts = PlaybackPageShortcutActions(registrationID: shortcutRegistration, mediaID: mediaID,
+      toggleInfo: { selectShortcutSection(.info) }, toggleComments: { selectShortcutSection(.comments) },
+      like: { shortcutLike() }, coin: { shortcutCoin() }, favorite: { shortcutFavorite() },
+      triple: { showingTriple = true },
+      composeDanmaku: { composeShown = true; chrome.activity() })
+  }
+  private func selectShortcutSection(_ target: Section) {
+    if target == .info, section == .info, !sidebarHidden { sidebarHidden = true; return }
+    sidebarHidden = false
+    section = section == target ? .info : target
+    userPickedSection = true
+    chrome.activity()
+  }
+  private func shortcutLike() {
+    guard let aid = details?.video.aid, aid > 0 else { return }
+    Task { await interactions.like(aid: aid) { model.showingLogin = true } }
+  }
+  private func shortcutCoin() {
+    guard let aid = details?.video.aid, aid > 0 else { return }
+    coinCount = 1; coinAlsoLike = true; showingCoin = true
+  }
+  private func shortcutFavorite() {
+    guard let aid = details?.video.aid, aid > 0 else { return }
+    Task { if await interactions.loadFolders(aid: aid, requiresLogin: { model.showingLogin = true }) { showingFavorites = true } }
   }
 
   private var shareURL: URL? {
@@ -291,7 +335,7 @@ struct VideoDetailPage: View {
         danmakuShown: $danmakuSettingsShown, networkShown: $networkShown, volumeShown: $showingVolume,
         composeShown: $composeShown,
         input: {
-          AnyView(PlaybackDanmakuInput(features: features) {
+          AnyView(PlaybackDanmakuInput(features: features, focused: $danmakuFocused) {
             features.send(seconds: displayTime) { model.showingLogin = true }
           })
         },

@@ -43,6 +43,7 @@ struct PlaybackSubtitleMenu: View {
 /// The comment field on the panel: a capsule with the style menu, the field and send.
 struct PlaybackDanmakuInput: View {
   @ObservedObject var features: PlaybackFeaturesModel
+  @FocusState.Binding var focused: Bool
   let send: () -> Void
   var body: some View {
     HStack(spacing: 8) {
@@ -60,6 +61,7 @@ struct PlaybackDanmakuInput: View {
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("弹幕样式")
       TextField("发一条友善的弹幕", text: $features.input, prompt: Text("发一条友善的弹幕")).labelsHidden()
         .textFieldStyle(.plain).font(Theme.Font.caption).foregroundStyle(.white).onSubmit(send).disabled(features.sending)
+        .focused($focused)
       Button(action: send) {
         if features.sending { ProgressView().controlSize(.mini) }
         else { Image(systemName: "paperplane.fill").font(.system(size: 11)) }

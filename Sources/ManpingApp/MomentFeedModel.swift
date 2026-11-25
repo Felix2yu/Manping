@@ -24,6 +24,7 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
   private var offset = ""
   private var baseline = ""
   private var generation = UUID()
+  private var requestVersion = UUID()
   private var stateIdentities: [String: AuthSnapshot] = [:]
   private var flight: Task<Void, Never>?
   private var writes: [String: Task<Void, Never>] = [:]
@@ -52,9 +53,14 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
         }
         if changed {
           let wasActive = self.active
+          let hadRows = !self.items.isEmpty || !self.stateIdentities.isEmpty
           self.reset(clearUsers: true); self.selectedUserID = nil; self.readUsers = []
           self.identityVersion += 1
-          if wasActive { self.active = true; await self.loadNext() }
+          if wasActive {
+            self.active = true; await self.loadNext()
+          } else if hadRows {
+            self.error = "登录状态已变化，请刷新动态。"
+          }
         }
       }
     }
@@ -64,10 +70,19 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
     for task in writes.values { task.cancel() }
     if let operations { Task { await operations.shutdown() } }
   }
+  func suspend() {
+    active = false; requestVersion = UUID()
+    flight?.cancel(); flight = nil; loading = false
+  }
   func cancel() {
-    active = false; generation = UUID(); flight?.cancel(); flight = nil; loading = false
+    suspend()
+    generation = UUID()
     for task in writes.values { task.cancel() }
     writes = [:]; busy = []; stateIdentities = [:]
+  }
+  func activate() async {
+    active = true
+    if items.isEmpty && error == nil && hasMore { await loadNext() }
   }
   private func reset(clearUsers: Bool) {
     cancel(); items = []; offset = ""; baseline = ""; hasMore = true
@@ -92,6 +107,13 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
     await loadNext()
     if let mid, error == nil { readUsers.insert(mid) }
   }
+  #if DEBUG
+  func debugRestore(_ page: RPCDynamicPage) {
+    reset(clearUsers: true)
+    items = page.items; users = page.users; offset = page.historyOffset
+    baseline = page.updateBaseline; hasMore = page.hasMore
+  }
+  #endif
   func refresh() async {
     let refreshUsers = selectedUserID == nil
     reset(clearUsers: refreshUsers); active = true
@@ -99,7 +121,8 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
   }
   func loadNext() async {
     guard active, !loading, hasMore else { return }
-    let revision = generation; let offset = self.offset; let baseline = self.baseline
+    let revision = generation; let requestRevision = UUID(); requestVersion = requestRevision
+    let offset = self.offset; let baseline = self.baseline
     let section = self.section; let mid = selectedUserID
     loading = true; error = nil
     let task = Task { @MainActor [weak self] in
@@ -113,7 +136,7 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
         let page = try await rpc.dynamics(query)
         let current = await auth.authSnapshot()
         try Task.checkCancellation()
-        guard generation == revision, sameIdentity(snapshot, current) else { throw CancellationError() }
+        guard generation == revision, requestVersion == requestRevision, sameIdentity(snapshot, current) else { throw CancellationError() }
         var known = Set(items.map(\.id))
         let incoming = page.items.filter {
           guard !$0.id.isEmpty else { return false }
@@ -132,10 +155,10 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
         hasMore = page.hasMore && !page.historyOffset.isEmpty && page.historyOffset != offset
       } catch is CancellationError {
       } catch {
-        guard generation == revision else { return }
+        guard generation == revision, requestVersion == requestRevision else { return }
         self.error = Self.message(error)
       }
-      guard generation == revision else { return }
+      guard generation == revision, requestVersion == requestRevision else { return }
       loading = false; flight = nil
     }
     flight = task

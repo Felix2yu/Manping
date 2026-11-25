@@ -53,6 +53,9 @@ import Foundation
     item = nil; player = nil; identity = nil
   }
 
+  func hasSession(for mediaID: String) -> Bool { item?.bvid == mediaID && player != nil }
+  func sendCurrentPosition() { send(requirePlaying: false) }
+
   /// Identity changes revoke the old session without flushing it to another account.
   func discard() {
     timer?.invalidate(); timer = nil

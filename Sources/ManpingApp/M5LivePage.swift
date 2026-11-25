@@ -8,7 +8,6 @@ struct M5LivePage: View {
   @AppStorage("m5LiveChildWidth") private var childWidth = 200.0
   @AppStorage("m5LiveSidebarHidden") private var sidebarHidden = false
   @State private var showsFollowing = false
-  @Environment(\.browsingPageActive) private var browsingPageActive
   @Environment(\.colorScheme) private var scheme
   private var showsChildren: Bool { !sidebarHidden && !discovery.children.isEmpty }
   init(model: AppModel) {
@@ -133,11 +132,8 @@ struct M5LivePage: View {
           LazyVGrid(columns: [GridItem(.adaptive(minimum: Theme.gridMinimum), spacing: Theme.gridSpacing)], spacing: Theme.gridSpacing) {
             ForEach(discovery.rooms) { room in
               M5LiveCard(room: room, recommendation: discovery.isRecommendation, play: model.openLiveRoom, watch: model.openLive) { mid in model.openOverlay(.userSpace(mid)) }
-                .onAppear {
-                  if browsingPageActive, room.id == discovery.rooms.last?.id, discovery.error == nil { Task { await discovery.loadNext() } }
-                }
             }
-          }.cardGridContent().padding(Theme.gridPadding)
+          }.cardGridContent().padding(Theme.gridPadding).performanceScrollTarget(target: "live")
           if let error = discovery.error {
             VStack(spacing: 10) {
               InlineErrorText(message: error)
@@ -146,7 +142,10 @@ struct M5LivePage: View {
           } else if discovery.hasMore {
             LoadMoreFooter(isLoading: discovery.isLoading, autoLoad: false) { Task { await discovery.loadNext() } }
           }
-        }.cardGrid()
+        }.cardGrid().performanceScrollProbe(page: "live")
+          .prefetchOnScroll(enabled: discovery.hasMore && !discovery.isLoading && discovery.error == nil) {
+            Task { await discovery.loadNext() }
+          }
       }
     }
   }

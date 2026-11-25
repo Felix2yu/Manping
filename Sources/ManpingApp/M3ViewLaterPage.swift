@@ -19,7 +19,7 @@ struct M3ViewLaterPage: View {
           collection.playLoaded { await open($0) }
         }, dismiss: collection.dismissPlayAllNotice)
       }
-      M3CollectionResults(collection: collection, model: model, emptyTitle: "稍后再看是空的") {
+      M3CollectionResults(collection: collection, model: model, emptyTitle: "稍后再看是空的", performanceTarget: "later") {
         pendingAction = collection.prepareRemoval([$0])
       }
     }.foregroundStyle(Theme.text(scheme))

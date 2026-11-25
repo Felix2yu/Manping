@@ -10,7 +10,8 @@ struct M4MomentPage: View {
   @State private var commentsPresented = false
   @State private var commentItem: RPCDynamic?
   @State private var commentTask: Task<Void, Never>?
-  @State private var initialized = false
+  @State private var position = ScrollPosition(edge: .top)
+  @State private var scrollMemory = MomentScrollMemory()
   @Environment(\.browsingPageActive) private var browsingPageActive
   @Environment(\.colorScheme) private var scheme
   init(model: AppModel) {
@@ -50,22 +51,29 @@ struct M4MomentPage: View {
       }
       .animation(.snappy(duration: 0.28), value: commentsPresented)
       .task(id: model.refreshToken) {
-        if initialized { await feed.refresh() }
-        else {
-          initialized = true
-          await feed.start(section: fixtureLaunchTarget == nil ? nil : .comprehensive)
-          if fixtureLaunchTarget == "moment:comments", let first = feed.items.first {
-            openComments(first)
-          }
+        await feed.start(section: fixtureLaunchTarget == nil ? nil : .comprehensive)
+        if PerformanceOptions.scrollPage == "moment" {
+          PerformanceRun.log("PERF moment feed items=\(feed.items.count) error=\(feed.error ?? "none")")
         }
+        if fixtureLaunchTarget == "moment:comments", let first = feed.items.first {
+          openComments(first)
+        }
+      }
+      .onChange(of: browsingPageActive) { _, active in
+        if active { Task { await feed.activate() } }
+        else { feed.suspend(); closeComments() }
       }
       .onChange(of: feed.identityVersion) { _, _ in closeComments() }
       .onDisappear { feed.cancel(); closeComments() }
       .onExitCommand(perform: browsingPageActive ? { if commentsPresented { closeComments() } } : nil)
+      .performanceScrollProbe(page: PerformanceOptions.scrollPage ?? "")
   }
   private var sectionTabs: some View {
     SegmentedTabs(options: MomentFeedSection.allCases.map { ($0, $0.rawValue) }, selection: Binding(
-      get: { feed.section }, set: { section in closeComments(); Task { await feed.select(section: section) } }))
+      get: { feed.section }, set: { section in
+        position.scrollTo(y: 0); scrollMemory.offset = nil; closeComments()
+        Task { await feed.select(section: section) }
+      }))
   }
   private var sidebar: some View {
     ScrollView {
@@ -107,20 +115,33 @@ struct M4MomentPage: View {
               ForEach(feed.items, id: \.id) { item in
                 MomentVideoCard(item: item, feed: feed, model: model) { openComments(item) }
               }
-            }.padding(Theme.gridPadding)
+            }.padding(Theme.gridPadding).performanceScrollTarget(target: PerformanceOptions.scrollPage ?? "")
           } else {
             LazyVStack(spacing: 12) {
               ForEach(feed.items, id: \.id) { item in
                 MomentFullCard(item: item, feed: feed, model: model) { openComments(item) }
               }
             }.frame(maxWidth: 760).padding(Theme.gridPadding).frame(maxWidth: .infinity)
+              .performanceScrollTarget(target: PerformanceOptions.scrollPage ?? "")
           }
           if let error = feed.error {
             PageStateView(.error, title: "没能加载更多动态", message: error, actionTitle: "重试") { Task { await feed.loadNext() } }
           } else if feed.loading || feed.hasMore {
             LoadMoreFooter(isLoading: feed.loading, hasMore: feed.hasMore) { Task { await feed.loadNext() } }
           }
-        }
+        }.scrollPosition($position)
+          .defaultScrollAnchor(.top)
+          .onScrollGeometryChange(for: CGPoint.self) { geometry in
+            geometry.contentOffset
+          } action: { _, new in
+            guard browsingPageActive else { return }
+            scrollMemory.offset = new
+          }
+          .onChange(of: browsingPageActive) { _, active in
+            if active, let offset = scrollMemory.offset {
+              position.scrollTo(x: offset.x, y: offset.y)
+            }
+          }
       }
     }.frame(maxWidth: .infinity, maxHeight: .infinity)
   }
@@ -133,6 +154,7 @@ struct M4MomentPage: View {
     commentTask?.cancel(); commentTask = nil; comments.cancel(); commentsPresented = false; commentItem = nil
   }
   private var fixtureLaunchTarget: String? {
+    if PerformanceOptions.scrollPage == "moment-all" { return "moment:all" }
     #if DEBUG
     guard model.usesUIFixtures else { return nil }
     let arguments = ProcessInfo.processInfo.arguments
@@ -143,4 +165,8 @@ struct M4MomentPage: View {
     return nil
     #endif
   }
+}
+
+@MainActor private final class MomentScrollMemory {
+  var offset: CGPoint?
 }

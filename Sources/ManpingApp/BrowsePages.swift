@@ -272,13 +272,13 @@ struct BrowseVideoResults: View, Equatable {
             spacing: Theme.gridSpacing
           ) {
             ForEach(visibleItems) { video in
-              VideoCard(video: video, action: { open(video) }, filterRecommendation: filtersRecommendations ? { kind in
-                if recommendationFilter.add(video, kind: kind).succeeded { feed.remove(videoID: video.id) }
+              VideoCard(video: video, action: { open(video) }, filterRecommendation: filtersRecommendations ? { (kind: RecommendationRuleKind) in
+                if recommendationFilter.add(video: video, kind: kind).succeeded { feed.remove(videoID: video.id) }
               } : nil, hideRecommendation: filtersRecommendations ? {
                 videoFeedback = recommendationFilter.hide(video: video) ? .hidden : .hideFailed
               } : nil)
             }
-          }.cardGridContent()
+          }.cardGridContent().performanceScrollTarget(target: PerformanceOptions.scrollPage ?? "")
           if let error = feed.state.error {
             VStack(spacing: 10) {
               InlineErrorText(message: "没能加载更多视频：\(error)")

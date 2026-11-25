@@ -51,6 +51,8 @@ enum PerformanceOptions {
     value("--perf-memory-ack-dir").map { URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath() }
   }
   static var scrollPage: String? { value("--perf-scroll") }
+  static let scrollPages = ["recommended", "popular", "search", "moment", "moment-all", "history", "favorites", "later",
+    "live", "article", "space", "following", "followers", "pgc"]
   /// `--perf-danmaku empty|bursty`: playback with the danmaku layer on, over an empty timeline
   /// or one that alternates 10 s of lines (two a second) with 10 s without.
   static var danmakuPattern: String? { value("--perf-danmaku") }
@@ -147,7 +149,7 @@ enum PerformanceOptions {
       else { throw Failure.arguments }
     }
     if let page = scrollPage {
-      guard ["recommended", "popular", "search"].contains(page), !arguments.contains("--perf-media") else { throw Failure.arguments }
+      guard Self.scrollPages.contains(page), !arguments.contains("--perf-media") else { throw Failure.arguments }
       return .scroll(page)
     }
     let stability = arguments.contains("--perf-stability")
@@ -286,9 +288,32 @@ enum PerformanceCoverData {
   static func reset() { cardHoverEvents = 0; cardHoverLifts = 0 }
 }
 
+@MainActor final class PerformanceScrollRegistry {
+  static let shared = PerformanceScrollRegistry()
+  private weak var active: PerformanceScrollDriver?
+
+  func activate(_ driver: PerformanceScrollDriver) {
+    guard active !== driver else { return }
+    active?.stop()
+    active = driver
+  }
+
+  func deactivate(_ driver: PerformanceScrollDriver) {
+    guard active === driver else { return }
+    active = nil
+  }
+
+  func isActive(_ driver: PerformanceScrollDriver) -> Bool { active === driver }
+}
+
 @MainActor final class PerformanceRun {
   static let shared = PerformanceRun()
   private var complete = false
+  private var scrollFrameDriver = "display_link"
+  private var scrollTargetID = ""
+  private var scrollWindowID = 0
+  private var scrollViewID = 0
+  private var nativeScrollDriver = "unbound"
   private var scrollStarted = false
   private var scrollOrigin = 0.0
   private var scrollLastArrival: Double?
@@ -335,7 +360,7 @@ enum PerformanceCoverData {
       Self.log("PERF environment pid=\(ProcessInfo.processInfo.processIdentifier) window=\(Int(window.frame.width))x\(Int(window.frame.height)) scale=\(window.backingScaleFactor) screen_max_hz=\(screen?.maximumFramesPerSecond ?? 0) display_mode_hz=\(refresh) config=isolated fixture_unique_ids=\(Set(PerformanceFixtures.videos.map(\.id)).count)")
       switch mode {
       case .scroll(let page):
-        Self.log("PERF scroll START page=\(page) items=600 warmup_s=2 duration_s=\(PerformanceOptions.scrollSeconds) speed_pt_s=\(PerformanceOptions.scrollSpeed) requested_hz=\(PerformanceOptions.scrollHz) cover_mode=\(PerformanceOptions.coverPipeline ? "pipeline" : "cached_bitmap") measurement=actual_displaylink_callback_arrival")
+        Self.log("PERF scroll START target=\(page) warmup_s=2 duration_s=\(PerformanceOptions.scrollSeconds) speed_pt_s=\(PerformanceOptions.scrollSpeed) requested_hz=\(PerformanceOptions.scrollHz) cover_mode=\(PerformanceOptions.coverPipeline ? "pipeline" : "cached_bitmap") measurement=actual_displaylink_callback_arrival")
         // Clicks pass through to whatever the user is doing. Hover still follows the real pointer,
         // so each run records how long the pointer was over the window (pointer_inside_pct).
         window.ignoresMouseEvents = true
@@ -382,6 +407,18 @@ enum PerformanceCoverData {
       previousDirection = direction
     }
     previousActualY = actualY
+  }
+  func useTimerFrameDriver() { scrollFrameDriver = "timer_locked_screen" }
+  func identifyScrollTarget(target: String, windowID: Int, scrollViewID: Int) {
+    scrollTargetID = target
+    scrollWindowID = windowID
+    self.scrollViewID = scrollViewID
+    nativeScrollDriver = "NSClipView"
+    Self.log("PERF scroll target=\(target) window=\(windowID) scroll_view=\(scrollViewID) driver=NSClipView")
+  }
+  func failScrollTarget(_ target: String, reason: String) {
+    Self.log("PERF FAIL reason=\(reason) target=\(target)")
+    complete = true
   }
   func scrollTick(arrival: Double, vsync: Double, target: Double, pointerInside: Bool, move: (Double) -> Void) -> Bool {
     guard !complete else { return false }
@@ -475,11 +512,14 @@ enum PerformanceCoverData {
     let hitch = scrollIntervals.reduce(0.0) { $0 + max(0, $1 - nominal * 1.5) }
     let busy = mainBusySpans.reduce(0, +)
     var report: [String: Any] = [
-      "page": PerformanceOptions.scrollPage ?? "", "requested_hz": PerformanceOptions.scrollHz,
+      "page": PerformanceOptions.scrollPage ?? "", "target_id": scrollTargetID,
+      "window_id": scrollWindowID, "scroll_view_id": scrollViewID, "native_driver": nativeScrollDriver,
+      "requested_hz": PerformanceOptions.scrollHz,
       "duration_s": PerformanceOptions.scrollSeconds, "speed_pt_s": PerformanceOptions.scrollSpeed,
       "cover_mode": PerformanceOptions.coverPipeline ? "pipeline" : "cached_bitmap",
       "environment": scrollEnvironment, "elapsed_s": elapsed, "nominal_period_ms": (nominal * 1000).rounded() / 1000,
       "pointer_mode": PerformanceOptions.pointerOver ? "over_with_emulated_scroll_gesture" : PerformanceOptions.pointerMode,
+      "frame_driver": scrollFrameDriver,
       "nominal_period_over_10ms_pct": share(scrollNominalPeriods, over: 10),
       "card_hover_events_per_s": (Double(PerformanceCounters.cardHoverEvents) / elapsed * 100).rounded() / 100,
       "card_hover_lifts_per_s": (Double(PerformanceCounters.cardHoverLifts) / elapsed * 100).rounded() / 100,
@@ -1106,75 +1146,146 @@ enum PerformanceCoverData {
 
 private struct PerformanceScrollModifier: ViewModifier {
   let page: String
-  @State private var position = ScrollPosition(y: 0)
   func body(content: Content) -> some View {
     if PerformanceOptions.requested && PerformanceOptions.scrollPage == page {
-      content.scrollPosition($position)
-        .onScrollGeometryChange(for: PerformanceGeometry.self) { geometry in
-          PerformanceGeometry(offset: geometry.contentOffset.y,
-            extent: max(0, geometry.contentSize.height - geometry.containerSize.height))
-        } action: { _, geometry in
-          PerformanceRun.shared.updateScroll(actualY: geometry.offset, extent: geometry.extent)
-        }
-        .background(PerformanceFrameView { y in position.scrollTo(y: y) })
+      content.onScrollGeometryChange(for: PerformanceGeometry.self) { geometry in
+        PerformanceGeometry(offset: geometry.contentOffset.y,
+          extent: max(0, geometry.contentSize.height - geometry.containerSize.height))
+      } action: { _, geometry in
+        PerformanceRun.shared.updateScroll(actualY: geometry.offset, extent: geometry.extent)
+      }
     } else { content }
   }
 }
 private struct PerformanceGeometry: Equatable { let offset: Double; let extent: Double }
-private struct PerformanceFrameView: NSViewRepresentable {
-  let move: (Double) -> Void
-  func makeNSView(context: Context) -> PerformanceFrameProbe { PerformanceFrameProbe(move: move) }
-  func updateNSView(_ nsView: PerformanceFrameProbe, context: Context) { nsView.move = move }
+private struct PerformanceScrollTargetModifier: ViewModifier {
+  let target: String
+  func body(content: Content) -> some View {
+    if PerformanceOptions.requested && PerformanceOptions.scrollPage == target {
+      content.background(PerformanceScrollDriverView(target: target))
+    } else { content }
+  }
 }
-@MainActor private final class PerformanceFrameProbe: NSView {
-  var move: (Double) -> Void
+private struct PerformanceScrollDriverView: NSViewRepresentable {
+  let target: String
+  func makeNSView(context: Context) -> PerformanceScrollDriver { PerformanceScrollDriver(target: target) }
+  func updateNSView(_ nsView: PerformanceScrollDriver, context: Context) {}
+}
+@MainActor final class PerformanceScrollDriver: NSView {
+  let target: String
   private var link: CADisplayLink?
+  private var timer: Timer?
   private var startTask: Task<Void, Never>?
+  private var fallbackTask: Task<Void, Never>?
+  private var lastTickAt = CACurrentMediaTime()
+  private var syntheticVsync = 0.0
   private weak var nativeScroll: NSScrollView?
-  private var identifiedDriver = false
-  init(move: @escaping (Double) -> Void) { self.move = move; super.init(frame: .zero) }
+
+  init(target: String) { self.target = target; super.init(frame: .zero) }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
-    guard window != nil else { startTask?.cancel(); startTask = nil; link?.invalidate(); link = nil; return }
-    guard link == nil, startTask == nil else { return }
+    guard window != nil else { stop(); return }
+    guard startTask == nil, link == nil, timer == nil else { return }
+    PerformanceScrollRegistry.shared.activate(self)
     startTask = Task { @MainActor [weak self] in
       try? await Task.sleep(for: .seconds(2))
       guard let self, !Task.isCancelled, self.window != nil else { return }
+      guard self.bindNativeScroll() else {
+        PerformanceRun.shared.failScrollTarget(self.target, reason: "target_scroll_not_found")
+        self.stop()
+        return
+      }
       let link = self.displayLink(target: self, selector: #selector(tick(_:)))
       let hz = Float(PerformanceOptions.scrollHz)
       link.preferredFrameRateRange = CAFrameRateRange(minimum: hz, maximum: hz, preferred: hz)
-      self.link = link; link.add(to: .main, forMode: .common)
+      self.lastTickAt = CACurrentMediaTime()
+      self.link = link
+      link.add(to: .main, forMode: .common)
+      self.fallbackTask = Task { @MainActor [weak self] in await self?.monitorLockedScreen() }
     }
   }
-  @objc private func tick(_ link: CADisplayLink) {
-    if !identifiedDriver, let content = window?.contentView {
-      var candidates: [NSScrollView] = []
-      func visit(_ view: NSView) {
-        if let scroll = view as? NSScrollView, (scroll.documentView?.frame.height ?? 0) > 1000 {
-          candidates.append(scroll)
-        }
-        view.subviews.forEach(visit)
+
+  private func bindNativeScroll() -> Bool {
+    var ancestor: NSView? = self
+    while let view = ancestor {
+      if let scroll = view as? NSScrollView {
+        guard let document = scroll.documentView, isInside(document) else { return false }
+        nativeScroll = scroll
+        if let window { PerformanceRun.shared.identifyScrollTarget(target: target, windowID: window.windowNumber,
+          scrollViewID: ObjectIdentifier(scroll).hashValue) }
+        return true
       }
-      visit(content)
-      // Overlay content is later in the view tree than its covered browse page.
-      nativeScroll = candidates.last
-      identifiedDriver = true
-      PerformanceRun.log("PERF scroll driver=\(nativeScroll == nil ? "SwiftUI.ScrollPosition" : "NSClipView") cover_mode=\(PerformanceOptions.coverPipeline ? "pipeline" : "cached_bitmap")")
+      ancestor = view.superview
     }
-    let scroll = nativeScroll
+    return false
+  }
+
+  private func isInside(_ root: NSView) -> Bool {
+    var view: NSView? = self
+    while let current = view {
+      if current === root { return true }
+      view = current.superview
+    }
+    return false
+  }
+
+  private func monitorLockedScreen() async {
+    while !Task.isCancelled {
+      try? await Task.sleep(for: .seconds(1))
+      guard !Task.isCancelled, window != nil,
+        let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+        (session["CGSSessionScreenIsLocked"] as? Int) == 1,
+        CACurrentMediaTime() - lastTickAt > 0.75 else { continue }
+      link?.invalidate(); link = nil
+      syntheticVsync = CACurrentMediaTime()
+      PerformanceRun.shared.useTimerFrameDriver()
+      PerformanceRun.log("PERF scroll frame_driver=timer_locked_screen measurement=main_thread_layout")
+      let period = 1.0 / Double(PerformanceOptions.scrollHz)
+      timer = Timer.scheduledTimer(withTimeInterval: period, repeats: true) { [weak self] _ in
+        MainActor.assumeIsolated { self?.timerTick() }
+      }
+      return
+    }
+  }
+
+  @objc private func tick(_ link: CADisplayLink) {
+    lastTickAt = CACurrentMediaTime()
+    advance(vsync: link.timestamp, target: link.targetTimestamp)
+  }
+
+  private func timerTick() {
+    let period = 1.0 / Double(PerformanceOptions.scrollHz)
+    syntheticVsync += period
+    advance(vsync: syntheticVsync, target: syntheticVsync + period)
+  }
+
+  private func advance(vsync: Double, target: Double) {
+    guard PerformanceScrollRegistry.shared.isActive(self), let scroll = nativeScroll else { return }
+    let clip = scroll.contentView
+    PerformanceRun.shared.updateScroll(actualY: clip.bounds.minY,
+      extent: max(0, (scroll.documentView?.bounds.height ?? 0) - clip.bounds.height))
     let pointerInside = window.map { $0.frame.contains(NSEvent.mouseLocation) } ?? false
-    if !PerformanceRun.shared.scrollTick(arrival: CACurrentMediaTime(), vsync: link.timestamp, target: link.targetTimestamp,
-      pointerInside: pointerInside, move: { [move] y in
-      if let scroll {
-        scroll.contentView.scroll(to: NSPoint(x: scroll.contentView.bounds.origin.x, y: y))
-        scroll.reflectScrolledClipView(scroll.contentView)
-      } else { move(y) }
+    if !PerformanceRun.shared.scrollTick(arrival: CACurrentMediaTime(), vsync: vsync, target: target,
+      pointerInside: pointerInside, move: { y in
+      clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
+      scroll.reflectScrolledClipView(clip)
     }) {
-      link.invalidate(); self.link = nil
+      stop()
     }
+  }
+
+  func stop() {
+    startTask?.cancel(); startTask = nil
+    fallbackTask?.cancel(); fallbackTask = nil
+    link?.invalidate(); link = nil
+    timer?.invalidate(); timer = nil
+    nativeScroll = nil
+    PerformanceScrollRegistry.shared.deactivate(self)
   }
 }
 extension View {
   func performanceScrollProbe(page: String) -> some View { modifier(PerformanceScrollModifier(page: page)) }
+  func performanceScrollTarget(target: String) -> some View { modifier(PerformanceScrollTargetModifier(target: target)) }
 }

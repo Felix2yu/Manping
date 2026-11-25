@@ -8,6 +8,7 @@ import SwiftUI
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, NSMenuDelegate {
   var window: NSWindow!
   let model = AppModel()
+  private lazy var keyboardRouter = PlaybackKeyboardRouter(delegate: self)
   var diagnosticsTimer: Timer?
   var probes: [String: String] = [:]
   var representation: [String: Any] = [:]
@@ -166,6 +167,7 @@ import SwiftUI
     if !model.openLink(field.stringValue) { model.error = "没有识别出哔哩哔哩链接或编号。" }
   }
   func applicationDidFinishLaunching(_ notification: Notification) {
+    keyboardRouter.install()
     // Performance diagnostics run as an accessory (no Dock icon, never activated by launch) so they do
     // not take focus or keystrokes from the user's frontmost app. `.prohibited` stops the display
     // link from driving the window at all, so it cannot be used here.
@@ -322,7 +324,15 @@ import SwiftUI
         }
       #endif
       try PerformanceOptions.validate()
-      if let page = PerformanceOptions.scrollPage { launchPage = page == "search" ? "search:性能样本" : page }
+      if let page = PerformanceOptions.scrollPage {
+        switch page {
+        case "search": launchPage = "search:性能样本"
+        case "moment-all": launchPage = "moment:all"
+        case "favorites": launchPage = "favorites:11"
+        case "pgc": launchPage = "anime:index"
+        default: launchPage = page
+        }
+      }
       if PerformanceOptions.requested { skipAuthentication = true; launchTheme = .dark }
       options = try DiagnosticArguments(diagnosticArgs)
       if let launchPage,
@@ -752,6 +762,15 @@ import SwiftUI
     item("小窗", #selector(toggleCompact), "p", [.command, .shift], in: playback)
     item("在独立窗口播放", #selector(toggleDetachedPlayback), "p", [.command, .option], in: playback)
     playback.addItem(.separator())
+    item("点赞 / 取消点赞（Q）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .like)!
+    item("投币（W）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .coin)!
+    item("收藏（E）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .favorite)!
+    item("三连（长按 R）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .triple)!
+    item("视频简介（X）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .info)!
+    item("视频评论（C）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .comments)!
+    item("分享 / 双击复制链接（V）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .share)!
+    item("发弹幕（Enter）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .composeDanmaku)!
+    playback.addItem(.separator())
     item("发弹幕", #selector(composeLiveDanmaku), in: playback)
     item("送礼物", #selector(openLiveGifts), in: playback)
     item("点赞", #selector(likeLiveRoom), in: playback)
@@ -857,6 +876,9 @@ import SwiftUI
     case #selector(composeLiveDanmaku), #selector(openLiveGifts), #selector(likeLiveRoom):
       guard let live = model.livePlayback, !model.compactPlayer else { return false }
       return action != #selector(openLiveGifts) || live.ui.settings.liveEffective.giftMessages
+    case #selector(runShortcut(_:)):
+      let choices = PlaybackShortcut.allCases
+      return choices.indices.contains(item.tag) && canPerformShortcut(choices[item.tag], in: NSApp.keyWindow)
     case #selector(saveVideoScreenshot): return model.canTakeScreenshot
     case #selector(goBack): return model.canGoBack
     case #selector(goForward): return model.canGoForward
@@ -872,7 +894,8 @@ import SwiftUI
       guard model.selected != nil || model.pgcPlayback?.episode != nil || model.livePlayback != nil else { return false }
       // A live stream has no timeline to step through.
       if model.livePlayback != nil, [#selector(seekBackward), #selector(seekForward)].contains(action) { return false }
-      if (NSApp.keyWindow?.firstResponder as? NSTextView)?.isEditable == true,
+      let editor = NSApp.keyWindow?.firstResponder as? NSTextView
+      if editor?.isEditable == true || editor?.hasMarkedText() == true,
         item.keyEquivalentModifierMask.isEmpty, !item.keyEquivalent.isEmpty { return false }
       if action == #selector(previousEpisode) { return model.canPlayPrevious }
       if action == #selector(nextEpisode) { return model.canPlayNext }
@@ -920,6 +943,103 @@ import SwiftUI
   @objc private func likeLiveRoom() {
     guard !model.compactPlayer else { return }
     model.livePlayback?.ui.like()
+  }
+  func canPerformShortcut(_ action: PlaybackShortcut, in eventWindow: NSWindow?) -> Bool {
+    let player = activePlayer
+    switch action {
+    case .home: return eventWindow != nil && eventWindow !== window
+    case .player: return model.hasPlayback
+    case .cycleWindows: return window != nil
+    case .zoom: return eventWindow != nil
+    case .compact, .fullScreen, .share, .copyShareLink, .playPause, .toggleDanmaku, .mute: return model.hasPlayback
+    case .info, .comments, .like, .coin, .favorite, .triple, .composeDanmaku:
+      guard model.hasPlayback, !model.compactPlayer else { return false }
+      switch action {
+      case .info: return model.playbackPageShortcuts?.toggleInfo != nil
+      case .comments: return model.playbackPageShortcuts?.toggleComments != nil
+      case .like: return model.playbackPageShortcuts?.like != nil
+      case .coin: return model.playbackPageShortcuts?.coin != nil
+      case .favorite: return model.playbackPageShortcuts?.favorite != nil
+      case .triple: return model.playbackPageShortcuts?.triple != nil
+      case .composeDanmaku: return model.playbackPageShortcuts?.composeDanmaku != nil
+      default: return false
+      }
+    case .seekBackward: return model.hasPlayback && model.livePlayback == nil && player.duration > 0
+    case .seekForward: return model.hasPlayback && model.livePlayback == nil && player.duration > 0
+    case .volumeUp, .volumeDown: return model.hasPlayback
+    case .speedUp, .speedDown, .normalSpeed, .doubleSpeed: return model.hasPlayback && model.livePlayback == nil
+    case .previousAdjacent: return model.canPlayAdjacentPart(true)
+    case .nextAdjacent: return model.canPlayAdjacentPart(false)
+    case .previousHistory, .nextHistory: return false
+    case .exitFullScreen:
+      return (player.surface?.window ?? eventWindow)?.styleMask.contains(.fullScreen) == true
+    }
+  }
+
+  func performShortcut(_ action: PlaybackShortcut) {
+    let player = activePlayer
+    switch action {
+    case .home: window?.makeKeyAndOrderFront(nil)
+    case .player:
+      if !model.mainShowsPlayer || model.playbackElsewhere { model.showPlayer() }
+      else { model.cyclePlaybackWindows(from: NSApp.keyWindow) }
+    case .cycleWindows: model.cyclePlaybackWindows(from: NSApp.keyWindow)
+    case .zoom: NSApp.keyWindow?.performZoom(nil)
+    case .compact: model.toggleCompactPlayer()
+    case .info: model.playbackPageShortcuts?.toggleInfo?()
+    case .comments: model.playbackPageShortcuts?.toggleComments?()
+    case .like: model.playbackPageShortcuts?.like?()
+    case .coin: model.playbackPageShortcuts?.coin?()
+    case .favorite: model.playbackPageShortcuts?.favorite?()
+    case .triple: model.playbackPageShortcuts?.triple?()
+    case .composeDanmaku: model.playbackPageShortcuts?.composeDanmaku?()
+    case .playPause: player.togglePause()
+    case .seekBackward: player.seek(max(0, player.time - 5))
+    case .seekForward: player.seek(min(player.duration, player.time + 5))
+    case .volumeUp: player.setVolume(min(model.appSettings.number(.maxVolume), player.volume + 10))
+    case .volumeDown: player.setVolume(max(0, player.volume - 10))
+    case .speedUp: adjustPlaybackSpeed(up: true)
+    case .speedDown: adjustPlaybackSpeed(up: false)
+    case .normalSpeed: player.setSpeed(1)
+    case .doubleSpeed: player.setSpeed(2)
+    case .previousAdjacent: model.playAdjacentPart(true)
+    case .nextAdjacent: model.playAdjacentPart(false)
+    case .fullScreen: model.togglePlayerFullScreen()
+    case .exitFullScreen:
+      if model.hasPlayback, player.surface?.window?.styleMask.contains(.fullScreen) == true { model.togglePlayerFullScreen() }
+      else { NSApp.keyWindow?.toggleFullScreen(nil) }
+    case .mute: player.toggleMuted()
+    case .toggleDanmaku: player.commentsEnabled.toggle()
+    case .share: presentShareSheet()
+    case .copyShareLink:
+      guard let url = model.shareURLForPlayback else { return }
+      NSPasteboard.general.clearContents(); NSPasteboard.general.setString(url.absoluteString, forType: .string)
+      model.showPlaybackNotice("分享链接已复制")
+    case .previousHistory, .nextHistory: break
+    }
+  }
+
+  func beginShortcutSeekHold() {
+    guard model.hasPlayback, model.livePlayback == nil, activePlayer.duration > 0 else { return }
+    activePlayer.beginTemporarySpeed()
+  }
+  func endShortcutSeekHold() { activePlayer.endTemporarySpeed() }
+  private func adjustPlaybackSpeed(up: Bool) {
+    let choices: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
+    let current = activePlayer.speed
+    let target = up ? choices.first { $0 > current + 0.01 } : choices.last { $0 < current - 0.01 }
+    activePlayer.setSpeed(target ?? (up ? 2 : 0.5))
+  }
+  private func presentShareSheet() {
+    guard let url = model.shareURLForPlayback, let view = NSApp.keyWindow?.contentView else { return }
+    let picker = NSSharingServicePicker(items: [url])
+    picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+  }
+
+  @objc private func runShortcut(_ sender: NSMenuItem) {
+    let choices = PlaybackShortcut.allCases
+    guard choices.indices.contains(sender.tag) else { return }
+    performShortcut(choices[sender.tag])
   }
   @objc private func togglePlayback() { activePlayer.togglePause() }
   @objc private func seekBackward() { activePlayer.seek(max(0, activePlayer.time - model.appSettings.number(.stepBackward))) }
@@ -1051,7 +1171,7 @@ import SwiftUI
   func windowDidExitFullScreen(_ notification: Notification) { fullScreen.didExit() }
   func windowDidFailToEnterFullScreen(_ window: NSWindow) { fullScreen.didFailToEnter() }
   func windowDidFailToExitFullScreen(_ window: NSWindow) { fullScreen.didFailToExit() }
-  func applicationWillTerminate(_ notification: Notification) { model.shutdown() }
+  func applicationWillTerminate(_ notification: Notification) { keyboardRouter.shutdown(); model.shutdown() }
   func windowWillClose(_ notification: Notification) {
     // The settings window belongs to this one; closing the main window quits.
     SettingsWindowController.shared.close()

@@ -35,6 +35,7 @@ private enum HistoryError: LocalizedError {
   private var pending: Set<String> = []
   private var outbox: [String: ReportBody] = [:]
   private var sessions: [String: UUID] = [:]
+  private var seenSessions: [String: Set<UUID>] = [:]
   private var flushTask: Task<Void, Never>?
   private var reportTask: Task<Void, Never>?
   private var retryTask: Task<Void, Never>?
@@ -128,7 +129,7 @@ private enum HistoryError: LocalizedError {
     reportTask?.cancel(); reportTask = nil
     retryTask?.cancel(); retryTask = nil
     officialTask?.cancel(); officialTask = nil
-    pending.removeAll(); requested.removeAll(); outbox.removeAll(); records.removeAll(); sessions.removeAll(); testStatus = nil
+    pending.removeAll(); requested.removeAll(); outbox.removeAll(); records.removeAll(); sessions.removeAll(); seenSessions.removeAll(); testStatus = nil
     failureCount = 0; blockedUntil = nil
     persistOutbox()
     persist(immediate: true)
@@ -148,7 +149,7 @@ private enum HistoryError: LocalizedError {
     outboxURL = fixedOutboxURL ?? WatchHistoryCache.outboxFileURL(accountID: nextAccountID)
     records = cacheURL.map { WatchHistoryCache.load(from: $0) } ?? [:]
     outbox = loadOutbox()
-    pending.removeAll(); requested.removeAll(); sessions.removeAll()
+    pending.removeAll(); requested.removeAll(); sessions.removeAll(); seenSessions.removeAll()
     failureCount = 0; blockedUntil = nil; officialBlockedUntil = nil; testStatus = nil
   }
 
@@ -159,7 +160,7 @@ private enum HistoryError: LocalizedError {
     reportTask?.cancel(); reportTask = nil
     retryTask?.cancel(); retryTask = nil
     officialTask?.cancel(); officialTask = nil
-    pending.removeAll(); requested.removeAll(); records.removeAll(); sessions.removeAll()
+    pending.removeAll(); requested.removeAll(); records.removeAll(); sessions.removeAll(); seenSessions.removeAll()
     failureCount = 0; blockedUntil = nil
     refreshOfficial(force: true)
     flushOutbox()
@@ -279,15 +280,17 @@ private enum HistoryError: LocalizedError {
     }
   }
 
-  func record(_ bvid: String) -> WatchRecord? { canConnect ? records[bvid] : nil }
+  func record(_ bvid: String) -> WatchRecord? { records[bvid] }
+  func flushLocal() { persist(immediate: true) }
 
-  /// Mirrors the position already being sent to Bilibili into bili-history. The local
-  /// cache updates first so the next card the user sees is already marked correctly.
+  /// Mirrors the position already being sent to Bilibili into the local cache; only the
+  /// server upload depends on sync being enabled.
   func report(_ item: WatchProgressReporter.Item, seconds: Int, sessionID: UUID = UUID()) {
-    guard canConnect, !item.bvid.isEmpty, seconds >= 0,
-      sessions[item.bvid] == nil || sessions[item.bvid] == sessionID else { return }
-    let startedNewSession = sessions[item.bvid] == nil || sessions[item.bvid] != sessionID
-    if startedNewSession { sessions[item.bvid] = sessionID }
+    guard !item.bvid.isEmpty, seconds >= 0,
+      seenSessions[item.bvid]?.contains(sessionID) != true else { return }
+    let startedNewSession = sessions[item.bvid] != sessionID
+    sessions[item.bvid] = sessionID
+    seenSessions[item.bvid, default: []].insert(sessionID)
     let finished = item.duration > 0 && seconds >= item.duration
     let now = Int64(Date().timeIntervalSince1970)
     // Reuse the viewing session's timestamp from official history when it is close to now;
@@ -299,6 +302,7 @@ private enum HistoryError: LocalizedError {
       duration: item.duration, finished: finished, viewAt: viewAt)
     requested.insert(item.bvid)
     persist()
+    guard canConnect else { return }
     let body = ReportBody(bvid: item.bvid, aid: item.aid, cid: item.cid, title: item.title,
       author: item.author, authorMid: item.authorID, cover: item.cover, duration: item.duration,
       progress: seconds, viewAt: viewAt)

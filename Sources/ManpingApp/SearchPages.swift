@@ -55,15 +55,18 @@ struct LibraryResults: View {
               }
             }
           }
-          }.cardGridContent()
+          }.cardGridContent().performanceScrollTarget(target: "search")
           if let error = library.error {
             PageStateView(.error, title: "没能加载更多", message: error, actionTitle: "重试") {
               Task { await library.loadNext() }
             }
           } else if library.hasMore {
-            LoadMoreFooter(isLoading: library.isLoading) { Task { await library.loadNext() } }
+            LoadMoreFooter(isLoading: library.isLoading, autoLoad: false) { Task { await library.loadNext() } }
           }
         }.cardGrid().performanceScrollProbe(page: "search").padding(Theme.gridPadding)
+          .prefetchOnScroll(enabled: library.hasMore && !library.isLoading && library.error == nil) {
+            Task { await library.loadNext() }
+          }
       }
     }.foregroundStyle(Theme.text(scheme)).onDisappear { relations.cancel() }
   }

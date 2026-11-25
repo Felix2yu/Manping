@@ -23,12 +23,22 @@ public enum M3Fixture {
     case "/x/relation/tags":
       data = [["tagid": 0, "name": "默认分组", "count": 100], ["tagid": 1, "name": "音乐与生活", "count": 64]]
     case "/x/relation/tag":
-      let total = parameters["tagid"] == "1" ? 64 : 100
-      let start = (page - 1) * 50
-      data = start < total ? (start..<min(start + 50, total)).map { uiUser(Int64(10001 + $0)) } : []
+      if FixturePerformance.isEnabled(target: "following") {
+        data = (FixturePerformance.indices(page: page, pageSize: 50) ?? 0..<0)
+          .map { uiUser(Int64(10001 + $0)) }
+      } else {
+        let total = parameters["tagid"] == "1" ? 64 : 100
+        let start = (page - 1) * 50
+        data = start < total ? (start..<min(start + 50, total)).map { uiUser(Int64(10001 + $0)) } : []
+      }
     case "/x/relation/followers":
-      let start = (page - 1) * 50
-      data = ["list": start < 100 ? (start..<min(start + 50, 100)).map { uiUser(Int64(10001 + $0)) } : [], "total": 100]
+      if FixturePerformance.isEnabled(target: "followers") {
+        let indices = FixturePerformance.indices(page: page, pageSize: 50) ?? 0..<0
+        data = ["list": indices.map { uiUser(Int64(10001 + $0)) }, "total": FixturePerformance.sampleCount]
+      } else {
+        let start = (page - 1) * 50
+        data = ["list": start < 100 ? (start..<min(start + 50, 100)).map { uiUser(Int64(10001 + $0)) } : [], "total": 100]
+      }
     case "/x/web-interface/wbi/search/type":
       let kind = parameters["search_type"] ?? "video"
       let items: [[String: Any]] = (0..<12).map { index in
@@ -43,15 +53,30 @@ public enum M3Fixture {
       }
       data = ["result": page <= 2 ? items : [], "numPages": 2, "numResults": 24]
     case "/x/v2/history/toview":
-      let start = (page - 1) * 40
-      data = ["list": start < 48 ? (start..<min(start + 40, 48)).map(uiVideo) : [], "count": 48]
+      if FixturePerformance.isEnabled(target: "later") {
+        let indices = FixturePerformance.indices(page: page, pageSize: 40) ?? 0..<0
+        data = ["list": indices.map(uiVideo), "count": FixturePerformance.sampleCount]
+      } else {
+        let start = (page - 1) * 40
+        data = ["list": start < 48 ? (start..<min(start + 40, 48)).map(uiVideo) : [], "count": 48]
+      }
     case "/x/v3/fav/resource/list":
-      let start = (page - 1) * 20
-      let items: [[String: Any]] = start < 36 ? (start..<min(start + 20, 36)).map { index in
-        ["id": 789 + index, "type": 2, "title": "本地收藏 · \(index + 1)", "cover": "https://fixture.invalid/cover/\(index)", "duration": 180 + index,
-          "fav_time": 1_760_000_000 - index * 3600, "upper": ["mid": 10001, "name": "本地 UP 主", "face": "https://fixture.invalid/avatar/1"], "cnt_info": ["play": 120000]]
-      } : []
-      data = ["medias": items, "has_more": page < 2, "info": ["media_count": 36]]
+      if FixturePerformance.isEnabled(target: "favorites") {
+        let indices = FixturePerformance.indices(page: page, pageSize: 20) ?? 0..<0
+        let items = indices.map { index in
+          ["id": 789 + index, "type": 2, "title": "本地收藏 · \(index + 1)", "cover": FixturePerformance.cover(index), "duration": 180 + index,
+            "fav_time": 1_760_000_000 - index * 3600, "upper": ["mid": 10001, "name": "本地 UP 主", "face": "https://fixture.invalid/avatar/1"], "cnt_info": ["play": 120000]]
+        }
+        data = ["medias": items, "has_more": page * 20 < FixturePerformance.sampleCount,
+          "info": ["media_count": FixturePerformance.sampleCount]]
+      } else {
+        let start = (page - 1) * 20
+        let items: [[String: Any]] = start < 36 ? (start..<min(start + 20, 36)).map { index in
+          ["id": 789 + index, "type": 2, "title": "本地收藏 · \(index + 1)", "cover": "https://fixture.invalid/cover/\(index)", "duration": 180 + index,
+            "fav_time": 1_760_000_000 - index * 3600, "upper": ["mid": 10001, "name": "本地 UP 主", "face": "https://fixture.invalid/avatar/1"], "cnt_info": ["play": 120000]]
+        } : []
+        data = ["medias": items, "has_more": page < 2, "info": ["media_count": 36]]
+      }
     default: return response(path: path, parameters: parameters)
     }
     return try? JSONSerialization.data(withJSONObject: ["code": 0, "data": data])
@@ -78,7 +103,8 @@ public enum M3Fixture {
   }
   private static func spaceResponse(path: String, parameters: [String: String], ui: Bool) -> Data? {
     let page = Int(parameters["pn"] ?? parameters["page_num"] ?? "1") ?? 1
-    let total = ui ? 40 : 1
+    let performance = ui && FixturePerformance.isEnabled(target: "space")
+    let total = performance ? FixturePerformance.sampleCount : (ui ? 40 : 1)
     let start = (page - 1) * 30
     let videos = start < total ? (start..<min(start + 30, total)).map(uiVideo) : []
     let data: Any
@@ -199,7 +225,18 @@ public actor M3FixtureRPCTransport: BiliRPCTransport {
       arc.archive.firstCid = 456; arc.archive.duration = 90
       arc.archive.author.mid = 123; arc.archive.author.name = "Fixture owner"
       reply.archives = [arc]; reply.total = 1
-      if richUI {
+      if FixturePerformance.isEnabled(target: "space") {
+        let page = Int(request.pn)
+        reply.archives = (FixturePerformance.indices(page: page, pageSize: 20) ?? 0..<0).map { index in
+          var item = arc
+          item.archive.aid = Int64(789 + index); item.archive.title = "本地投稿 · \(index + 1)"
+          item.archive.firstCid = Int64(456 + index)
+          item.archive.pic = FixturePerformance.cover(index)
+          item.archive.stat.view = Int32(120000 + index * 1000)
+          return item
+        }
+        reply.total = Int64(FixturePerformance.sampleCount)
+      } else if richUI {
         let start = max(0, Int(request.pn - 1)) * 20
         reply.archives = start < 40 ? (start..<min(start + 20, 40)).map { index in
           var item = arc
@@ -225,40 +262,57 @@ public actor M3FixtureRPCTransport: BiliRPCTransport {
     } else if let request = request as? Bilibili_App_Interfaces_V1_CursorReq {
       var reply = Bilibili_App_Interfaces_V1_CursorV2Reply()
       let start = Int(request.cursor.max)
-      reply.items = start < 24 ? (start..<min(start + 12, 24)).map { index in
-        var item = Self.historyItem()
-        item.kid = Int64(321 + index); item.oid = Int64(789 + index)
-        item.title = "本地观看记录 · \(index + 1)"; item.viewAt -= Int64(index * 3600)
-        if request.business == "article" {
-          item.business = "article"; item.uri = "https://www.bilibili.com/read/cv\(321 + index)"
-          item.cardArticle.covers = ["https://fixture.invalid/cover/\(index)"]
-        } else if request.business == "live" {
-          item.business = "live"; item.uri = "https://live.bilibili.com/\(321 + index)"
-          item.cardLive.cover = "https://fixture.invalid/cover/\(index)"
-        } else { item.cardUgc.cover = "https://fixture.invalid/cover/\(index)" }
-        return item
-      } : []
-      reply.cursor.max = Int64(start + reply.items.count); reply.hasMore_p = start + reply.items.count < 24
+      if FixturePerformance.isEnabled(target: "history") {
+        let page = Self.performanceHistoryPage(start: start, business: request.business)
+        reply.items = page.items; reply.cursor.max = page.next; reply.hasMore_p = page.hasMore
+      } else {
+        reply.items = start < 24 ? (start..<min(start + 12, 24)).map { index in
+          var item = Self.historyItem()
+          item.kid = Int64(321 + index); item.oid = Int64(789 + index)
+          item.title = "本地观看记录 · \(index + 1)"; item.viewAt -= Int64(index * 3600)
+          if request.business == "article" {
+            item.business = "article"; item.uri = "https://www.bilibili.com/read/cv\(321 + index)"
+            item.cardArticle.covers = ["https://fixture.invalid/cover/\(index)"]
+          } else if request.business == "live" {
+            item.business = "live"; item.uri = "https://live.bilibili.com/\(321 + index)"
+            item.cardLive.cover = "https://fixture.invalid/cover/\(index)"
+          } else { item.cardUgc.cover = "https://fixture.invalid/cover/\(index)" }
+          return item
+        } : []
+        reply.cursor.max = Int64(start + reply.items.count); reply.hasMore_p = start + reply.items.count < 24
+      }
       payload = try reply.serializedData()
-    } else if request is Bilibili_App_Interfaces_V1_SearchReq {
+    } else if let request = request as? Bilibili_App_Interfaces_V1_SearchReq {
       var reply = Bilibili_App_Interfaces_V1_SearchReply()
-      reply.items = [Self.historyItem()]; reply.page.total = 1
+      if FixturePerformance.isEnabled(target: "history") {
+        let indices = FixturePerformance.indices(page: Int(request.pn), pageSize: 60) ?? 0..<0
+        reply.items = indices.map { Self.performanceHistoryItem(index: $0, business: request.business) }
+        reply.page.total = Int64(FixturePerformance.sampleCount)
+        reply.hasMore_p = indices.upperBound < FixturePerformance.sampleCount
+      } else {
+        reply.items = [Self.historyItem()]; reply.page.total = 1
+      }
       payload = try reply.serializedData()
     } else if let request = request as? Bilibili_App_Interfaces_V1_CursorV2Req {
       var reply = Bilibili_App_Interfaces_V1_CursorV2Reply()
-      var item = Self.historyItem()
-      if request.business == "article" {
-        item.business = "article"; item.kid = 77; item.title = "Fixture history article"
-        item.uri = "bilibili://article/77"
-        item.cardArticle.name = "Fixture owner"; item.cardArticle.mid = 123
-        item.cardArticle.covers = ["https://fixture.invalid/cover/2"]
-      } else if request.business == "live" {
-        item.business = "live"; item.kid = 88; item.title = "Fixture history live"
-        item.uri = "bilibili://live/88"
-        item.cardLive.name = "Fixture owner"; item.cardLive.mid = 123
-        item.cardLive.cover = "https://fixture.invalid/cover/3"
+      if FixturePerformance.isEnabled(target: "history") {
+        let page = Self.performanceHistoryPage(start: Int(request.cursor.max), business: request.business)
+        reply.items = page.items; reply.cursor.max = page.next; reply.hasMore_p = page.hasMore
+      } else {
+        var item = Self.historyItem()
+        if request.business == "article" {
+          item.business = "article"; item.kid = 77; item.title = "Fixture history article"
+          item.uri = "bilibili://article/77"
+          item.cardArticle.name = "Fixture owner"; item.cardArticle.mid = 123
+          item.cardArticle.covers = ["https://fixture.invalid/cover/2"]
+        } else if request.business == "live" {
+          item.business = "live"; item.kid = 88; item.title = "Fixture history live"
+          item.uri = "bilibili://live/88"
+          item.cardLive.name = "Fixture owner"; item.cardLive.mid = 123
+          item.cardLive.cover = "https://fixture.invalid/cover/3"
+        }
+        reply.items = [item]; reply.cursor.max = 1
       }
-      reply.items = [item]; reply.cursor.max = 1
       payload = try reply.serializedData()
     } else if request is Bilibili_App_Dynamic_V2_DynAllPersonalReq {
       var reply = Bilibili_App_Dynamic_V2_DynAllPersonalReply()
@@ -307,6 +361,35 @@ public actor M3FixtureRPCTransport: BiliRPCTransport {
     video.rcmdReasonStyle.text = index % 3 == 0 ? "很多人点赞" : ""
     card.smallCoverV5 = video
     return card
+  }
+  private static func performanceHistoryPage(start: Int, business: String)
+    -> (items: [Bilibili_App_Interfaces_V1_CursorItem], next: Int64, hasMore: Bool) {
+    let start = min(FixturePerformance.sampleCount, max(0, start))
+    let end = min(FixturePerformance.sampleCount, start + 60)
+    return ((start..<end).map { performanceHistoryItem(index: $0, business: business) },
+      Int64(end), end < FixturePerformance.sampleCount)
+  }
+  private static func performanceHistoryItem(index: Int, business: String)
+    -> Bilibili_App_Interfaces_V1_CursorItem {
+    var item = historyItem()
+    item.title = "本地观看记录 · \(index + 1)"; item.viewAt -= Int64(index * 3600)
+    switch business {
+    case "article":
+      item.business = "article"; item.kid = Int64(321 + index); item.oid = item.kid
+      item.uri = "https://www.bilibili.com/read/cv\(321 + index)"
+      item.cardArticle.name = "Fixture owner"; item.cardArticle.mid = 123
+      item.cardArticle.covers = [FixturePerformance.cover(index)]
+    case "live":
+      item.business = "live"; item.kid = Int64(321 + index); item.oid = item.kid
+      item.uri = "https://live.bilibili.com/\(321 + index)"
+      item.cardLive.name = "Fixture owner"; item.cardLive.mid = 123
+      item.cardLive.cover = FixturePerformance.cover(index)
+    default:
+      item.kid = Int64(789 + index); item.oid = item.kid
+      item.uri = "https://www.bilibili.com/video/av\(789 + index)"
+      item.cardUgc.cid = Int64(456 + index); item.cardUgc.cover = FixturePerformance.cover(index)
+    }
+    return item
   }
   private static func historyItem() -> Bilibili_App_Interfaces_V1_CursorItem {
     var item = Bilibili_App_Interfaces_V1_CursorItem()

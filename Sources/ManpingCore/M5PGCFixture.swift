@@ -38,17 +38,33 @@ public enum M5PGCFixture {
                    filter("is_finish", "状态", [("-1", "全部"), ("1", "已完结"), ("0", "连载")])]]
     case "/pgc/season/index/result":
       envelope = "data"
-      let page = max(1, min(3, Int(parameters["page"] ?? "1") ?? 1))
       let type = Int(parameters["index_type"] ?? "1") ?? 1
       let name = [1: "动漫", 2: "电影", 5: "电视剧", 3: "纪录片"][type] ?? "动漫"
-      let items: [[String: Any]] = page >= 3 ? [] : (0..<30).map { index in
-        let sid = 1000 + type * 100 + (page - 1) * 30 + index
-        return ["season_id": sid, "title": "\(name) · 本地剧集 \((page - 1) * 30 + index + 1)",
-          "cover": "https://fixture.invalid/cover/\(index % 8)", "badge": index % 3 == 0 ? "会员" : "",
-          "index_show": "更新至第 12 集", "subTitle": parameters["year"] == "2026" ? "2026 · 奇幻之旅" : "奇幻之旅",
-          "score": "8.5", "first_ep": ["ep_id": sid * 100 + 1]]
+      let indexPayload: [String: Any]
+      if FixturePerformance.isEnabled(target: "pgc") {
+        let page = max(1, Int(parameters["page"] ?? "1") ?? 1)
+        let indices = FixturePerformance.indices(page: page, pageSize: 30) ?? 0..<0
+        let items = indices.map { index in
+          let sid = 1000 + type * 100 + index
+          return ["season_id": sid, "title": "\(name) · 本地剧集 \(index + 1)",
+            "cover": FixturePerformance.cover(index), "badge": index % 3 == 0 ? "会员" : "",
+            "index_show": "更新至第 12 集", "subTitle": parameters["year"] == "2026" ? "2026 · 奇幻之旅" : "奇幻之旅",
+            "score": "8.5", "first_ep": ["ep_id": sid * 100 + 1]]
+        }
+        indexPayload = ["list": items, "has_next": indices.upperBound < FixturePerformance.sampleCount ? 1 : 0,
+          "num": page, "size": 30, "total": FixturePerformance.sampleCount]
+      } else {
+        let page = max(1, min(3, Int(parameters["page"] ?? "1") ?? 1))
+        let items: [[String: Any]] = page >= 3 ? [] : (0..<30).map { index in
+          let sid = 1000 + type * 100 + (page - 1) * 30 + index
+          return ["season_id": sid, "title": "\(name) · 本地剧集 \((page - 1) * 30 + index + 1)",
+            "cover": "https://fixture.invalid/cover/\(index % 8)", "badge": index % 3 == 0 ? "会员" : "",
+            "index_show": "更新至第 12 集", "subTitle": parameters["year"] == "2026" ? "2026 · 奇幻之旅" : "奇幻之旅",
+            "score": "8.5", "first_ep": ["ep_id": sid * 100 + 1]]
+        }
+        indexPayload = ["list": items, "has_next": page == 1 ? 1 : 0, "num": page, "size": 30, "total": 60]
       }
-      payload = ["list": items, "has_next": page == 1 ? 1 : 0, "num": page, "size": 30, "total": 60]
+      payload = indexPayload
     case "/pgc/view/v2/app/season":
       envelope = "data"
       let requested = Int64(parameters["season_id"] ?? "") ?? (Int64(parameters["ep_id"] ?? "") ?? 1001) / 100

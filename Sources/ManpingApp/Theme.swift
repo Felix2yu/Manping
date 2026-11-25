@@ -635,6 +635,7 @@ struct SegmentedTabs<Value: Hashable>: View {
   var overflow: [(Value, String)] = []
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var keyboardNavigation = NSApp.isFullKeyboardAccessEnabled
   @Namespace private var thumb
 
   var body: some View {
@@ -656,6 +657,10 @@ struct SegmentedTabs<Value: Hashable>: View {
             }
             .contentShape(Capsule())
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+          .focusEffectDisabled(!keyboardNavigation)
+          .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            keyboardNavigation = NSApp.isFullKeyboardAccessEnabled
+          }
           .demoAnchor("tab.\(title)")
       }
       if !overflow.isEmpty {

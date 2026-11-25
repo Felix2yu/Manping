@@ -223,6 +223,8 @@ enum MpvParkingBudget {
   /// Display-sleep assertion held only while frames are actually advancing.
   private let sleepGuard = PlaybackPowerAssertion()
   @Published var volume: Double = 80
+  private var volumeBeforeMute: Double?
+  var isMuted: Bool { volume == 0 }
   @Published var speed: Double = 1
   var status = "未加载"
   @Published var error: String?
@@ -888,8 +890,13 @@ enum MpvParkingBudget {
   }
   func setVolume(_ value: Double) {
     guard value.isFinite, value >= 0 else { return }
+    if value > 0 { volumeBeforeMute = value }
     volume = value; userVolume = (value, Date().addingTimeInterval(0.8)); Self.sessionVolume = value
     set("volume", String(value))
+  }
+  func toggleMuted() {
+    if volume > 0 { setVolume(0) }
+    else { setVolume(min(runtimeSettings.number(.maxVolume), volumeBeforeMute ?? 80)) }
   }
   private func isStale(_ sample: Double, against user: (value: Double, until: Date)?) -> Bool {
     guard let user, Date() < user.until else { return false }

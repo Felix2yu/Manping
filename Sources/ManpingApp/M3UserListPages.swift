@@ -43,7 +43,8 @@ struct M3FollowingPage: View {
         SidebarResizeHandle(width: $storedWidth, range: 180...400)
       }
       VStack(spacing: 0) {
-        M3UserResults(library: library, relations: relations, model: model, emptyText: "这个分组还没有关注的人")
+        M3UserResults(library: library, relations: relations, model: model,
+          emptyText: "这个分组还没有关注的人", performanceTarget: "following")
       }
     }.foregroundStyle(Theme.text(scheme))
       .pageToolbar(title: mid == model.accountMID ? "我的关注" : "关注",
@@ -72,7 +73,8 @@ struct M3FollowersPage: View {
   }
   var body: some View {
     VStack(spacing: 0) {
-      M3UserResults(library: library, relations: relations, model: model, emptyText: "还没有粉丝")
+      M3UserResults(library: library, relations: relations, model: model,
+        emptyText: "还没有粉丝", performanceTarget: "followers")
     }
       .pageToolbar(title: mid == model.accountMID ? "我的粉丝" : "粉丝", subtitle: "\(library.total) 位粉丝",
         refresh: { Task { await library.refresh() } })
@@ -98,6 +100,7 @@ struct M3UserResults: View {
   @ObservedObject var relations: UserRelationsModel
   @ObservedObject var model: AppModel
   let emptyText: String
+  let performanceTarget: String
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     Group {
@@ -115,7 +118,7 @@ struct M3UserResults: View {
             ForEach(library.users) { user in
               M3UserCard(user: user, relations: relations, model: model)
             }
-          }.padding(Theme.gridPadding)
+          }.padding(Theme.gridPadding).performanceScrollTarget(target: performanceTarget)
           if let error = library.error {
             PageStateView(.error, title: "没能加载更多用户", message: error, actionTitle: "重试") {
               Task { await library.loadNext() }
@@ -123,7 +126,7 @@ struct M3UserResults: View {
           } else if library.hasMore {
             LoadMoreFooter(isLoading: library.isLoading) { Task { await library.loadNext() } }
           }
-        }
+        }.performanceScrollProbe(page: performanceTarget)
       }
     }.foregroundStyle(Theme.text(scheme)).frame(maxWidth: .infinity, maxHeight: .infinity)
   }

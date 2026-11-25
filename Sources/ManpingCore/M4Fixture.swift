@@ -92,6 +92,15 @@ public enum M4Fixture {
   }
   private static func feed(video: Bool, offset: String, host: Int64? = nil)
     -> (items: [Bilibili_App_Dynamic_V2_DynamicItem], offset: String, hasMore: Bool) {
+    if performanceScroll {
+      let start = max(0, Int(offset) ?? 0)
+      let items = (start..<min(600, start + 512)).map { index in
+        dynamic(index: index, author: host ?? Int64(30001 + index % 5),
+          kind: video ? 0 : index % 5, performance: true)
+      }
+      let next = min(600, start + 512)
+      return (items, next < 600 ? String(next) : "", next < 600)
+    }
     let next = video ? "m4-video-next" : "m4-all-next"
     let end = video ? "m4-video-end" : "m4-all-end"
     guard offset.isEmpty || offset == next else { return ([], end, false) }
@@ -105,7 +114,14 @@ public enum M4Fixture {
     }
     return (items, start == 0 ? next : end, start == 0)
   }
-  private static func dynamic(index: Int, author: Int64, kind: Int) -> Bilibili_App_Dynamic_V2_DynamicItem {
+  private static var performanceScroll: Bool {
+    let arguments = ProcessInfo.processInfo.arguments
+    guard let index = arguments.firstIndex(of: "--perf-scroll"), arguments.indices.contains(index + 1) else { return false }
+    let target = arguments[index + 1]
+    return target == "moment" || target == "moment-all"
+  }
+  private static func dynamic(index: Int, author: Int64, kind: Int, performance: Bool = false)
+    -> Bilibili_App_Dynamic_V2_DynamicItem {
     var item = Bilibili_App_Dynamic_V2_DynamicItem()
     item.extend.dynIDStr = String(9_000_000 + author * 100 + Int64(index))
     var authorModule = Bilibili_App_Dynamic_V2_Module()
@@ -132,7 +148,7 @@ public enum M4Fixture {
       content.moduleDynamic.dynArchive.avid = Int64(100 + index)
       content.moduleDynamic.dynArchive.cid = Int64(1000 + index)
       content.moduleDynamic.dynArchive.title = "动态视频 · \(index + 1) · 记录创作与生活"
-      content.moduleDynamic.dynArchive.cover = "https://fixture.invalid/cover/\(index)"
+      content.moduleDynamic.dynArchive.cover = "https://fixture.invalid/cover/\(performance ? index % 8 : index)"
       content.moduleDynamic.dynArchive.uri = "https://www.bilibili.com/video/av\(100 + index)"
       content.moduleDynamic.dynArchive.duration = 180; content.moduleDynamic.dynArchive.view = 120_000
     case 1:
@@ -140,7 +156,7 @@ public enum M4Fixture {
       content.moduleDynamic.type = .mdlDynDraw; content.moduleDynamic.dynDraw.id = Int64(7000 + index)
       content.moduleDynamic.dynDraw.items = (0..<3).map { image in
         var draw = Bilibili_App_Dynamic_V2_MdlDynDrawItem()
-        draw.src = "https://fixture.invalid/cover/\(index * 3 + image)"; draw.width = 800; draw.height = 800
+        draw.src = "https://fixture.invalid/cover/\(performance ? (index * 3 + image) % 8 : index * 3 + image)"; draw.width = 800; draw.height = 800
         return draw
       }
     case 2: item.cardType = .word
@@ -152,7 +168,7 @@ public enum M4Fixture {
       content.moduleDynamic.type = .mdlDynArticle; content.moduleDynamic.dynArticle.id = Int64(2000 + index)
       content.moduleDynamic.dynArticle.title = "本地创作笔记 · \(index + 1)"
       content.moduleDynamic.dynArticle.desc = "这是一篇用于检查动态专栏卡片的本地样本。"
-      content.moduleDynamic.dynArticle.covers = ["https://fixture.invalid/cover/\(index)"]
+      content.moduleDynamic.dynArticle.covers = ["https://fixture.invalid/cover/\(performance ? index % 8 : index)"]
     }
     var stat = Bilibili_App_Dynamic_V2_Module()
     stat.moduleType = .moduleStat; stat.moduleStat.like = Int64(120 + index * 15)

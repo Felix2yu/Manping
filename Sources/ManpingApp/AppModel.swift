@@ -340,15 +340,23 @@ import WebKit
   let proxySettingsModel = ProxySettingsModel()
   /// Debug playback reports exercise real playback but must never write to the account.
   private static let writesHistory = !ProcessInfo.processInfo.arguments.contains("--ui-playback-report")
-  private(set) lazy var watchHistory: WatchHistoryStore = {
-    let store = WatchHistoryStore(fetchOfficial: { [weak self] in
-      guard let self, !self.usesUIFixtures else { return [:] }
-      return await self.officialWatchRecords()
-    })
-    store.configure(enabled: appSettings.bool(.historySync), baseURL: appSettings.text(.historyServer),
-      token: BiliHistoryConfig.readToken(), accountID: accountMID)
-    return store
-  }()
+  private var watchHistoryStorage: WatchHistoryStore?
+  private var currentHistoryVideoID: String?
+  private var currentHistoryPosition = 0.0
+  var watchHistory: WatchHistoryStore {
+    get {
+      if let watchHistoryStorage { return watchHistoryStorage }
+      let store = WatchHistoryStore(fetchOfficial: { [weak self] in
+        guard let self, !self.usesUIFixtures else { return [:] }
+        return await self.officialWatchRecords()
+      })
+      store.configure(enabled: appSettings.bool(.historySync), baseURL: appSettings.text(.historyServer),
+        token: BiliHistoryConfig.readToken(), accountID: accountMID)
+      watchHistoryStorage = store
+      return store
+    }
+    set { watchHistoryStorage = newValue }
+  }
   /// One page of the account's own history: bili-history only crawls hourly, this fills the gap.
   private func officialWatchRecords() async -> [String: WatchRecord] {
     guard let rpc = try? standardRPCService() else { return [:] }
@@ -374,6 +382,7 @@ import WebKit
   @Published private(set) var accountMID: Int64? {
     didSet {
       if oldValue != accountMID {
+        currentHistoryVideoID = nil; currentHistoryPosition = 0
         restartUnreadPolling()
         watchHistory.configure(enabled: appSettings.bool(.historySync), baseURL: appSettings.text(.historyServer),
           token: BiliHistoryConfig.readToken(), accountID: accountMID)
@@ -456,6 +465,8 @@ import WebKit
   var debugAfterIdentityEvent: ((AuthIdentityEvent) async -> Void)?
   var debugCuratedRequest: Task<Void, Never>? { curatedTask }
   var debugVideoLoadRequest: Task<Void, Never>? { loadTask }
+  var debugRequestedStart: Double { currentStartAt }
+  func debugSetWatchHistory(_ store: WatchHistoryStore) { watchHistory = store }
   var debugSuppressPlaybackWindows = false
   var debugAllowFixtureQualityChanges = false
   var debugAfterQualityPrepare: (() async -> Void)?
@@ -503,6 +514,50 @@ import WebKit
   }()
   private var liveMediaSubscription: AnyCancellable?
   private let playbackWindow = M7PlaybackWindowCoordinator()
+  var playbackPageShortcuts: PlaybackPageShortcutActions?
+  var shareURLForPlayback: URL? {
+    if let playback = pgcPlayback { return playback.episode?.publicURL }
+    if let live = livePlayback {
+      return live.room?.webURL ?? URL(string: "https://live.bilibili.com/\(live.roomID)")
+    }
+    guard let selected else { return nil }
+    if let aid = videoDetails?.video.aid ?? selected.aid { return URL(string: "https://www.bilibili.com/video/av\(aid)") }
+    return selected.bvid.isEmpty ? nil : URL(string: "https://www.bilibili.com/video/\(selected.bvid)")
+  }
+  func canPlayAdjacentPart(_ previous: Bool) -> Bool {
+    if let playback = pgcPlayback {
+      guard let episodes = playback.details?.episodes, let episode = playback.episode,
+        let index = episodes.firstIndex(where: { $0.id == episode.id }) else { return false }
+      let target = index + (previous ? -1 : 1)
+      return episodes.indices.contains(target)
+    }
+    return adjacentPart(previous) != nil
+  }
+  private func adjacentPart(_ previous: Bool) -> VideoPart? {
+    guard let details = videoDetails, let selected, details.parts.count > 1 else { return nil }
+    guard let index = details.parts.firstIndex(where: { $0.cid == selected.cid }) else { return nil }
+    let target = index + (previous ? -1 : 1)
+    return details.parts.indices.contains(target) ? details.parts[target] : nil
+  }
+  func playAdjacentPart(_ previous: Bool) {
+    if let playback = pgcPlayback {
+      guard let episodes = playback.details?.episodes, let episode = playback.episode,
+        let index = episodes.firstIndex(where: { $0.id == episode.id }) else { return }
+      let target = index + (previous ? -1 : 1)
+      guard episodes.indices.contains(target) else { return }
+      playback.selectEpisode(episodes[target]); return
+    }
+    if let part = adjacentPart(previous) { openPart(part) }
+  }
+  func cyclePlaybackWindows(from current: NSWindow?) {
+    NSApp.activate()
+    let windows = [mainWindow, miniPlayer.panel, playbackWindow.window].compactMap { $0 }.filter { $0.isVisible }
+    guard let current, let index = windows.firstIndex(where: { $0 === current }) else {
+      if let first = windows.first { first.makeKeyAndOrderFront(nil) }
+      return
+    }
+    windows[(index + 1) % windows.count].makeKeyAndOrderFront(nil)
+  }
   /// Brings whichever window shows the player to the front.
   func showPlayer() {
     NSApp.activate()
@@ -808,8 +863,9 @@ import WebKit
     setUpProxy()
   }
   #if DEBUG
-  init(probeService: BiliService, observeIdentity: Bool = true) {
+  init(probeService: BiliService, libraryRPCTransport: BiliRPCTransport? = nil, observeIdentity: Bool = true) {
     service = probeService
+    self.libraryRPCTransport = libraryRPCTransport
     playbackBookmarks = try! PlaybackBookmarkStore(memoryOnly: true)
     if observeIdentity { observeQueueIdentity() }
   }
@@ -1093,7 +1149,11 @@ import WebKit
   func standardRPCService() throws -> any BiliRPCService {
     if let libraryStandardRPC { return libraryStandardRPC }
     let installationID = InstallationIdentity.rpc
-    let rpc = try NativeBiliRPCService(auth: service, installationID: installationID)
+    let rpc = if let libraryRPCTransport {
+      try NativeBiliRPCService(auth: service, transport: libraryRPCTransport, installationID: installationID)
+    } else {
+      try NativeBiliRPCService(auth: service, installationID: installationID)
+    }
     libraryStandardRPC = rpc
     return rpc
   }
@@ -1159,9 +1219,7 @@ import WebKit
         launchPGCSelection = identifier.hasPrefix("ss") ? PGCSelection(seasonID: id) : PGCSelection(episodeID: id)
         page = .anime; return true
       }
-      #if DEBUG
       if usesUIFixtures && name == "favorites:11" { overlays = [.favorites]; return true }
-      #endif
       for (prefix, route) in [("space:", 0), ("following:", 1), ("followers:", 2)] {
         if name.hasPrefix(prefix) {
           guard let mid = Int64(name.dropFirst(prefix.count)), mid > 0 else { return false }
@@ -1198,7 +1256,11 @@ import WebKit
   /// items (next part, playlist, related) stay where the picture is.
   func open(_ video: Video) { open(video, mode: nil) }
   func open(_ video: Video, startAt: Double, part: Int? = nil, mode: MacOpenMode? = nil) {
-    startVideo(video, preservingQueue: false, part: part, startAt: startAt)
+    open(video, startAt: startAt, part: part, mode: mode, useHistory: false)
+  }
+  private func open(_ video: Video, startAt: Double, part: Int? = nil, mode: MacOpenMode? = nil,
+    useHistory: Bool) {
+    startVideo(video, preservingQueue: false, part: part, startAt: startAt, useHistory: useHistory)
     pendingOpenMode = mode.map { OpenPlacement(mode: $0) } ?? defaultOpenPlacement
     // An explicit window opens right away; the media fills it when it loads, leaving the
     // window as it is by then.
@@ -1207,7 +1269,9 @@ import WebKit
       pendingOpenMode = OpenPlacement(mode: mode, windowDisplay: nil)
     }
   }
-  func open(_ video: Video, mode: MacOpenMode?) { open(video, startAt: 0, mode: mode) }
+  func open(_ video: Video, mode: MacOpenMode?) {
+    open(video, startAt: 0, mode: mode, useHistory: true)
+  }
   func resolvePGCLaunch() {
     if let room = launchLiveRoom { launchLiveRoom = nil; openLive(room); return }
     guard let selection = launchPGCSelection else { return }
@@ -1441,18 +1505,19 @@ import WebKit
   }
   /// The clip generation of a launch video whose anonymous load failed (not cancelled).
   private var anonymousLoadFailure: UUID?
-  private var deferredVideoRetry: (video: Video, generation: UUID, startAt: Double)?
+  private var deferredVideoRetry: (video: Video, generation: UUID, startAt: Double, useHistory: Bool)?
   private var currentStartAt = 0.0
+  private var currentUsesHistory = false
   private var requestedPart: Int?
   private func retryVideoForIdentity(_ video: Video) {
     let startAt = currentStartAt
     if pausedBrowsing.isBrowsing {
       pausedBrowsing.invalidate()
       player.suspendForBrowsing()
-      deferredVideoRetry = (video, clipGeneration, startAt)
+      deferredVideoRetry = (video, clipGeneration, startAt, currentUsesHistory)
     } else {
       startVideo(video, preservingQueue: false, identityRetry: true,
-        initiallyPaused: !player.playbackIntended, startAt: startAt)
+        initiallyPaused: !player.playbackIntended, startAt: startAt, useHistory: currentUsesHistory)
     }
   }
   private func retryDeferredVideo(resume: Bool, preservingOverlay: Bool = false) {
@@ -1460,7 +1525,7 @@ import WebKit
     let routes = overlays, forward = forwardRoutes
     deferredVideoRetry = nil
     startVideo(retry.video, preservingQueue: false, identityRetry: true,
-      initiallyPaused: !resume, startAt: retry.startAt)
+      initiallyPaused: !resume, startAt: retry.startAt, useHistory: retry.useHistory)
     if preservingOverlay, let route = playbackRoute {
       var restored = routes.filter { !Self.isPlayerRoute($0) }
       let index = min(routes.firstIndex(where: Self.isPlayerRoute) ?? restored.count, restored.count)
@@ -1469,9 +1534,34 @@ import WebKit
     }
     forwardRoutes = forward.filter { !Self.isPlayerRoute($0) }
   }
+  private func rememberHistoryPosition() {
+    let time = player.time
+    guard currentUsesHistory, let selected, !selected.bvid.isEmpty,
+      time.isFinite, time > 0,
+      let record = watchHistory.record(selected.bvid), record.progress == Int(time) else { return }
+    currentHistoryVideoID = selected.id; currentHistoryPosition = time
+    if progressReporter.hasSession(for: selected.id) {
+      progressReporter.sendCurrentPosition()
+      watchHistory.flushLocal()
+    }
+  }
+
+  private func currentResumeStart(for video: Video, cid: Int64?, fallback: Double? = nil) -> Double {
+    let fallback = fallback ?? currentStartAt
+    guard currentUsesHistory else { return fallback }
+    if video.id == currentHistoryVideoID { return currentHistoryPosition }
+    guard !video.bvid.isEmpty,
+      let record = watchHistory.record(video.bvid) else { return fallback }
+    guard record.watched, !record.finished, record.progress > 0, record.duration > 0,
+      record.progress < record.duration else { return fallback }
+    return Double(record.progress)
+  }
+
   private func startVideo(_ video: Video, preservingQueue: Bool, identityRetry: Bool = false,
-    initiallyPaused: Bool = false, part: Int? = nil, startAt: Double = 0) {
-    currentStartAt = startAt.isFinite ? max(0, startAt) : 0
+    initiallyPaused: Bool = false, part: Int? = nil, startAt: Double = 0, useHistory: Bool = false) {
+    let requestedStart = startAt.isFinite ? max(0, startAt) : 0
+    currentUsesHistory = useHistory
+    currentStartAt = useHistory ? currentResumeStart(for: video, cid: video.cid, fallback: requestedStart) : requestedStart
     if !identityRetry { requestedPart = part }
     let requestedPart = identityRetry ? self.requestedPart : part
     deferredVideoRetry = nil
@@ -1543,8 +1633,10 @@ import WebKit
         selectedStream = choice.video
         if usesUIFixtures { player.status = "本地样本 · 不加载在线媒体" }
         else {
-          let resumeAt = ContinueWatchingItem.validStart(currentStartAt,
+          let resumeAt = ContinueWatchingItem.validStart(self.currentResumeStart(
+            for: details.video, cid: video.cid),
             duration: details.video.duration, cid: video.cid, expectedCID: details.video.cid)
+          currentStartAt = resumeAt
           let result = await cdn.prepare(video: choice.video, audio: choice.audio, avoidP2P: playbackPreferences.avoidP2P,
             reportFailureTo: player)
           try await checkCurrentLoad(loadGeneration, expected: expected)
@@ -1702,6 +1794,7 @@ import WebKit
   }
 
   func closePlayer() {
+    rememberHistoryPosition()
     // First, so closing the mini or standalone window below does not put the page back.
     browsingBesidePlayback = false
     pausedBrowsing.reset()
@@ -1800,6 +1893,7 @@ import WebKit
   /// queue and cleared when playback closes.
   @Published private(set) var playbackNotice: String?
   func dismissPlaybackNotice() { playbackNotice = nil }
+  func showPlaybackNotice(_ message: String) { playbackNotice = message }
   func playCuratedList() {
     guard !curatedLoading else { return }
     cancelCuratedPlaylist()
@@ -2382,6 +2476,7 @@ import WebKit
     }
   }
   func shutdown() {
+    rememberHistoryPosition()
     browsingBesidePlayback = false
     clipPlayback.stop(.stopped); aiRuntime?.shutdown()
     progressReporter.flush()

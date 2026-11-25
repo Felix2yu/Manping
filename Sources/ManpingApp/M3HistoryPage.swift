@@ -100,8 +100,8 @@ struct M3HistoryPage: View {
         } else if history.isLoading || history.hasMore {
           LoadMoreFooter(isLoading: history.isLoading, autoLoad: false) { Task { await history.loadNext() } }
         }
-      }.cardGridContent().padding(Theme.gridPadding)
-    }.cardGrid().prefetchOnScroll(enabled: history.hasMore && !history.isLoading && !history.busy && history.error == nil) {
+      }.cardGridContent().padding(Theme.gridPadding).performanceScrollTarget(target: "history")
+    }.cardGrid().performanceScrollProbe(page: "history").prefetchOnScroll(enabled: history.hasMore && !history.isLoading && !history.busy && history.error == nil) {
       Task { await history.loadNext() }
     }
   }

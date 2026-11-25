@@ -23,6 +23,8 @@ struct PGCPlayerPage: View {
   @State private var fixturePaused = false
   @State private var volumeShown = false
   @State private var composeShown = false
+  @FocusState private var danmakuFocused: Bool
+  @State private var shortcutRegistration = UUID()
   @State private var chaptersShown = false
   @State private var showingCoin = false
   @State private var showingFavorites = false
@@ -91,7 +93,13 @@ struct PGCPlayerPage: View {
         if playback.details != nil && !tabs.contains(tab) { tab = .info }
       }
       .onChange(of: playback.identityVersion) { _, _ in model.refreshPlaybackBookmarks(); comments.cancel(); tab = .info; showingCoin = false; showingFavorites = false; showingTriple = false }
-      .onDisappear { comments.cancel(); restoreTemporarySpeed() }
+      .onAppear { installPlaybackShortcuts() }
+    .onChange(of: playback.episode?.id) { _, _ in installPlaybackShortcuts() }
+    .onChange(of: composeShown) { _, shown in danmakuFocused = shown }
+    .onDisappear {
+      if model.playbackPageShortcuts?.registrationID == shortcutRegistration { model.playbackPageShortcuts = nil }
+      comments.cancel(); restoreTemporarySpeed()
+    }
       .task(id: playback.episode?.cid) {
         videoShot = nil
         guard !playback.usesFixtures, let episode = playback.episode, let cid = episode.cid else { return }
@@ -106,6 +114,28 @@ struct PGCPlayerPage: View {
         }
         Button("取消", role: .cancel) {}
       }
+  }
+  private func installPlaybackShortcuts() {
+    model.playbackPageShortcuts = PlaybackPageShortcutActions(
+      registrationID: shortcutRegistration, mediaID: "pgc:\(playback.episode?.id ?? 0)",
+      toggleInfo: { selectShortcutTab(.info) }, toggleComments: { selectShortcutTab(.comments) },
+      like: {
+        guard let aid = playback.episode?.aid else { return }
+        Task { await interactions.like(aid: aid) { model.showingLogin = true } }
+      },
+      coin: { showingCoin = true },
+      favorite: {
+        guard let aid = playback.episode?.aid else { return }
+        Task { if await interactions.loadFolders(aid: aid, requiresLogin: { model.showingLogin = true }) { showingFavorites = true } }
+      },
+      triple: { showingTriple = true },
+      composeDanmaku: { composeShown = true; chrome.activity() })
+  }
+  private func selectShortcutTab(_ target: Tab) {
+    if target == .info, tab == .info, !sidebarHidden { sidebarHidden = true; return }
+    sidebarHidden = false
+    tab = tab == target ? .info : target
+    chrome.activity()
   }
   private var toolbarTitle: String { playback.episode?.title ?? playback.details?.season.title ?? "正在加载剧集…" }
   /// The season's name beside the episode's title.
@@ -209,7 +239,7 @@ struct PGCPlayerPage: View {
         danmakuShown: $danmakuSettingsShown, networkShown: $networkShown, volumeShown: $volumeShown,
         composeShown: $composeShown,
         input: {
-          AnyView(PlaybackDanmakuInput(features: features) {
+          AnyView(PlaybackDanmakuInput(features: features, focused: $danmakuFocused) {
             features.send(seconds: time) { model.showingLogin = true }
           })
         },

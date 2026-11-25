@@ -113,8 +113,8 @@ struct M3CollectionResults: View {
   @ObservedObject var collection: CollectionActionsModel
   @ObservedObject var model: AppModel
   let emptyTitle: String
+  let performanceTarget: String
   let remove: (LibraryEntry) -> Void
-  @Environment(\.browsingPageActive) private var browsingPageActive
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     VStack(spacing: 0) {
@@ -146,13 +146,9 @@ struct M3CollectionResults: View {
           LazyVGrid(columns: [GridItem(.adaptive(minimum: collection.isPGC ? 148 : Theme.gridMinimum),
             spacing: Theme.gridSpacing)], spacing: collection.isPGC ? 24 : Theme.gridSpacing) {
             ForEach(collection.entries) { entry in
-              card(entry).onAppear {
-                if browsingPageActive, entry.id == collection.entries.last?.id, collection.error == nil {
-                  Task { await collection.loadNext() }
-                }
-              }
+              card(entry)
             }
-          }.cardGridContent().padding(Theme.gridPadding)
+          }.cardGridContent().padding(Theme.gridPadding).performanceScrollTarget(target: performanceTarget)
           if let error = collection.error {
             VStack(spacing: 10) {
               InlineErrorText(message: error)
@@ -162,6 +158,9 @@ struct M3CollectionResults: View {
             LoadMoreFooter(isLoading: collection.isLoading, autoLoad: false) { Task { await collection.loadNext() } }
           }
         }.frame(maxWidth: .infinity, maxHeight: .infinity).cardGrid()
+          .performanceScrollProbe(page: performanceTarget)
+          .prefetchOnScroll(enabled: collection.hasMore && !collection.isLoading && !collection.isMutating
+            && !collection.isLoadingFolders && collection.error == nil) { Task { await collection.loadNext() } }
       }
       if collection.isMutating {
         HStack(spacing: 12) {

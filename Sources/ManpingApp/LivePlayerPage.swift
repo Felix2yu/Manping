@@ -32,6 +32,7 @@ struct LivePlayerPage: View {
   @State private var volumeShown = false
   @State private var tab: Tab = .chat
   @State private var fixtureApplied = false
+  @State private var shortcutRegistration = UUID()
   @Environment(\.colorScheme) private var scheme
 
   init(model: AppModel, live: LivePlaybackModel) {
@@ -61,7 +62,9 @@ struct LivePlayerPage: View {
         }
       #endif
       updateComposerVisibility()
+      installPlaybackShortcuts()
     }
+    .onChange(of: live.roomID) { _, _ in installPlaybackShortcuts() }
     .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
       if DebugUIFixtures.usesLiveSceneMemory {
         fixtureSidebarHidden = PerformanceEnvironment.defaults.bool(
@@ -84,6 +87,24 @@ struct LivePlayerPage: View {
         PlayerToolbarActions(model: model, sidebarHidden: sidebarBinding, windowToggle: false)
       }
     }
+    .onDisappear {
+      if model.playbackPageShortcuts?.registrationID == shortcutRegistration { model.playbackPageShortcuts = nil }
+    }
+  }
+
+  private func installPlaybackShortcuts() {
+    model.playbackPageShortcuts = PlaybackPageShortcutActions(
+      registrationID: shortcutRegistration, mediaID: "live:\(live.roomID)",
+      toggleInfo: { selectShortcutTab(.info) }, toggleComments: { selectShortcutTab(.chat) },
+      like: {
+        if interaction.canInteract { interaction.like() } else { model.showingLogin = true }
+      },
+      composeDanmaku: { interaction.requestCompose() })
+  }
+  private func selectShortcutTab(_ target: Tab) {
+    sidebarHidden = false
+    tab = tab == target ? (target == .chat ? .info : .chat) : target
+    updateComposerVisibility()
   }
 
   /// The room page; falls back to the requested id while the room is still loading.

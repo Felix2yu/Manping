@@ -56,6 +56,7 @@ private struct PGCDiscoveryPage: View {
   private func applyDiagnosticSelection() {
     guard !diagnosticApplied else { return }
     diagnosticApplied = true
+    if PerformanceOptions.scrollPage == "pgc", !cinema { animeSection = "index" }
     #if DEBUG
     let args = ProcessInfo.processInfo.arguments
     guard let index = args.firstIndex(of: "--ui-page"), index + 1 < args.count else { return }
@@ -138,14 +139,14 @@ private struct PGCDiscoveryPage: View {
               PosterCard(cover: season.cover, title: season.title, subtitle: season.subtitle,
                 badge: season.badge, score: season.score) { onOpen(season.selection) }
             }
-          }.cardGridContent().padding(Theme.gridPadding)
+          }.cardGridContent().padding(Theme.gridPadding).performanceScrollTarget(target: "pgc")
           if let error = browse.error {
             InlineErrorText(message: error).padding(12)
             Button("重试") { Task { await browse.loadNext() } }.buttonStyle(AppButtonStyle(size: .small))
           } else if browse.isLoading || browse.hasMore {
             LoadMoreFooter(isLoading: browse.isLoading, autoLoad: false) { Task { await browse.loadNext() } }
           }
-        }.cardGrid().prefetchOnScroll(enabled: !timeline && browse.hasMore && !browse.isLoading && browse.error == nil) { Task { await browse.loadNext() } }
+        }.cardGrid().performanceScrollProbe(page: "pgc").prefetchOnScroll(enabled: !timeline && browse.hasMore && !browse.isLoading && browse.error == nil) { Task { await browse.loadNext() } }
       }
     }
   }

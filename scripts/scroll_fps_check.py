@@ -73,7 +73,7 @@ def run_once(binary, args, output, label, index):
                 if elapsed > args.seconds + 40:
                     raise RuntimeError(name + ': diagnostic timed out')
                 # Profile the main thread mid-scroll (after the 2 s warm-up and the first sweep).
-                if args.sample_seconds and sampler is None and 'PERF scroll driver' in log_path.read_text():
+                if args.sample_seconds and sampler is None and 'PERF scroll target=' in log_path.read_text():
                     time.sleep(3)
                     sampler = subprocess.Popen(['/usr/bin/sample', str(process.pid), str(args.sample_seconds),
                         '-mayDie', '-file', str(output / (name + '-sample.txt'))],
@@ -97,6 +97,8 @@ def run_once(binary, args, output, label, index):
             print(line, flush=True)
     if process.returncode != 0 or report is None or 'PERF FAIL' in text or not report['scroll']['verified']:
         raise RuntimeError(name + ': incomplete diagnostic; see ' + str(log_path))
+    if report.get('target_id') != args.page or report.get('native_driver') != 'NSClipView' or not report.get('scroll_view_id'):
+        raise RuntimeError(name + ': wrong or unbound scroll target; see ' + str(log_path))
     report['log'] = str(log_path)
     # Other work on the machine (builds, sync) shifts frame pacing; keep it next to the numbers.
     report['loadavg_1m'] = [round(load_before, 2), round(os.getloadavg()[0], 2)]
@@ -135,7 +137,8 @@ def main():
     parser.add_argument('--build', action='store_true', help='swift build -c release and assemble ' + str(PERF_APP.relative_to(ROOT)))
     parser.add_argument('--build-to', type=Path, default=PERF_APP, help='where --build assembles the app (under .build)')
     parser.add_argument('--template', type=Path, default=ROOT / 'dist/release/满屏.app')
-    parser.add_argument('--page', choices=['recommended', 'popular', 'search'], default='recommended')
+    parser.add_argument('--page', choices=['recommended', 'popular', 'search', 'moment', 'moment-all', 'history', 'favorites', 'later',
+        'live', 'article', 'space', 'following', 'followers', 'pgc'], default='recommended')
     parser.add_argument('--hz', type=int, choices=[60, 120], default=120)
     parser.add_argument('--seconds', type=int, default=30)
     parser.add_argument('--speed', type=int, default=2400, help='points per second')
@@ -164,6 +167,7 @@ def main():
     runs = [run_once(binary, args, output, args.label, index + 1) for index in range(args.runs)]
     result = {'label': args.label, 'app': str(app), 'page': args.page, 'requested_hz': args.hz,
         'duration_s': args.seconds, 'speed_pt_s': args.speed, 'cover_mode': args.covers, 'pointer': args.pointer,
+        'target_binding': {key: runs[0].get(key) for key in ['target_id', 'window_id', 'scroll_view_id', 'native_driver', 'frame_driver']},
         'median': summarize(runs), 'runs': runs}
     if any('hover_settle' in r for r in runs):
         # --pointer hover: lifts while the content moved, and whether the card under the pointer lifted after.

@@ -99,7 +99,8 @@ struct ArticleBrowserPage: View {
               LoadMoreFooter(isLoading: browse.isLoading, autoLoad: false) { Task { await browse.loadNext() } }
             }
           }.padding(Theme.gridPadding).frame(maxWidth: 920).frame(maxWidth: .infinity)
-        }.prefetchOnScroll(enabled: browse.hasMore && !browse.isLoading && browse.error == nil) {
+            .performanceScrollTarget(target: "article")
+        }.performanceScrollProbe(page: "article").prefetchOnScroll(enabled: browse.hasMore && !browse.isLoading && browse.error == nil) {
           Task { await browse.loadNext() }
         }
       }

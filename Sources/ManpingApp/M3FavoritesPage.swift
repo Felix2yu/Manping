@@ -28,7 +28,7 @@ struct M3FavoritesPage: View {
           }, dismiss: collection.dismissPlayAllNotice)
         }
         M3CollectionResults(collection: collection, model: model,
-          emptyTitle: collection.isPGC ? "还没有追番或追剧" : "这个收藏夹是空的") {
+          emptyTitle: collection.isPGC ? "还没有追番或追剧" : "这个收藏夹是空的", performanceTarget: "favorites") {
             pendingAction = collection.prepareRemoval([$0])
           }
       }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -49,6 +49,7 @@ struct M3FavoritesPage: View {
       .task(id: model.refreshToken) {
         await collection.start()
         if let intent = model.pgcFavoriteIntent { await collection.select(intent.cinema ? .cinema : .anime) }
+        if PerformanceOptions.scrollPage == "favorites" { await collection.select(.folder(11)) }
         #if DEBUG
         let arguments = CommandLine.arguments
         if model.usesUIFixtures, let index = arguments.firstIndex(of: "--ui-page"),

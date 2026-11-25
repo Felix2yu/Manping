@@ -7,7 +7,6 @@ struct MomentVideoCard: View {
   @ObservedObject var feed: MomentFeedModel
   @ObservedObject var model: AppModel
   let showComments: () -> Void
-  @State private var showingDescription = false
   @Environment(\.colorScheme) private var scheme
   private var media: MomentMedia? { MomentMedia.find(item.content) }
   var body: some View {
@@ -21,23 +20,29 @@ struct MomentVideoCard: View {
             Text(media.title).font(Theme.Font.headline).lineLimit(2)
               .frame(maxWidth: .infinity, alignment: .leading)
           }.buttonStyle(.plain)
-          if !item.text.isEmpty { descriptionButton }
+          if !item.text.isEmpty { MomentDescriptionButton(text: item.text, emotes: item.emotes) }
         }
       } else if !item.text.isEmpty {
-        descriptionButton
+        MomentDescriptionButton(text: item.text, emotes: item.emotes)
       }
-      MomentVideoMetadata(item: item, model: model, showComments: showComments)
+      MomentVideoMetadata(item: item, feed: feed, model: model, showComments: showComments)
     }.padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
       .foregroundStyle(Theme.text(scheme)).cardSurface(scheme)
       .contextMenu { MomentMenu(item: item, model: model) }
   }
-  @ViewBuilder private var descriptionButton: some View {
+}
+
+private struct MomentDescriptionButton: View {
+  let text: String
+  let emotes: [RPCEmote]
+  @State private var showingDescription = false
+  var body: some View {
     Button { showingDescription.toggle() } label: {
       Image(systemName: "text.bubble").font(.system(size: 11)).frame(width: 24, height: 24)
     }.buttonStyle(ChromeButtonStyle(icon: true, capsule: true)).help("动态描述")
       .accessibilityLabel("动态描述")
       .popover(isPresented: $showingDescription) {
-        MomentRichText(text: item.text, emotes: item.emotes, maxLines: nil).padding(16).frame(width: 400)
+        MomentRichText(text: text, emotes: emotes, maxLines: nil).padding(16).frame(width: 400)
       }
   }
 }
@@ -62,7 +67,7 @@ struct MomentFullCard: View {
 
 private struct MomentAuthor: View {
   let item: RPCDynamic
-  @ObservedObject var model: AppModel
+  let model: AppModel
   var compact = false
   @Environment(\.colorScheme) private var scheme
   var body: some View {
@@ -84,8 +89,8 @@ private struct MomentAuthor: View {
 
 private struct MomentVideoMetadata: View {
   let item: RPCDynamic
-  @ObservedObject var feed: MomentFeedModel
-  @ObservedObject var model: AppModel
+  let feed: MomentFeedModel
+  let model: AppModel
   let showComments: () -> Void
   var body: some View {
     HStack(spacing: 6) {
@@ -115,8 +120,8 @@ struct MomentRichText: View {
 
 private struct MomentOperationRow: View {
   let item: RPCDynamic
-  @ObservedObject var feed: MomentFeedModel
-  @ObservedObject var model: AppModel
+  let feed: MomentFeedModel
+  let model: AppModel
   let showComments: () -> Void
   var body: some View {
     HStack(spacing: 12) {
@@ -167,7 +172,7 @@ private enum MomentMedia {
 
 private struct MomentContent: View {
   let content: RPCDynamicContent
-  @ObservedObject var model: AppModel
+  let model: AppModel
   @Environment(\.colorScheme) private var scheme
   @Environment(\.watchHistory) private var watchHistory
   var body: some View { rendered(content, depth: 0) }
@@ -282,7 +287,7 @@ private struct MomentMenu: View {
     }
   }
 }
-private func openMomentInBrowser(_ item: RPCDynamic) {
+@MainActor private func openMomentInBrowser(_ item: RPCDynamic) {
   if let url = URL(string: "https://t.bilibili.com/\(item.id)") { ExternalWebLink.open(url) }
 }
 private func copyMomentURL(_ item: RPCDynamic) {
