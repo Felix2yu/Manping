@@ -104,7 +104,7 @@ final class WatchHistoryTests: XCTestCase {
     }
     let finished = item(9, 100, viewedAt: 300)
     XCTAssertTrue(ContinueWatchingItem.entries(from: [item(1, 40), finished]).isEmpty)
-    for progress in [0, -1, 101] { XCTAssertTrue(ContinueWatchingItem.entries(from: [item(1, progress)]).isEmpty) }
+    for progress in [0, -1, 101] as [Int64] { XCTAssertTrue(ContinueWatchingItem.entries(from: [item(1, progress)]).isEmpty) }
     let episode = RPCHistoryItem(id: 2, oid: 2, business: "archive", title: "剧集", uri: "",
       viewedAt: 400, content: .episode(cover: nil, progress: 10, duration: 100, subtitle: ""))
     let live = RPCHistoryItem(id: 3, oid: 3, business: "live", title: "直播", uri: "",

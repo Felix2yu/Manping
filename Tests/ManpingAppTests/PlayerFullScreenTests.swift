@@ -3,7 +3,7 @@ import XCTest
 @testable import ManpingApp
 
 final class PlayerFullScreenTests: XCTestCase {
-  func testTerminalFailureClearsPreviousMediaClock() {
+  @MainActor func testTerminalFailureClearsPreviousMediaClock() {
     let player = PlayerModel()
     player.time = 125
     player.duration = 600

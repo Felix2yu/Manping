@@ -3,33 +3,9 @@ import XCTest
 
 @testable import ManpingCore
 
-/// A fake login keychain: counts reads (each one would be a system prompt) and deletions.
-private final class FakeKeychain: @unchecked Sendable {
-  private let lock = NSLock()
-  private var items: [LocalSecretVault.LegacyItem: Data] = [:]
-  private var failure: OSStatus?
-  private(set) var reads = 0
-  private(set) var deleted: [LocalSecretVault.LegacyItem] = []
-
-  func put(_ data: Data, _ item: LocalSecretVault.LegacyItem) { lock.withLock { items[item] = data } }
-  func failReads(_ status: OSStatus?) { lock.withLock { failure = status } }
-  var keychain: LocalSecretVault.Keychain {
-    LocalSecretVault.Keychain(
-      read: { item in
-        try self.lock.withLock {
-          self.reads += 1
-          if let status = self.failure { throw LocalSecretVault.KeychainStatus(status: status) }
-          return self.items[item]
-        }
-      },
-      delete: { item in self.lock.withLock { self.items.removeValue(forKey: item); self.deleted.append(item) } })
-  }
-}
-
 final class LocalSecretVaultTests: XCTestCase {
   private var root: URL!
   private var directory: URL!
-  private let legacy = LocalSecretVault.LegacyItem(service: "io.github.pidean.manping.session.v2", account: "bilibili")
 
   override func setUpWithError() throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent("vault-" + UUID().uuidString, isDirectory: true)
@@ -40,8 +16,8 @@ final class LocalSecretVaultTests: XCTestCase {
     try? FileManager.default.removeItem(at: root)
   }
 
-  private func vault(device: String = "DEVICE-A", keychain: FakeKeychain? = nil) -> LocalSecretVault {
-    LocalSecretVault(directory: directory, keychain: keychain?.keychain, deviceID: { device })
+  private func vault(device: String = "DEVICE-A") -> LocalSecretVault {
+    LocalSecretVault(directory: directory, deviceID: { device })
   }
 
   func testSealedOwnerOnlyFilesAndRoundTripAcrossInstances() throws {
@@ -82,73 +58,10 @@ final class LocalSecretVaultTests: XCTestCase {
 
   func testMissingDeviceIdentifierFailsInsteadOfUsingAnotherKey() throws {
     try vault().write("bilibili.session", Data("a".utf8))
-    let broken = LocalSecretVault(directory: directory, keychain: nil, deviceID: { nil })
+    let broken = LocalSecretVault(directory: directory, deviceID: { nil })
     XCTAssertThrowsError(try broken.read("bilibili.session")) { XCTAssertEqual($0 as? LocalSecretVault.Failure, .deviceUnavailable) }
     XCTAssertThrowsError(try broken.write("bilibili.session", Data("b".utf8)))
     XCTAssertEqual(try vault().read("bilibili.session"), Data("a".utf8), "nothing was overwritten")
-  }
-
-  func testKeychainItemMovesOverOnceAndIsRemoved() throws {
-    let keychain = FakeKeychain()
-    keychain.put(Data("old-session".utf8), legacy)
-    XCTAssertEqual(try vault(keychain: keychain).read("bilibili.session", legacy: legacy), Data("old-session".utf8))
-    XCTAssertEqual(keychain.reads, 1)
-    XCTAssertEqual(keychain.deleted, [legacy])
-
-    // Later launches read the file only: no Keychain access, so no prompt.
-    XCTAssertEqual(try vault(keychain: keychain).read("bilibili.session", legacy: legacy), Data("old-session".utf8))
-    XCTAssertEqual(keychain.reads, 1)
-  }
-
-  func testSignedOutAccountDoesNotComeBackFromAnItemThatCouldNotBeDeleted() throws {
-    let keychain = FakeKeychain()
-    let stuck = LocalSecretVault.Keychain(read: keychain.keychain.read, delete: { _ in })  // deletion needs authorization
-    keychain.put(Data("old-session".utf8), legacy)
-    let first = LocalSecretVault(directory: directory, keychain: stuck, deviceID: { "DEVICE-A" })
-    XCTAssertNotNil(try first.read("bilibili.session", legacy: legacy))
-    try first.delete("bilibili.session", legacy: legacy)
-
-    let next = LocalSecretVault(directory: directory, keychain: stuck, deviceID: { "DEVICE-A" })
-    XCTAssertNil(try next.read("bilibili.session", legacy: legacy))
-    XCTAssertEqual(keychain.reads, 1, "the leftover item is never read again")
-  }
-
-  func testWritesSupersedeAnUnreadKeychainItem() throws {
-    let keychain = FakeKeychain()
-    keychain.put(Data("old-key".utf8), legacy)
-    try vault(keychain: keychain).write("bilibili.session", Data("new".utf8), legacy: legacy)
-    XCTAssertEqual(keychain.deleted, [legacy])
-    try vault(keychain: keychain).delete("bilibili.session", legacy: legacy)
-    XCTAssertNil(try vault(keychain: keychain).read("bilibili.session", legacy: legacy))
-    XCTAssertEqual(keychain.reads, 0)
-  }
-
-  func testRefusedPromptIsNotRepeatedButALockedKeychainIsRetried() throws {
-    let keychain = FakeKeychain()
-    keychain.put(Data("old".utf8), legacy)
-    keychain.failReads(errSecInteractionNotAllowed)
-    XCTAssertThrowsError(try vault(keychain: keychain).read("bilibili.session", legacy: legacy)) {
-      XCTAssertEqual($0 as? LocalSecretVault.Failure, .keychainUnavailable(errSecInteractionNotAllowed), "never read as absent")
-    }
-    XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("bilibili.session.sealed").path))
-    keychain.failReads(nil)
-    XCTAssertEqual(try vault(keychain: keychain).read("bilibili.session", legacy: legacy), Data("old".utf8), "tried again")
-
-    let other = LocalSecretVault.LegacyItem(service: "io.github.pidean.manping.ai.chatgpt.v1", account: "registration")
-    keychain.put(Data("token".utf8), other)
-    keychain.failReads(errSecUserCanceled)
-    XCTAssertNil(try vault(keychain: keychain).read("ai.chatgpt.registration", legacy: other))
-    let reads = keychain.reads
-    keychain.failReads(nil)
-    XCTAssertNil(try vault(keychain: keychain).read("ai.chatgpt.registration", legacy: other), "starts signed out instead")
-    XCTAssertEqual(keychain.reads, reads, "no second prompt")
-  }
-
-  func testAbsentItemsAreLookedUpOnce() throws {
-    let keychain = FakeKeychain()
-    XCTAssertNil(try vault(keychain: keychain).read("ai.chatgpt.host", legacy: legacy))
-    XCTAssertNil(try vault(keychain: keychain).read("ai.chatgpt.host", legacy: legacy))
-    XCTAssertEqual(keychain.reads, 1)
   }
 
   func testNamesAreValidated() {
@@ -159,7 +72,7 @@ final class LocalSecretVaultTests: XCTestCase {
   }
 
   func testMemoryVaultNeverTouchesDisk() throws {
-    let memory = LocalSecretVault(directory: nil, keychain: nil)
+    let memory = LocalSecretVault(directory: nil)
     try memory.write("bilibili.session", Data("a".utf8))
     XCTAssertEqual(try memory.read("bilibili.session"), Data("a".utf8))
     try memory.delete("bilibili.session")
@@ -192,36 +105,20 @@ final class LocalSecretVaultTests: XCTestCase {
   }
 
   func testTestProcessesDoNotUseTheUsersFolder() throws {
-    // `swift test` runs outside the app bundle: the shared vault must stay in memory.
     try LocalSecretVault.shared.write("test.probe", Data("x".utf8))
-    let real = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("Manping/Secrets/test.probe.sealed")
+    let real = AppIdentity.applicationSupportDirectory
+      .appendingPathComponent("Secrets/test.probe.sealed")
     XCTAssertFalse(FileManager.default.fileExists(atPath: real.path))
     try LocalSecretVault.shared.delete("test.probe")
   }
-  func testInstancesSharingAFolderAgreeOnTheKeyAndTheRetiredList() throws {
-    let instances = (0..<4).map { _ in vault(keychain: FakeKeychain()) }
+
+  func testInstancesSharingAFolderAgreeOnTheKey() throws {
+    let instances = (0..<4).map { _ in vault() }
     DispatchQueue.concurrentPerform(iterations: 16) { index in
-      let item = LocalSecretVault.LegacyItem(service: "s", account: "a\(index)")
-      try? instances[index % 4].write("entry\(index)", Data("value\(index)".utf8), legacy: item)
+      try? instances[index % 4].write("entry\(index)", Data("value\(index)".utf8))
     }
     let fresh = vault()
     for index in 0..<16 { XCTAssertEqual(try fresh.read("entry\(index)"), Data("value\(index)".utf8)) }
-    let retired = try JSONDecoder().decode([String].self, from: Data(contentsOf: root.appendingPathComponent("Secrets-retired-keychain-items.json")))
-    XCTAssertEqual(Set(retired), Set((0..<16).map { "entry\($0)" }), "no instance overwrote another's names")
-  }
-
-  func testUnsavedRetirementIsNotTreatedAsDone() throws {
-    let keychain = FakeKeychain()
-    keychain.put(Data("old".utf8), legacy)
-    let instance = vault(keychain: keychain)
-    try instance.write("other", Data("x".utf8))  // creates the folder and key
-    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: root.path)  // the list cannot be saved
-    XCTAssertThrowsError(try instance.read("bilibili.session", legacy: legacy))
-    XCTAssertThrowsError(try instance.delete("bilibili.session", legacy: legacy), "no false success")
-    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
-    try instance.delete("bilibili.session", legacy: legacy)
-    XCTAssertNil(try vault(keychain: keychain).read("bilibili.session", legacy: legacy))
   }
 
   func testUnreadableKeyIsNeverReplaced() throws {
@@ -234,18 +131,6 @@ final class LocalSecretVaultTests: XCTestCase {
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: keyURL.path)
     XCTAssertEqual(try Data(contentsOf: keyURL), original)
     XCTAssertEqual(try vault().read("bilibili.session"), Data("a".utf8))
-  }
-
-  func testDeletingTheFolderDoesNotBringKeychainItemsBack() throws {
-    let keychain = FakeKeychain()
-    let stuck = LocalSecretVault.Keychain(read: keychain.keychain.read, delete: { _ in })
-    keychain.put(Data("old-session".utf8), legacy)
-    let first = LocalSecretVault(directory: directory, keychain: stuck, deviceID: { "DEVICE-A" })
-    XCTAssertNotNil(try first.read("bilibili.session", legacy: legacy))
-    try FileManager.default.removeItem(at: directory)
-    let next = LocalSecretVault(directory: directory, keychain: stuck, deviceID: { "DEVICE-A" })
-    XCTAssertNil(try next.read("bilibili.session", legacy: legacy))
-    XCTAssertEqual(keychain.reads, 1)
   }
 
   func testDebugAndToolsDoNotShareTheReleaseAIConfiguration() {

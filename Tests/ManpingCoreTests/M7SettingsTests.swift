@@ -181,7 +181,8 @@ final class M7SettingsTests: XCTestCase {
     ]
     for (key, value) in invalidValues {
       // A valid entry alongside the invalid one must still make the complete import fail.
-      let values = [MacSettingKey.notifications.rawValue: ["type": "bool", "value": true], key: value]
+      let validKey = key == MacSettingKey.notifications.rawValue ? MacSettingKey.danmakuEnabled : MacSettingKey.notifications
+      let values = [validKey.rawValue: ["type": "bool", "value": true], key: value]
       XCTAssertThrowsError(try MacSettingsBackup.decode(data: backupJSON(values: values)), key)
     }
   }

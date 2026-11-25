@@ -25,7 +25,7 @@ final class PlaybackBookmarkTests: XCTestCase {
     let note = String(repeating: "笔", count: PlaybackBookmark.maximumNoteLength)
     let bookmark = try PlaybackBookmark(mediaKey: media, time: 0, note: note)
     XCTAssertEqual(bookmark.note.count, 2_000)
-    for time in [-1, .infinity, .nan, -.infinity] {
+    for time in [-1, .infinity, .nan, -.infinity] as [Double] {
       XCTAssertThrowsError(try PlaybackBookmark(mediaKey: media, time: time))
     }
     XCTAssertThrowsError(try PlaybackBookmark(mediaKey: media, time: 1, note: note + "记"))

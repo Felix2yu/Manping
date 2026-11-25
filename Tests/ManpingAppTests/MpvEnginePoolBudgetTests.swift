@@ -79,7 +79,7 @@ final class MpvEnginePoolBudgetTests: XCTestCase {
   func testInvalidGeometryUsesEngineOverheadAndInvalidScaleUsesOne() {
     for bounds in [
       CGSize(width: 0, height: 1080), CGSize(width: 1920, height: -1),
-      CGSize(width: .nan, height: 1080), CGSize(width: 1920, height: .infinity),
+      CGSize(width: CGFloat.nan, height: 1080), CGSize(width: 1920, height: CGFloat.infinity),
     ] {
       XCTAssertEqual(
         MpvParkingBudget.estimate(bounds: bounds, contentsFormat: .RGBA16Float,

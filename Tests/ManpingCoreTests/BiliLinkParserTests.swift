@@ -21,16 +21,16 @@ final class BiliLinkParserTests: XCTestCase {
     XCTAssertEqual(BiliLinkParser.parse("  bv1fK4y1t7hj "), .video(bvid: "BV1fK4y1t7hj"))
     XCTAssertEqual(BiliLinkParser.parse("AV170001"), .archive(aid: 170001))
     XCTAssertEqual(BiliLinkParser.parse("ss456"), .season(456))
-    XCTAssertEqual(BiliLinkParser.parse("manping://video/BV1fK4y1t7hj"), .video(bvid: "BV1fK4y1t7hj"))
-    XCTAssertEqual(BiliLinkParser.parse("manping://live/24530995"), .live(24530995))
-    XCTAssertEqual(BiliLinkParser.parse("manping://article/cv42"), .article(42))
-    XCTAssertEqual(BiliLinkParser.parse("manping://search?keyword=Swift"), .search("Swift"))
-    XCTAssertEqual(BiliLinkParser.parse("manping://region/129"), .region(129))
+    XCTAssertEqual(BiliLinkParser.parse("manpingx://video/BV1fK4y1t7hj"), .video(bvid: "BV1fK4y1t7hj"))
+    XCTAssertEqual(BiliLinkParser.parse("manpingx://live/24530995"), .live(24530995))
+    XCTAssertEqual(BiliLinkParser.parse("manpingx://article/cv42"), .article(42))
+    XCTAssertEqual(BiliLinkParser.parse("manpingx://search?keyword=Swift"), .search("Swift"))
+    XCTAssertEqual(BiliLinkParser.parse("manpingx://region/129"), .region(129))
     XCTAssertEqual(BiliLinkParser.parse("bilibili://video/BV1fK4y1t7hj"), .video(bvid: "BV1fK4y1t7hj"))
     XCTAssertEqual(BiliLinkParser.parse("bilibili://space/42"), .space(42))
     XCTAssertEqual(BiliLinkParser.parse("https://www.bilibili.com/video/BV1fK4y1t7hj?p=3&t=90.5"),
       .video(bvid: "BV1fK4y1t7hj", part: 3, startAt: 90.5))
-    XCTAssertEqual(BiliLinkParser.parse("manping://video/BV1fK4y1t7hj?p=2&t=45"),
+    XCTAssertEqual(BiliLinkParser.parse("manpingx://video/BV1fK4y1t7hj?p=2&t=45"),
       .video(bvid: "BV1fK4y1t7hj", part: 2, startAt: 45))
     XCTAssertEqual(BiliLinkParser.parse("https://www.bilibili.com/video/BV1fK4y1t7hj?p=0&t=nan"),
       .video(bvid: "BV1fK4y1t7hj"))
@@ -39,8 +39,8 @@ final class BiliLinkParserTests: XCTestCase {
   func testRejectsForeignAndMalformedLinks() {
     for text in ["https://evil.example/video/BV1fK4y1t7hj", "https://www.bilibili.com.evil.example/video/BV1fK4y1t7hj",
       "https://user:pass@www.bilibili.com/video/BV1fK4y1t7hj", "ftp://www.bilibili.com/video/BV1fK4y1t7hj",
-      "https://www.bilibili.com/video/BV1short", "av0", "ep-1", "manping://video/../../etc", "manping://unknown/1",
-      "https://b23.tv/a/b", "manping://search?keyword=", "manping://region/0", "bilibili://unknown/1", "随便一段文字", "", String(repeating: "a", count: 3000)] {
+      "https://www.bilibili.com/video/BV1short", "av0", "ep-1", "manpingx://video/../../etc", "manpingx://unknown/1",
+      "https://b23.tv/a/b", "manpingx://search?keyword=", "manpingx://region/0", "bilibili://unknown/1", "随便一段文字", "", String(repeating: "a", count: 3000)] {
       XCTAssertNil(BiliLinkParser.parse(text), text)
     }
     XCTAssertTrue(BiliLinkParser.isBilibili(URL(string: "https://www.bilibili.com/video/BV1fK4y1t7hj")!))
