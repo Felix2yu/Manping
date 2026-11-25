@@ -627,7 +627,19 @@ struct UnreadBadge: View {
 
 // MARK: - Segmented controls
 
-/// Two to five mutually exclusive options: a capsule glass track, the selected item filled.
+enum SegmentedTabAppearance {
+  static func foreground(selected: Bool, scheme: ColorScheme) -> Color {
+    selected ? Theme.onAccent : Theme.secondaryText(scheme)
+  }
+
+  static func fill(selected: Bool) -> Color { selected ? Theme.accent : .clear }
+
+  static func focusStroke(focused: Bool, scheme: ColorScheme) -> Color {
+    focused ? Theme.accentText(scheme) : .clear
+  }
+}
+
+/// Two to five mutually exclusive options: a capsule glass track with a solid accent selection.
 struct SegmentedTabs<Value: Hashable>: View {
   let options: [(Value, String)]
   @Binding var selection: Value
@@ -635,7 +647,7 @@ struct SegmentedTabs<Value: Hashable>: View {
   var overflow: [(Value, String)] = []
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var keyboardNavigation = NSApp.isFullKeyboardAccessEnabled
+  @FocusState private var focused: Value?
   @Namespace private var thumb
 
   var body: some View {
@@ -646,21 +658,22 @@ struct SegmentedTabs<Value: Hashable>: View {
           withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) { selection = value }
         } label: {
           Text(title).font(Theme.Font.caption).fontWeight(selected ? .semibold : .regular)
-            .foregroundStyle(selected ? Theme.text(scheme) : Theme.secondaryText(scheme))
+            .foregroundStyle(SegmentedTabAppearance.foreground(selected: selected, scheme: scheme))
             .padding(.horizontal, 14).frame(height: 26)
             .background {
               if selected {
-                Capsule().fill(thumbFill)
-                  .shadow(color: .black.opacity(scheme == .dark ? 0 : 0.10), radius: 1.5, y: 1)
+                Capsule().fill(SegmentedTabAppearance.fill(selected: true))
                   .matchedGeometryEffect(id: "thumb", in: thumb)
               }
             }
+            .overlay {
+              Capsule().strokeBorder(SegmentedTabAppearance.focusStroke(focused: focused == value, scheme: scheme), lineWidth: 2)
+                .padding(2)
+            }
             .contentShape(Capsule())
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
-          .focusEffectDisabled(!keyboardNavigation)
-          .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            keyboardNavigation = NSApp.isFullKeyboardAccessEnabled
-          }
+          .focused($focused, equals: value)
+          .focusEffectDisabled()
           .demoAnchor("tab.\(title)")
       }
       if !overflow.isEmpty {
@@ -675,10 +688,12 @@ struct SegmentedTabs<Value: Hashable>: View {
           .help(overflow.map(\.1).joined(separator: "、")).accessibilityLabel("更多分段").demoAnchor("tab.more")
       }
     }.padding(2).glassEffect(.regular, in: Capsule())
+      // macOS otherwise focuses the first option on launch, even when another one is selected.
+      .onAppear { focused = selection }
+      .onChange(of: selection) { _, selected in
+        if let focused, focused != selected { self.focused = nil }
+      }
   }
-
-  /// White 16% on the dark track; on the light track a near-opaque white so the thumb still reads.
-  private var thumbFill: Color { scheme == .dark ? .white.opacity(0.16) : .white.opacity(0.9) }
 }
 
 /// `SegmentedTabs` that never runs out of room: when the whole track is wider than what it is
