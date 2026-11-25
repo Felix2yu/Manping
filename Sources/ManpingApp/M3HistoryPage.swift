@@ -198,6 +198,7 @@ struct M3HistoryPage: View {
         .labelsHidden().textFieldStyle(AppTextFieldStyle(height: Theme.toolbarControlHeight)).frame(width: 150)
         .onSubmit { Task { await searchArchive() } }
     }
+    if archive.segment != .favorites { archiveFilterMenu }
     if let url = Self.reportURL(model) {
       Button { ExternalWebLink.open(url) } label: { Label("完整报告", systemImage: "chart.bar.doc.horizontal") }
         .toolbarActionStyle()
@@ -205,17 +206,82 @@ struct M3HistoryPage: View {
     }
   }
 
+  private var activeArchiveFilter: ArchiveHistoryFilter {
+    archive.segment == .later ? archive.laterFilter : archive.filter
+  }
+
+  private var archiveFilteringSupported: Bool {
+    archive.segment == .later ? archive.laterSupportsFiltering : archive.supportsFiltering
+  }
+
+  private func applyArchiveFilter(_ change: (inout ArchiveHistoryFilter) -> Void) {
+    let segment = archive.segment
+    guard segment != .favorites else { return }
+    var updated = activeArchiveFilter
+    change(&updated)
+    Task { await archive.setFilter(updated, segment: segment) }
+  }
+
+  private var archiveFilterMenu: some View {
+    Menu {
+      Section("一级分区") {
+        Picker("一级分区", selection: Binding(
+          get: { activeArchiveFilter.mainCategory },
+          set: { value in
+            applyArchiveFilter {
+              $0.mainCategory = value
+              $0.subCategory = ""
+            }
+          }
+        )) {
+          Text("全部分区").tag("")
+          ForEach(archive.categories) { category in
+            Text(category.name).tag(category.name)
+          }
+        }.pickerStyle(.inline)
+      }
+      Section("二级分区") {
+        Picker("二级分区", selection: Binding(
+          get: { activeArchiveFilter.subCategory },
+          set: { value in applyArchiveFilter { $0.subCategory = value } }
+        )) {
+          Text("全部子分区").tag("")
+          ForEach(archive.categories.first { $0.name == activeArchiveFilter.mainCategory }?.subCategories ?? []) { category in
+            Text(category.name).tag(category.name)
+          }
+        }.pickerStyle(.inline).disabled(activeArchiveFilter.mainCategory.isEmpty)
+      }
+      Section("视频时长") {
+        Picker("视频时长", selection: Binding(
+          get: { activeArchiveFilter.duration },
+          set: { value in applyArchiveFilter { $0.duration = value } }
+        )) {
+          ForEach(ArchiveDurationFilter.allCases) { duration in
+            Text(duration.title).tag(duration)
+          }
+        }.pickerStyle(.inline)
+      }
+      if !activeArchiveFilter.isEmpty {
+        Divider()
+        Button("清除筛选") {
+          applyArchiveFilter { $0 = ArchiveHistoryFilter() }
+        }
+      }
+      if let error = archive.categoryError {
+        Divider()
+        Text("分区加载失败：\(error)")
+        Button("重试") { Task { await archive.loadCategories() } }
+      }
+    } label: {
+      MenuLabel(title: activeArchiveFilter.isEmpty ? "筛选" : "筛选 \(activeArchiveFilter.activeCount)",
+        symbol: "line.3.horizontal.decrease")
+    }.appMenuStyle(toolbar: true)
+      .disabled(!archiveFilteringSupported)
+      .help(archiveFilteringSupported ? "按一级、二级分区和视频时长筛选当前归档列表" : "请升级 bili-history 后使用归档筛选")
+  }
+
   private func searchArchive() async {
-    let keyword = archiveSearchText
-    guard !keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-      await archive.load(segment: .history, reset: true)
-      return
-    }
-    // ArchiveBrowserModel 的游标接口不带关键词；这里用一次性搜索并清空游标，避免
-    // 搜索结果和"加载更多"混在一起（服务器对关键词分页的支持尚未暴露给客户端）。
-    if let found = try? await model.clientHistory.search(keyword, limit: 40) {
-      archive.applySearchResults(found)
-    }
+    await archive.search(keyword: archiveSearchText)
   }
 
   private var archiveBody: some View {
@@ -296,9 +362,9 @@ struct M3HistoryPage: View {
   @ViewBuilder private var archiveHistorySection: some View {
     if archive.history.isEmpty {
       if !archive.isLoading {
-        PageStateView(title: archiveSearchText.isEmpty ? "归档里还没有记录" : "没有找到匹配的记录",
-          message: archiveSearchText.isEmpty
-            ? "bili-history 每小时抓取一次，抓到的记录会永久留在这里。" : "换个关键词试试。",
+        PageStateView(title: archive.hasCriteria ? "没有找到匹配的记录" : "归档里还没有记录",
+          message: archive.hasCriteria
+            ? "换个关键词，或调整分区和时长条件试试。" : "bili-history 每小时抓取一次，抓到的记录会永久留在这里。",
           icon: "archivebox")
       }
     } else {
@@ -324,7 +390,12 @@ struct M3HistoryPage: View {
 
   @ViewBuilder private var archiveLaterSection: some View {
     if archive.later.isEmpty {
-      if !archive.isLoading { PageStateView(title: "归档里没有稍后再看", message: "在 bili-history 同步过后，删稿的视频也还在这里。", icon: "clock") }
+      if !archive.isLoading {
+        PageStateView(title: archive.laterHasCriteria ? "没有找到匹配的稍后再看" : "归档里没有稍后再看",
+          message: archive.laterHasCriteria
+            ? "换个分区或时长条件试试。" : "在 bili-history 同步过后，删稿的视频也还在这里。",
+          icon: "clock")
+      }
     } else {
       LazyVGrid(columns: [GridItem(.adaptive(minimum: Theme.gridMinimum), spacing: Theme.gridSpacing)], spacing: Theme.gridSpacing) {
         ForEach(archive.later) { item in

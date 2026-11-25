@@ -36,14 +36,23 @@ import ManpingCore
     return page.records
   }
 
-  func history(cursor: Int64 = 0, limit: Int = 40, keyword: String = "", business: String = "", year: Int = 0)
-    async throws -> ArchivePage
+  func history(cursor: Int64 = 0, limit: Int = 40, keyword: String = "", business: String = "", year: Int = 0,
+    filter: ArchiveHistoryFilter = ArchiveHistoryFilter()) async throws -> ArchivePage
   {
     var body: [String: Any] = ["cursor": cursor, "limit": limit]
     if !keyword.isEmpty { body["keyword"] = keyword }
     if !business.isEmpty { body["business"] = business }
     if year > 0 { body["year"] = year }
+    if !filter.mainCategory.isEmpty { body["main_category"] = filter.mainCategory }
+    if !filter.subCategory.isEmpty { body["sub_category"] = filter.subCategory }
+    if let minimum = filter.duration.minimumSeconds { body["min_duration"] = minimum }
+    if let maximum = filter.duration.maximumSeconds { body["max_duration"] = maximum }
     return try await post("history", body: body)
+  }
+
+  func categories() async throws -> [ArchiveCategory] {
+    let page: CategoryPage = try await get("categories")
+    return page.categories
   }
 
   /// Which of these videos the archive has marked as deleted. Answered from the
@@ -59,8 +68,15 @@ import ManpingCore
     try await get("summary?year=\(year)&month=\(month)")
   }
 
-  func watchLater(page: Int = 1, size: Int = 40) async throws -> PagedList<ArchiveWatchLaterItem> {
-    try await get("watchlater?page=\(page)&size=\(size)")
+  func watchLater(page: Int = 1, size: Int = 40,
+    filter: ArchiveHistoryFilter = ArchiveHistoryFilter()) async throws -> WatchLaterPage
+  {
+    var query = "page=\(page)&size=\(size)"
+    if !filter.mainCategory.isEmpty { query += "&main_category=\(Self.queryValue(filter.mainCategory))" }
+    if !filter.subCategory.isEmpty { query += "&sub_category=\(Self.queryValue(filter.subCategory))" }
+    if let minimum = filter.duration.minimumSeconds { query += "&min_duration=\(minimum)" }
+    if let maximum = filter.duration.maximumSeconds { query += "&max_duration=\(maximum)" }
+    return try await get("watchlater?" + query)
   }
 
   func favorites() async throws -> [ArchiveFavoriteFolder] {
@@ -85,8 +101,21 @@ import ManpingCore
     let records: [T]
     let total: Int
   }
+  struct WatchLaterPage: Decodable, Sendable {
+    let records: [ArchiveWatchLaterItem]
+    let total: Int
+    /// Older servers omit this; read-only filtering stays unavailable until the
+    /// page explicitly confirms the server applies the query.
+    let supportsFiltering: Bool?
+
+    enum CodingKeys: String, CodingKey {
+      case records, total
+      case supportsFiltering = "supports_filtering"
+    }
+  }
   private struct RecentPage: Decodable { let records: [ArchiveVideo] }
   private struct StatusPage: Decodable { let deleted: [String] }
+  private struct CategoryPage: Decodable { let categories: [ArchiveCategory] }
   private struct FolderPage: Decodable { let folders: [ArchiveFavoriteFolder] }
   private struct Envelope<T: Decodable>: Decodable {
     let status: String
@@ -109,6 +138,12 @@ import ManpingCore
       case .api(let message): message.isEmpty ? "bili-history 返回了错误。" : message
       }
     }
+  }
+
+  private static func queryValue(_ value: String) -> String {
+    var allowed = CharacterSet.urlQueryAllowed
+    allowed.remove(charactersIn: "&+=#?")
+    return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
   }
 
   private func request(path: String, method: String) throws -> URLRequest {

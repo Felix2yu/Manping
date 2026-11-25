@@ -35,9 +35,18 @@ import SwiftUI
   /// bvid, so they are counted for an honest footnote instead of being shown as
   /// cards that do nothing when clicked.
   @Published private(set) var hiddenNonVideo = 0
+  @Published var filter = ArchiveHistoryFilter()
+  @Published var laterFilter = ArchiveHistoryFilter()
+  @Published private(set) var keyword = ""
+  @Published private(set) var categories: [ArchiveCategory] = []
+  @Published private(set) var categoryError: String?
+  @Published private(set) var supportsFiltering = false
+  @Published private(set) var laterSupportsFiltering = false
 
   private let service: ClientHistoryService?
   private var historyCursor: Int64 = 0
+  private var historyGeneration = UUID()
+  private var laterGeneration = UUID()
   private var laterPage = 0
   private var contentsPage = 0
   private var statusAsked: Set<String> = []
@@ -59,6 +68,9 @@ import SwiftUI
     case .favorites: selectedFolder != nil && contentsHaveMore
     }
   }
+
+  var hasCriteria: Bool { !keyword.isEmpty || !filter.isEmpty }
+  var laterHasCriteria: Bool { !laterFilter.isEmpty }
 
   /// One section per day, newest first, in the same shape the account list uses.
   struct HistorySection: Identifiable {
@@ -84,16 +96,24 @@ import SwiftUI
     }
   }
 
-  /// Replaces the list with a one-off keyword result. Kept separate from paging so
-  /// a search never mixes with "加载更多" rows.
-  func applySearchResults(_ items: [ArchiveVideo]) {
-    history = items.filter(\.isPlayable)
-    hiddenNonVideo = items.count - history.count
-    historyCursor = 0
-    hasMore = false
-    error = nil
-    segment = .history
-    Task { await resolveStatus(history.map(\.bvid)) }
+  func search(keyword: String) async {
+    self.keyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+    await loadHistory(reset: true)
+  }
+
+  func setFilter(_ filter: ArchiveHistoryFilter, segment: Segment = .history) async {
+    switch segment {
+    case .history:
+      guard self.filter != filter else { return }
+      self.filter = filter
+      await loadHistory(reset: true)
+    case .later:
+      guard laterFilter != filter else { return }
+      laterFilter = filter
+      await loadLater(reset: true)
+    case .favorites:
+      break
+    }
   }
 
   /// 继续观看 and the summary are independent requests; a failure in one must not
@@ -105,8 +125,25 @@ import SwiftUI
     let year = Calendar(identifier: .gregorian).component(.year, from: Date())
     async let recentTask = service.recent(limit: 30)
     async let summaryTask = service.summary(year: year, month: month)
+    async let categoriesTask = service.categories()
     do { recent = try await recentTask } catch { recent = [] }
     do { summary = try await summaryTask } catch { summary = nil }
+    do {
+      let loaded = try await categoriesTask
+      categories = loaded.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+      categoryError = nil
+    }
+    catch { categoryError = error.localizedDescription }
+  }
+
+  func loadCategories() async {
+    guard let service else { return }
+    do {
+      categories = try await service.categories().sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+      categoryError = nil
+    } catch {
+      categoryError = error.localizedDescription
+    }
   }
 
   func refresh() async {
@@ -125,6 +162,8 @@ import SwiftUI
     laterHasMore = false
     contentsHaveMore = false
     hiddenNonVideo = 0
+    historyGeneration = UUID()
+    laterGeneration = UUID()
     error = nil
     await loadOverview()
     await load(segment: segment, reset: true)
@@ -133,27 +172,24 @@ import SwiftUI
   func load(segment: Segment, reset: Bool = false) async {
     guard let service else { return }
     self.segment = segment
+    if segment == .history {
+      laterGeneration = UUID()
+      await loadHistory(reset: reset)
+      return
+    }
+    if segment == .later {
+      historyGeneration = UUID()
+      await loadLater(reset: reset)
+      return
+    }
+    historyGeneration = UUID()
+    laterGeneration = UUID()
     isLoading = true
     error = nil
     defer { isLoading = false }
     do {
       switch segment {
-      case .history:
-        if reset { history = []; historyCursor = 0; hiddenNonVideo = 0 }
-        let page = try await service.history(cursor: historyCursor, limit: 40)
-        let playable = page.records.filter(\.isPlayable)
-        hiddenNonVideo += page.records.count - playable.count
-        history.append(contentsOf: playable)
-        historyCursor = page.next
-        hasMore = page.next != 0
-        await resolveStatus(playable.map(\.bvid))
-      case .later:
-        if reset { later = []; laterPage = 0 }
-        let page = try await service.watchLater(page: laterPage + 1, size: 40)
-        later.append(contentsOf: page.records)
-        laterPage += 1
-        laterHasMore = later.count < page.total && !page.records.isEmpty
-        await resolveStatus(page.records.map(\.bvid))
+      case .history, .later: break
       case .favorites:
         if reset {
           folders = try await service.favorites()
@@ -164,6 +200,71 @@ import SwiftUI
         }
       }
     } catch {
+      self.error = error.localizedDescription
+    }
+  }
+
+  private func loadHistory(reset: Bool) async {
+    guard let service else { return }
+    if reset {
+      historyGeneration = UUID()
+      history = []
+      historyCursor = 0
+      hiddenNonVideo = 0
+      hasMore = false
+    }
+    if !reset, isLoading { return }
+    let generation = historyGeneration
+    let requestedFilter = filter
+    let requestedKeyword = keyword
+    isLoading = true
+    error = nil
+    defer { if historyGeneration == generation { isLoading = false } }
+    do {
+      let page = try await service.history(cursor: historyCursor, limit: 40,
+        keyword: requestedKeyword, filter: requestedFilter)
+      try Task.checkCancellation()
+      guard historyGeneration == generation else { return }
+      supportsFiltering = page.supportsFiltering == true
+      let playable = page.records.filter(\.isPlayable)
+      hiddenNonVideo += page.records.count - playable.count
+      history.append(contentsOf: playable)
+      historyCursor = page.next
+      hasMore = page.next != 0
+      await resolveStatus(playable.map(\.bvid))
+    } catch is CancellationError {
+    } catch {
+      guard historyGeneration == generation else { return }
+      self.error = error.localizedDescription
+    }
+  }
+
+  private func loadLater(reset: Bool) async {
+    guard let service else { return }
+    if reset {
+      laterGeneration = UUID()
+      later = []
+      laterPage = 0
+      laterHasMore = false
+    }
+    if !reset, isLoading { return }
+    let generation = laterGeneration
+    let requestedFilter = laterFilter
+    isLoading = true
+    error = nil
+    defer { if laterGeneration == generation { isLoading = false } }
+    do {
+      let page = try await service.watchLater(page: laterPage + 1, size: 40, filter: requestedFilter)
+      try Task.checkCancellation()
+      guard laterGeneration == generation else { return }
+      laterSupportsFiltering = page.supportsFiltering == true
+      later.append(contentsOf: page.records)
+      laterPage += 1
+      laterHasMore = later.count < page.total && !page.records.isEmpty
+      await resolveStatus(page.records.map(\.bvid))
+    } catch is CancellationError {
+    } catch {
+      guard laterGeneration == generation else { return }
       self.error = error.localizedDescription
     }
   }
@@ -195,30 +296,12 @@ import SwiftUI
   }
 
   func loadMore() async {
-    guard let service else { return }
+    guard let service, !isLoading else { return }
     switch segment {
     case .history where hasMore:
-      isLoading = true
-      defer { isLoading = false }
-      do {
-        let page = try await service.history(cursor: historyCursor, limit: 40)
-        let playable = page.records.filter(\.isPlayable)
-        hiddenNonVideo += page.records.count - playable.count
-        history.append(contentsOf: playable)
-        historyCursor = page.next
-        hasMore = page.next != 0
-        await resolveStatus(playable.map(\.bvid))
-      } catch { self.error = error.localizedDescription }
+      await loadHistory(reset: false)
     case .later where laterHasMore:
-      isLoading = true
-      defer { isLoading = false }
-      do {
-        let page = try await service.watchLater(page: laterPage + 1, size: 40)
-        later.append(contentsOf: page.records)
-        laterPage += 1
-        laterHasMore = later.count < page.total && !page.records.isEmpty
-        await resolveStatus(page.records.map(\.bvid))
-      } catch { self.error = error.localizedDescription }
+      await loadLater(reset: false)
     case .favorites where contentsHaveMore:
       guard let folder = selectedFolder else { break }
       isLoading = true
