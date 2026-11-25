@@ -16,6 +16,26 @@ public struct ArchiveVideo: Decodable, Identifiable, Equatable, Sendable {
   public let viewAt: Int64
   public let finished: Bool
   public let business: String?
+  public let mainCategory: String?
+  public let subCategory: String?
+
+  public init(bvid: String, title: String, cover: String, author: String, authorMID: Int64,
+    duration: Int, progress: Int, viewAt: Int64, finished: Bool, business: String? = nil,
+    mainCategory: String? = nil, subCategory: String? = nil)
+  {
+    self.bvid = bvid
+    self.title = title
+    self.cover = cover
+    self.author = author
+    self.authorMID = authorMID
+    self.duration = duration
+    self.progress = progress
+    self.viewAt = viewAt
+    self.finished = finished
+    self.business = business
+    self.mainCategory = mainCategory
+    self.subCategory = subCategory
+  }
 
   public var id: String { bvid + "-\(viewAt)" }
   /// Fraction drawn under a cover; a finished play fills the bar.
@@ -32,30 +52,107 @@ public struct ArchiveVideo: Decodable, Identifiable, Equatable, Sendable {
     return !bvid.isEmpty && !["live", "article", "article-list"].contains(kind)
   }
 
-  /// A `Video` for the shared card view. The archive has no stats or partition,
-  /// so those stay empty rather than being invented.
+  /// A `Video` for the shared card view. Statistics stay empty rather than being
+  /// invented; partition names come from the archive when it has them.
   public var video: Video {
     Video(
       bvid: bvid, title: title, cover: URL(string: cover), author: author,
-      duration: duration, aid: nil, authorID: authorMID > 0 ? authorMID : nil)
+      duration: duration, aid: nil, authorID: authorMID > 0 ? authorMID : nil,
+      partitionName: mainCategory, subpartitionName: subCategory)
   }
 
   enum CodingKeys: String, CodingKey {
     case bvid, title, cover, author, duration, progress, finished, business
     case authorMID = "author_mid"
     case viewAt = "view_at"
+    case mainCategory = "main_category"
+    case subCategory = "sub_category"
   }
+}
+
+public struct ArchiveHistoryFilter: Equatable, Sendable {
+  public var mainCategory = ""
+  public var subCategory = ""
+  public var duration = ArchiveDurationFilter.all
+
+  public init() {}
+
+  public var isEmpty: Bool { mainCategory.isEmpty && subCategory.isEmpty && duration == .all }
+  public var activeCount: Int { (mainCategory.isEmpty ? 0 : 1) + (duration == .all ? 0 : 1) }
+}
+
+public enum ArchiveDurationFilter: String, CaseIterable, Identifiable, Sendable {
+  case all
+  case upTo5Minutes
+  case fiveToTwentyMinutes
+  case twentyToSixtyMinutes
+  case overSixtyMinutes
+
+  public var id: String { rawValue }
+  public var title: String {
+    switch self {
+    case .all: "全部时长"
+    case .upTo5Minutes: "5 分钟内"
+    case .fiveToTwentyMinutes: "5–20 分钟"
+    case .twentyToSixtyMinutes: "20–60 分钟"
+    case .overSixtyMinutes: "60 分钟以上"
+    }
+  }
+  public var minimumSeconds: Int? {
+    switch self {
+    case .all: nil
+    case .upTo5Minutes: 1
+    case .fiveToTwentyMinutes: 301
+    case .twentyToSixtyMinutes: 1201
+    case .overSixtyMinutes: 3601
+    }
+  }
+  public var maximumSeconds: Int? {
+    switch self {
+    case .all, .overSixtyMinutes: nil
+    case .upTo5Minutes: 300
+    case .fiveToTwentyMinutes: 1200
+    case .twentyToSixtyMinutes: 3600
+    }
+  }
+  func contains(_ duration: Int) -> Bool {
+    guard duration > 0 else { return self == .all }
+    return (minimumSeconds.map { duration >= $0 } ?? true)
+      && (maximumSeconds.map { duration <= $0 } ?? true)
+  }
+}
+
+public struct ArchiveCategory: Decodable, Identifiable, Equatable, Sendable {
+  public let name: String
+  public let subCategories: [ArchiveSubcategory]
+
+  public var id: String { name }
+  enum CodingKeys: String, CodingKey { case name, subCategories = "sub_categories" }
+}
+
+public struct ArchiveSubcategory: Decodable, Identifiable, Equatable, Sendable {
+  public let name: String
+  public let tid: Int
+  public var id: String { name }
+
+  enum CodingKeys: String, CodingKey { case name, tid }
 }
 
 public struct ArchivePage: Decodable, Equatable, Sendable {
   public let records: [ArchiveVideo]
   /// The cursor for the next page; 0 means the archive has no more rows.
   public let next: Int64
+  /// Older servers omit capability metadata; filters stay disabled until a page
+  /// explicitly confirms that the server understands them.
+  public let supportsFiltering: Bool?
 
-  public init(records: [ArchiveVideo] = [], next: Int64 = 0) {
+  public init(records: [ArchiveVideo] = [], next: Int64 = 0, supportsFiltering: Bool? = nil) {
     self.records = records
     self.next = next
+    self.supportsFiltering = supportsFiltering
   }
+
+  enum CodingKeys: String, CodingKey { case records, next, supportsFiltering = "supports_filtering" }
 }
 
 /// The one-line summary above the archive list. `seconds` is the sum of the
@@ -88,15 +185,21 @@ public struct ArchiveWatchLaterItem: Decodable, Identifiable, Equatable, Sendabl
   public let duration: Int
   public let addAt: Int64
   public let view: Int
+  public let mainCategory: String?
+  public let subCategory: String?
 
   public var id: String { bvid }
   public var video: Video {
-    Video(bvid: bvid, title: title, cover: URL(string: cover), author: author, duration: duration, views: view)
+    Video(
+      bvid: bvid, title: title, cover: URL(string: cover), author: author,
+      duration: duration, views: view, partitionName: mainCategory, subpartitionName: subCategory)
   }
 
   enum CodingKeys: String, CodingKey {
     case bvid, title, cover, author, duration, view
     case addAt = "add_at"
+    case mainCategory = "main_category"
+    case subCategory = "sub_category"
   }
 }
 
