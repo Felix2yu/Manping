@@ -112,9 +112,8 @@ private struct PlayerChromeFade: ViewModifier {
 
 // MARK: - Panel
 
-/// The glass control panel: `stageInset` (12pt) inside the stage's edges, never touching them,
-/// `md` radius (the stage's 20 less the 12pt inset would leave 8, too tight for the 40pt play
-/// button), always dark.
+/// The glass control panel: `stageInset` (8pt) inside the stage's edges, never touching them,
+/// with `md` radius and always dark.
 struct PlayerControlPanel<Content: View>: View {
   let chrome: PlayerChromeState
   @ViewBuilder var content: Content

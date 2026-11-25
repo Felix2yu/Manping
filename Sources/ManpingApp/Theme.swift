@@ -53,7 +53,7 @@ enum Theme {
   static let panelInset: CGFloat = 8
   /// The playback page: the gap between the stage, the window edges, the toolbar and the right
   /// panel, and between the stage's edges and its control panel (DesignSystem.md §11).
-  static let stageInset: CGFloat = 12
+  static let stageInset: CGFloat = 8
 
   /// Four radii plus capsule: badges, rows and fields, covers and cards, panels.
   enum Radius {

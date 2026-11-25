@@ -3,7 +3,7 @@ import CoreImage
 import SwiftUI
 
 // The playback stage (DesignSystem.md §11): the video page, the episode page and the live room
-// put the picture in one rounded, always-dark container that sits on the window's backdrop 12 pt
+// put the picture in one rounded, always-dark container that sits on the window's backdrop 8 pt
 // from the window edges, the toolbar and the right panel. Around the picture the stage shows a
 // still, blurred and darkened copy of the cover, so letterboxing reads as part of the picture
 // instead of a black hole. Full screen defaults to pure black and drops the radius, margins and edge.
@@ -87,7 +87,7 @@ private struct PlayerStageShape: ViewModifier {
   let immersive: Bool
   @Environment(\.colorScheme) private var scheme
   func body(content: Content) -> some View {
-    let shape = RoundedRectangle(cornerRadius: immersive ? 0 : Theme.Radius.lg, style: .continuous)
+    let shape = RoundedRectangle(cornerRadius: immersive ? 0 : Theme.Radius.md, style: .continuous)
     content
       .clipShape(shape)
       .overlay {
@@ -99,7 +99,7 @@ private struct PlayerStageShape: ViewModifier {
 private struct PlayerSidePanelSurface: ViewModifier {
   @Environment(\.colorScheme) private var scheme
   func body(content: Content) -> some View {
-    let shape = RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+    let shape = RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
     content
       .background(Theme.panel(scheme))
       .clipShape(shape)
