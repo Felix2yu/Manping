@@ -204,6 +204,9 @@ public enum AISource: Sendable, Equatable, Codable {
 /// preset's needs.
 public enum AIMaterialKind: String, Codable, Sendable, CaseIterable, Hashable, Comparable {
   case metadata, articleBody, subtitles, officialSummary, danmaku, comments, viewerPosition, history
+  /// What the user watched recently, read from their own bili-history. It is not
+  /// part of the video, so it only ever travels with the presets that ask for it.
+  case personalHistory = "personal_history"
   public var title: String {
     switch self {
     case .metadata: "基本信息"
@@ -214,6 +217,7 @@ public enum AIMaterialKind: String, Codable, Sendable, CaseIterable, Hashable, C
     case .comments: "评论精选"
     case .viewerPosition: "当前进度"
     case .history: "对话历史"
+    case .personalHistory: "我的观看历史"
     }
   }
   /// Basic information and the article body are the subject itself and cannot be switched off.

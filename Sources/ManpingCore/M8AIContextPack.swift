@@ -14,21 +14,26 @@ public struct AIMaterialBundle: Sendable, Equatable {
   public var danmakuNote: String?
   public var comments: AICommentDigest?
   public var commentsNote: String?
+  /// Read from bili-history, not from Bilibili: only the 我的观看历史 preset asks for it.
+  public var personalHistory: AIPersonalHistoryDigest?
+  public var personalHistoryNote: String?
   /// A material failed for a reason that may pass (network, server); such a bundle is not cached,
   /// so the next run or 重试 fetches again.
   public var transient = false
   public init(source: AISource, transcript: AITranscript? = nil, transcriptNote: String? = nil, viewPoints: [AIViewPoint] = [],
     viewPointSource: String = "official", official: AIOfficialSummary? = nil, danmaku: AIDanmakuDigest? = nil,
-    danmakuNote: String? = nil, comments: AICommentDigest? = nil, commentsNote: String? = nil) {
+    danmakuNote: String? = nil, comments: AICommentDigest? = nil, commentsNote: String? = nil,
+    personalHistory: AIPersonalHistoryDigest? = nil, personalHistoryNote: String? = nil) {
     self.source = source; self.transcript = transcript; self.transcriptNote = transcriptNote; self.viewPoints = viewPoints
     self.viewPointSource = viewPointSource; self.official = official; self.danmaku = danmaku; self.danmakuNote = danmakuNote
     self.comments = comments; self.commentsNote = commentsNote
+    self.personalHistory = personalHistory; self.personalHistoryNote = personalHistoryNote
   }
 }
 
 public enum AIContextTag: String, Codable, Sendable, CaseIterable {
   case metadata, chapters, officialSummary = "official_summary", transcript, segmentSummaries = "segment_summaries", article
-  case danmakuDigest = "danmaku_digest", comments, viewer
+  case danmakuDigest = "danmaku_digest", comments, viewer, personalHistory = "personal_history"
 }
 
 public struct AIContextLayer: Sendable, Equatable {
@@ -165,6 +170,13 @@ public struct AIContextPack: Sendable, Equatable {
         layers.append(AIContextLayer(tag: .comments, material: .comments, attributes: attributes, body: digest.render()))
       } else { notes[.comments] = bundle.commentsNote ?? "没有评论" }
     }
+    if allowed(.personalHistory) {
+      if let digest = bundle.personalHistory {
+        layers.append(AIContextLayer(tag: .personalHistory, material: .personalHistory,
+          attributes: [("source", "bili-history"), ("count", String(digest.entries.count))],
+          body: digest.render()))
+      } else { notes[.personalHistory] = bundle.personalHistoryNote ?? "没有可用的观看记录" }
+    }
     if source.kind.isTimeline, preset.style == .conversation, let position = viewerPosition, position.isFinite, position >= 0,
       allowed(.viewerPosition) {
       // Subtitle text around the position goes only when subtitles may be sent too.
@@ -273,7 +285,8 @@ public struct AIContextPreview: Sendable, Equatable {
     history: AIHistoryUse? = nil) -> AIContextPreview {
     var rows: [Row] = []
     let kinds: [AIMaterialKind] = bundle.source.kind == .article
-      ? [.metadata, .articleBody, .comments, .history] : [.metadata, .subtitles, .officialSummary, .danmaku, .comments, .viewerPosition, .history]
+      ? [.metadata, .articleBody, .comments, .history]
+      : [.metadata, .subtitles, .officialSummary, .danmaku, .comments, .viewerPosition, .personalHistory, .history]
     for kind in kinds {
       var tokens = pack.layers.filter { $0.material == kind }.reduce(0) { $0 + $1.tokens }
       if kind == .history, let history { tokens = history.turns > 0 ? max(1, history.tokens) : 0 }
@@ -311,6 +324,9 @@ public struct AIContextPreview: Sendable, Equatable {
       let pinned = digest.items.filter(\.pinned).count, uploader = digest.items.filter(\.byUploader).count
       return "置顶 \(pinned) 条、精选 \(digest.items.count - pinned) 条（含 UP 主 \(uploader) 条），附点赞数"
     case .viewerPosition: return "问答时附带当前进度前后 90 秒的字幕"
+    case .personalHistory:
+      guard let digest = bundle.personalHistory else { return bundle.personalHistoryNote ?? "没有可用的观看记录" }
+      return "你最近的 \(digest.entries.count) 条观看记录（标题、UP 主、观看日期、看到哪里），来自 bili-history"
     case .history: return "最近 3 轮原文，更早的轮次压缩后发送"
     }
   }

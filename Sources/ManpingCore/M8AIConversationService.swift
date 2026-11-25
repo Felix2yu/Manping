@@ -103,10 +103,12 @@ public actor AIConversationService {
   public init(store: AIConversationStore, materials: any AIMaterialProvider, backends: any AIBackendFactory, identity: AIIdentityGate) {
     self.store = store; self.materials = materials; self.backends = backends; self.identity = identity
   }
-  /// The app's service: live materials and models, the on-disk store.
+  /// The app's service: live materials and models, the on-disk store. `personalHistory`
+  /// reads the user's bili-history archive; nil when no server is configured.
   public static func live(service: BiliService, rpc: (any BiliRPCService)?, configuration: AIConfigurationStore,
-    store: AIConversationStore) -> AIConversationService {
-    AIConversationService(store: store, materials: AIBiliMaterialProvider(service: service, rpc: rpc),
+    store: AIConversationStore, personalHistory: AIPersonalHistoryReader? = nil) -> AIConversationService {
+    AIConversationService(store: store,
+      materials: AIBiliMaterialProvider(service: service, rpc: rpc, personalHistory: personalHistory),
       backends: AILiveBackendFactory(configuration: configuration), identity: .live(service))
   }
   /// UI screenshots: canned materials and answers, an in-memory store, nothing leaves the Mac.

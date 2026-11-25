@@ -357,6 +357,21 @@ import WebKit
     }
     set { watchHistoryStorage = newValue }
   }
+  /// The archive reader: one object for the history page and the AI panel. Built
+  /// lazily so a Mac that never configured bili-history pays nothing.
+  private var clientHistoryStorage: ClientHistoryService?
+  var clientHistory: ClientHistoryService {
+    if let clientHistoryStorage { return clientHistoryStorage }
+    let service = ClientHistoryService(
+      baseURL: appSettings.text(.historyServer), token: BiliHistoryConfig.readToken())
+    clientHistoryStorage = service
+    return service
+  }
+  /// True when 归档 may be offered at all. The same switch that allows the cover
+  /// marks also allows the archive reads, so turning bili-history off really off
+  /// stops every request to that server.
+  var hasArchiveServer: Bool { appSettings.bool(.historySync) && clientHistory.isConfigured }
+
   /// One page of the account's own history: bili-history only crawls hourly, this fills the gap.
   private func officialWatchRecords() async -> [String: WatchRecord] {
     guard let rpc = try? standardRPCService() else { return [:] }
@@ -702,6 +717,9 @@ import WebKit
     watchActivity.indexesSpotlight = settings.bool(.spotlightIndex)
     if previous.bool(.spotlightIndex), !settings.bool(.spotlightIndex) { watchActivity.end(); watchActivity.clearSpotlight() }
     watchHistory.configure(enabled: settings.bool(.historySync), baseURL: settings.text(.historyServer))
+    // The archive client caches the address and token it was built with, so a
+    // settings change has to hand out a fresh one on next use.
+    clientHistoryStorage = nil
     theme = AppTheme(rawValue: settings.text(.theme)) ?? .system
     playbackPreferences.codec = PlaybackCodec(rawValue: settings.text(.codec)) ?? .h264
     playbackPreferences.quality = settings.number(.quality) > 0 ? Int(settings.number(.quality)) : nil

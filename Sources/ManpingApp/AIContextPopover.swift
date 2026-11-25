@@ -158,6 +158,7 @@ struct AIContextPopover: View {
     case .danmaku: "只发统计结果与少量代表弹幕"
     case .comments: "置顶、高赞与 UP 主回复，附赞数"
     case .viewerPosition: "问答时附带当前进度前后的字幕"
+    case .personalHistory: "你最近 20 条观看记录（标题、UP 主、观看日期、看到哪里），来自你的 bili-history"
     case .history: "追问时附带之前的问答"
     }
   }

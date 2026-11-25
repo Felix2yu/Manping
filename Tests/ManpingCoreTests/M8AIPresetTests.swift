@@ -5,10 +5,10 @@ import XCTest
 final class M8AIPresetTests: XCTestCase {
   private func presetDefaults() -> UserDefaults { scratchDefaults("fixture.ai.presets") }
 
-  func testBuiltInsCoverTheTenPresetsAndSystemPromptIsTheDesignText() {
-    XCTAssertEqual(AIBuiltInPresets.all.map(\.name), ["章节总结", "只看 3 分钟", "高能时刻", "弹幕在聊什么", "评论区观点", "评价", "问答",
+  func testBuiltInsCoverTheElevenPresetsAndSystemPromptIsTheDesignText() {
+    XCTAssertEqual(AIBuiltInPresets.all.map(\.name), ["章节总结", "只看 3 分钟", "高能时刻", "弹幕在聊什么", "评论区观点", "评价", "问答", "我看过什么",
       "专栏要点", "专栏评价", "专栏问答"])
-    XCTAssertEqual(Set(AIBuiltInPresets.all.map(\.id)).count, 10)
+    XCTAssertEqual(Set(AIBuiltInPresets.all.map(\.id)).count, 11)
     XCTAssertEqual(AIBuiltInPresets.chapters.output, .chaptersJSON)
     XCTAssertEqual(AIBuiltInPresets.clips.output, .clipsJSON)
     XCTAssertEqual(AIBuiltInPresets.highlights.required, [.danmaku])

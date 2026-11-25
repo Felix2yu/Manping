@@ -239,8 +239,22 @@ public enum AIBuiltInPresets {
     - 正文没有覆盖的内容，直接说明「材料中没有提到」。
     """, output: .markdown, required: [.articleBody], optional: [.history, .comments], style: .conversation, builtIn: true)
 
+  /// Uses the one material that is about the viewer rather than the video, so it is
+  /// listed but never part of another preset's context.
+  public static let personalHistory = AIPreset(id: "personal-history", name: "我看过什么", version: 1, targets: [.video, .pgc], taskPrompt: """
+    任务：结合 <personal_history>（我自己 bili-history 里的最近观看记录）和这个视频的基本信息回答，使用 Markdown：
+    ## 你可能已经看过
+    同 UP 主、同分区或标题相近的记录，最多 5 条，写清观看日期和看到哪里。没有就直说「记录里没有相近的视频」。
+    ## 最近在看什么
+    用 1–2 句概括记录里反复出现的主题或 UP 主，并说明这个视频是否属于其中之一。
+    ## 可以接着看
+    记录里看到一半的视频，最多 3 条，写清进度。
+    - 只使用记录里出现过的标题、UP 主与进度，不要补造视频，也不要猜测没写出的时间点。
+    - 材料里没有 <personal_history> 时，说明没有连接 bili-history，然后只根据基本信息回答第一段。
+    """, output: .markdown, optional: [.personalHistory], builtIn: true)
+
   public static let all: [AIPreset] = [chapters, clips, highlights, danmakuTalk, commentViews, evaluation, question,
-    articlePoints, articleEvaluation, articleQuestion]
+    personalHistory, articlePoints, articleEvaluation, articleQuestion]
 }
 
 /// Persisted preset state: built-ins keep only the user's edits so unedited ones follow new defaults.

@@ -9,13 +9,23 @@ public protocol AIMaterialProvider: Sendable {
     fallbackChapters: [AIViewPoint], loadedDanmaku: [DanmakuComment]?) async throws -> AIMaterialBundle
 }
 
+/// Reads the user's own bili-history archive. Main-actor bound because the reader
+/// holds the app's settings and HTTP service; `gather` awaits it off the actor.
+public typealias AIPersonalHistoryReader = @MainActor @Sendable () async -> [ArchiveVideo]
+
 /// Live materials: one player-metadata request (subtitles + chapters), the subtitle body, the
 /// official summary (videos), danmaku and two hot comment pages read in order. Identity changes
 /// and cancellation propagate; any other failure becomes a note on that material.
 public struct AIBiliMaterialProvider: AIMaterialProvider {
   let service: BiliService
   let rpc: (any BiliRPCService)?
-  public init(service: BiliService, rpc: (any BiliRPCService)?) { self.service = service; self.rpc = rpc }
+  /// The user's own bili-history archive. Nil when no server is configured, which is
+  /// reported as a note rather than as a failure.
+  let personalHistory: AIPersonalHistoryReader?
+  public init(service: BiliService, rpc: (any BiliRPCService)?,
+    personalHistory: AIPersonalHistoryReader? = nil) {
+    self.service = service; self.rpc = rpc; self.personalHistory = personalHistory
+  }
 
   public func gather(source: AISource, kinds: Set<AIMaterialKind>, settings: AIMaterialSettings, identity: AuthSnapshot?,
     fallbackChapters: [AIViewPoint], loadedDanmaku: [DanmakuComment]?) async throws -> AIMaterialBundle {
@@ -85,6 +95,19 @@ public struct AIBiliMaterialProvider: AIMaterialProvider {
         } catch is CancellationError { throw CancellationError() }
         catch { try await check(); bundle.commentsNote = "没能读取评论"; if AICommentFetcher.isTransient(error) { bundle.transient = true } }
       } else { bundle.commentsNote = "评论服务不可用" }
+    }
+    if kinds.contains(.personalHistory) {
+      // bili-history authenticates with its own token, so this read is independent of
+      // the Bilibili identity; a server that is off makes it a note, not a failure.
+      if let personalHistory {
+        let items = await personalHistory()
+        bundle.personalHistory = AIPersonalHistoryDigest.make(items)
+        if bundle.personalHistory == nil {
+          bundle.personalHistoryNote = items.isEmpty ? "bili-history 里还没有观看记录" : "记录里没有可以打开的普通视频"
+        }
+      } else {
+        bundle.personalHistoryNote = "没有连接 bili-history"
+      }
     }
     try await check()
     return bundle
@@ -219,6 +242,19 @@ public struct AIFixtureMaterialProvider: AIMaterialProvider {
         replyCount: 1, liked: false, pinned: false, replies: [])
       let page = RPCCommentPage(oid: source.commentTarget.oid, targetType: source.commentTarget.type, comments: [hot], pinned: pinned, next: 0, isEnd: true)
       bundle.comments = AICommentDigest.make(pages: [page], uploaderMid: source.uploaderMid ?? 2)
+    }
+    if kinds.contains(.personalHistory) {
+      // Offline rows shaped like bili-history's answer, so screenshots and UI checks
+      // can show the material without a server.
+      let rows = [
+        ArchiveVideo(bvid: "BVfixture01", title: "川西环线第一天：从成都到新都桥", cover: "", author: "路上的 UP",
+          authorMID: 2, duration: 1_104, progress: 402, viewAt: 1_760_000_000, finished: false, business: "video"),
+        ArchiveVideo(bvid: "BVfixture02", title: "折多山垭口实测：海拔 4298 米的风有多大", cover: "", author: "路上的 UP",
+          authorMID: 2, duration: 620, progress: 620, viewAt: 1_759_800_000, finished: true, business: "video"),
+        ArchiveVideo(bvid: "BVfixture03", title: "自驾 318 需要准备什么", cover: "", author: "装备清单",
+          authorMID: 3, duration: 900, progress: 180, viewAt: 1_759_600_000, finished: false, business: "video"),
+      ]
+      bundle.personalHistory = AIPersonalHistoryDigest.make(rows)
     }
     return bundle
   }

@@ -179,6 +179,7 @@ struct AISettingsSections: View {
     (.danmaku, "只发统计结果与少量代表弹幕。"),
     (.comments, "置顶、高赞与 UP 主回复，附赞数。"),
     (.viewerPosition, "问答时附带当前时间前后 90 秒的字幕。"),
+    (.personalHistory, "最近 20 条观看记录：标题、UP 主、观看日期和看到哪里，来自你自己的 bili-history。"),
     (.history, "追问时附带之前的问答；较早的轮次压缩后发送。"),
   ]
 

@@ -64,7 +64,14 @@ struct AITimelineMarks: Equatable {
     } else {
       do {
         let store = try AIConversationStore(url: AIConversationStore.defaultURL)
-        conversations = .live(service: app.service, rpc: try? app.standardRPCService(), configuration: app.aiConfiguration, store: store)
+        conversations = .live(
+          service: app.service, rpc: try? app.standardRPCService(), configuration: app.aiConfiguration, store: store,
+          personalHistory: { @MainActor @Sendable [weak app] in
+            // A missing server yields no rows; the material then reports itself as
+            // unavailable instead of failing the whole answer.
+            guard let app, app.hasArchiveServer else { return [] }
+            return (try? await app.clientHistory.recent(limit: 20)) ?? []
+          })
         coordinator = AIIdentityCoordinator(store: store); storeError = nil
       } catch {
         conversations = nil; coordinator = nil; storeError = "没能打开 AI 对话数据库，回答不会保存。"

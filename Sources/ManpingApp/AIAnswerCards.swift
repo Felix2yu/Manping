@@ -75,6 +75,7 @@ extension AIMaterialKind {
     case .danmaku: "弹幕"
     case .comments: "评论"
     case .viewerPosition: "当前进度"
+    case .personalHistory: "观看历史"
     case .history: "对话历史"
     }
   }
