@@ -16,6 +16,50 @@ final class PlayerFullScreenTests: XCTestCase {
     XCTAssertEqual(player.error, "fixture failure")
   }
 
+  @MainActor func testDetachedWindowKeepsOneFullSizePlayerSurfaceAcrossResizes() throws {
+    _ = NSApplication.shared
+    let coordinator = M7PlaybackWindowCoordinator(savesFrame: false)
+    let content = NSView(frame: CGRect(origin: .zero, size: M7PlaybackWindowCoordinator.defaultSize))
+    var closeCalls = 0
+    coordinator.present(content: content, mainWindow: nil, hideMain: false, displayMode: nil) {
+      closeCalls += 1
+    }
+    let window = try XCTUnwrap(coordinator.window)
+    XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
+    XCTAssertEqual(window.contentRect(forFrameRect: window.frame).size, M7PlaybackWindowCoordinator.defaultSize)
+    XCTAssertEqual(window.minSize, M7PlaybackWindowCoordinator.minimumSize)
+    XCTAssertEqual(window.backgroundColor, Theme.stageNSColor)
+    XCTAssertTrue(window.contentView === content)
+
+    for size in [M7PlaybackWindowCoordinator.minimumSize, NSSize(width: 960, height: 540), Self.wideSize] {
+      window.setContentSize(size)
+      XCTAssertTrue(window.contentView === content, "resizing must not create a second player owner")
+    }
+
+    coordinator.close(showMain: false)
+    coordinator.close(showMain: false)
+    XCTAssertNil(coordinator.window)
+    XCTAssertNil(window.contentView)
+    XCTAssertEqual(closeCalls, 1, "closing restores the main player exactly once")
+  }
+
+  @MainActor func testDetachedWindowDisplayModesKeepTheirExistingPlacementBehavior() throws {
+    _ = NSApplication.shared
+    let coordinator = M7PlaybackWindowCoordinator(savesFrame: false)
+    coordinator.present(content: NSView(), mainWindow: nil, hideMain: false, displayMode: nil) {}
+    let window = try XCTUnwrap(coordinator.window)
+
+    coordinator.applyDisplayMode("compact")
+    XCTAssertEqual(window.level, .floating)
+    XCTAssertEqual(window.contentRect(forFrameRect: window.frame).size, NSSize(width: 800, height: 500))
+
+    coordinator.applyDisplayMode("default")
+    XCTAssertEqual(window.level, .normal)
+    coordinator.close(showMain: false)
+  }
+
+  private let wideSize = NSSize(width: 1440, height: 810)
+
   func testExitFramesFitCurrentVisibleScreen() {
     let screen = NSRect(x: 0, y: 0, width: 1440, height: 900)
     let visible = NSRect(x: 0, y: 25, width: 1440, height: 850)

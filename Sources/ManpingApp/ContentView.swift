@@ -466,8 +466,7 @@ enum ShellPreferences {
   static let sidebarHiddenKey = "Manping.sidebarHidden"
 }
 
-/// The standalone playback window: the same toolbar as the main window's playback page (title,
-/// the page's actions, 在独立窗口播放, 右侧栏) without 返回 / 前进 and search, then the page.
+/// The standalone playback window is a player-only surface: no page toolbar or information panel.
 struct DetachedPlaybackContent: View {
   @ObservedObject var model: AppModel
   var body: some View {
@@ -483,31 +482,22 @@ struct DetachedPlaybackContent: View {
 
 private struct DetachedPlaybackLayout: View {
   @ObservedObject var model: AppModel
-  @Environment(\.colorScheme) private var scheme
   var body: some View {
-    // In full screen only the picture, the danmaku and the controls remain.
-    let immersive = model.playbackWindowFullScreen
-    VStack(spacing: 0) {
-      Color.clear.frame(height: immersive ? 0 : Theme.toolbarHeight)
-      page.frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environment(\.immersivePlayback, immersive)
-    }
-    .overlayPreferenceValue(PageToolbarKey.self, alignment: .top) { item in
-      if !immersive {
-        HStack(spacing: 12) {
-          PageToolbarTitle(item: item, fallback: "").layoutPriority(-1)
-          Spacer(minLength: 8)
-          if let accessory = item?.accessory { HStack(spacing: 8) { accessory }.fixedSize() }
+    page
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      // The standalone window always uses the edge-to-edge player presentation.
+      .environment(\.immersivePlayback, true)
+      .background(Theme.stage)
+      .overlay(alignment: .top) {
+        if !model.playbackWindowFullScreen {
+          LinearGradient(colors: [.black.opacity(0.42), .black.opacity(0)],
+            startPoint: .top, endPoint: .bottom)
+            .frame(height: 48)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
-        .foregroundStyle(Theme.text(scheme))
-        // The window's buttons sit at the leading edge of this band.
-        .padding(.leading, 16 + 72).padding(.trailing, 16)
-        .frame(height: Theme.toolbarHeight)
       }
-    }
-    // The same stage and panel as the main window's playback page, on the window's backdrop.
-    .background(immersive ? Theme.stage : Theme.backdrop(scheme))
-    .ignoresSafeArea(.container, edges: .top)
+      .ignoresSafeArea(.container, edges: .top)
   }
   @ViewBuilder private var page: some View {
     if let video = model.selected {

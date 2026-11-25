@@ -3,6 +3,10 @@ import AppKit
 /// Hosts one playback page after the root removes its previous SwiftUI owner.
 /// It never creates a PlayerModel or a second render surface.
 @MainActor final class M7PlaybackWindowCoordinator: NSObject, NSWindowDelegate {
+  static let defaultSize = NSSize(width: 1280, height: 720)
+  static let minimumSize = NSSize(width: 640, height: 360)
+
+  private let savesFrame: Bool
   private(set) var window: NSWindow?
   private weak var mainWindow: NSWindow?
   private var restoreMain = false
@@ -15,6 +19,12 @@ import AppKit
   /// This window only shows the player, so its full screen is always immersive.
   private lazy var fullScreen = PlayerFullScreenTransition(showsPlayer: { true },
     setFullScreen: { [weak self] in self?.onFullScreen?($0) })
+
+  init(savesFrame: Bool = true) {
+    self.savesFrame = savesFrame
+    super.init()
+  }
+
   /// Shows `content` in the window. `displayMode` (default, fullscreen or compact) is applied
   /// when the caller opens something there; nil keeps the window's current state.
   func present(content: NSView, mainWindow: NSWindow?, hideMain: Bool, displayMode: String?,
@@ -22,24 +32,27 @@ import AppKit
     self.mainWindow = mainWindow
     self.onClose = onClose
     if window == nil {
-      let window = PlayerHostWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+      let window = PlayerHostWindow(contentRect: NSRect(origin: .zero, size: Self.defaultSize),
         styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
         backing: .buffered, defer: false)
       window.title = "满屏 · 播放"
       window.titlebarAppearsTransparent = true
       window.titleVisibility = .hidden
-      window.backgroundColor = Theme.backdropNSColor
+      window.backgroundColor = Theme.stageNSColor
       window.isReleasedWhenClosed = false
       window.isRestorable = false
-      window.minSize = NSSize(width: 760, height: 480)
+      window.minSize = Self.minimumSize
       window.delegate = self
       window.center()
       // Reopens where the user last left it (center() is only the first-run default).
-      if !DebugUIFixtures.usesLiveSceneMemory { window.setFrameAutosaveName("PlaybackWindow") }
+      if savesFrame, !DebugUIFixtures.usesLiveSceneMemory { window.setFrameAutosaveName("PlaybackWindow") }
       self.window = window
     }
     guard let window else { return }
     window.contentView = content
+    #if DEBUG
+    publishWindowID(window)
+    #endif
     window.makeKeyAndOrderFront(nil)
     if hideMain, mainWindow?.isVisible == true {
       restoreMain = true
@@ -70,6 +83,9 @@ import AppKit
     window.contentView = nil
     window.close()
     self.window = nil
+    #if DEBUG
+    if let file = playbackWindowIDFile { try? FileManager.default.removeItem(at: file) }
+    #endif
     fullScreen.reset()
     if showMain || restoreMain { mainWindow?.makeKeyAndOrderFront(nil) }
     restoreMain = false
@@ -100,4 +116,16 @@ import AppKit
   func windowDidExitFullScreen(_ notification: Notification) { fullScreen.didExit() }
   func windowDidFailToEnterFullScreen(_ window: NSWindow) { fullScreen.didFailToEnter() }
   func windowDidFailToExitFullScreen(_ window: NSWindow) { fullScreen.didFailToExit() }
+
+  #if DEBUG
+  private var playbackWindowIDFile: URL? {
+    guard Bundle.main.bundleURL.pathExtension == "app" else { return nil }
+    return Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("playback-window-id")
+  }
+
+  private func publishWindowID(_ window: NSWindow) {
+    guard let file = playbackWindowIDFile else { return }
+    try? String(window.windowNumber).write(to: file, atomically: true, encoding: .utf8)
+  }
+  #endif
 }

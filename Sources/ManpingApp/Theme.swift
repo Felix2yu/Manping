@@ -108,6 +108,7 @@ enum Theme {
   static let stage = color(0x05070B)
   /// The stage's 0.5 pt edge: white 6% on the dark window, black 8% on the light one.
   static func stageStroke(_ scheme: ColorScheme) -> Color { scheme == .dark ? .white.opacity(0.06) : .black.opacity(0.08) }
+  static let stageNSColor = NSColor(srgbRed: 0x05 / 255, green: 0x07 / 255, blue: 0x0B / 255, alpha: 1)
   /// Partition symbol tints; rotated by partition id.
   static let partitionPalette: [Color] = [
     color(0xA98BFF), color(0x2EC0F7), live, color(0x3CCB9F), highlight, color(0x5B8CFF), color(0xFF8A4C),

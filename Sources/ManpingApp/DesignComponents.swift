@@ -59,8 +59,7 @@ extension View {
   }
 }
 
-/// The toolbar's title group: the page's leading badge, title and subtitle. Shared by the main
-/// window's toolbar and the standalone playback window's.
+/// The toolbar's title group: the page's leading badge, title and subtitle.
 struct PageToolbarTitle: View {
   let item: PageToolbarItem?
   let fallback: String
