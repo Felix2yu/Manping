@@ -25,7 +25,7 @@ final class M7SettingsTests: XCTestCase {
     }
   }
   func testTVPlaybackDefaultsAreConservativeAndRoundTrip() throws {
-    try withDefaults { defaults in
+    withDefaults { defaults in
       let initial = MacSettings.load(from: defaults)
       XCTAssertFalse(initial.bool(.videoSmoothMotion))
       XCTAssertEqual(initial.text(.fullscreenSurround), "black")
@@ -42,7 +42,7 @@ final class M7SettingsTests: XCTestCase {
     }
   }
   func testLegacyPreferencesLoadAndAutoQualityRemovesOldSelection() throws {
-    try withDefaults { defaults in
+    withDefaults { defaults in
       defaults.set("深色", forKey: "appTheme")
       defaults.set("hevc", forKey: "preferredCodec")
       defaults.set(80, forKey: "preferredVideoQuality")
@@ -70,7 +70,7 @@ final class M7SettingsTests: XCTestCase {
     XCTAssertTrue(settings.bool(.globalSpeed))
   }
   func testInvalidPersistedValuesFallBackWithoutMutatingOtherPreferences() throws {
-    try withDefaults { defaults in
+    withDefaults { defaults in
       defaults.set("unexpected", forKey: MacSettingKey.theme.rawValue)
       defaults.set("av1", forKey: MacSettingKey.codec.rawValue)
       defaults.set("not-a-number", forKey: MacSettingKey.stepForward.rawValue)
@@ -199,7 +199,7 @@ final class M7SettingsTests: XCTestCase {
       XCTAssertNil(MacSettingKey(rawValue: raw))
       XCTAssertFalse(MacSettingsCatalog.descriptors.contains { $0.key.rawValue == raw })
     }
-    try withDefaults { defaults in
+    withDefaults { defaults in
       defaults.set(true, forKey: "Manping.nvdec")
       defaults.set(false, forKey: "Manping.topNavigation")
       var settings = MacSettings.load(from: defaults)

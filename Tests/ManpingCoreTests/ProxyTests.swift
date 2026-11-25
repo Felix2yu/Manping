@@ -294,7 +294,7 @@ final class TestOrigin: @unchecked Sendable {
 
   private func handle(_ connection: NWConnection) {
     connection.start(queue: queue)
-    func read(_ buffer: Data) {
+    @Sendable func read(_ buffer: Data) {
       connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, done, error in
         guard let self else { return }
         var buffer = buffer
@@ -361,7 +361,7 @@ final class TestShadowsocksServer: @unchecked Sendable {
     lock.withLock { accepted += 1 }
     let pipe = Pipe()
     client.start(queue: queue)
-    func pumpClient() {
+    @Sendable func pumpClient() {
       client.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, done, error in
         guard let self else { return }
         if let data { pipe.buffer.append(data) }

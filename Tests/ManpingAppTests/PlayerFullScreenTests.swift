@@ -31,7 +31,7 @@ final class PlayerFullScreenTests: XCTestCase {
     XCTAssertEqual(window.backgroundColor, Theme.stageNSColor)
     XCTAssertTrue(window.contentView === content)
 
-    for size in [M7PlaybackWindowCoordinator.minimumSize, NSSize(width: 960, height: 540), Self.wideSize] {
+    for size in [M7PlaybackWindowCoordinator.minimumSize, NSSize(width: 960, height: 540), wideSize] {
       window.setContentSize(size)
       XCTAssertTrue(window.contentView === content, "resizing must not create a second player owner")
     }

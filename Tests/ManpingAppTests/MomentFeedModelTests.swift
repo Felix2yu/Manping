@@ -46,7 +46,7 @@ private final class MomentDynamicTransport: BiliRPCTransport, @unchecked Sendabl
     }
     if shouldHold {
       let waiter = lock.withLock { waiters.first! }
-      defer { lock.withLock { waiters.remove(waiter) } }
+      defer { _ = lock.withLock { waiters.remove(waiter) } }
       while lock.withLock({ waiters.contains(waiter) }) { try await Task.sleep(for: .milliseconds(5)) }
     }
     return Response()
@@ -120,7 +120,7 @@ private final class MomentDynamicTransport: BiliRPCTransport, @unchecked Sendabl
     XCTAssertEqual(transport.count, 2)
     feed.suspend()
     await feed.activate()
-    try await settle()
+    await settle()
     XCTAssertEqual(transport.count, 2)
     feed.cancel()
   }

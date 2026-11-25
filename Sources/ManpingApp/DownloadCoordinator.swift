@@ -48,8 +48,8 @@ import SwiftUI
     guard current.epoch == snapshot.epoch, current.identityRevision == snapshot.identityRevision else { throw CancellationError() }
   }
   private func run(_ record: DownloadRecord) {
-    guard let options = record.options, let store, tasks[record.id] == nil else { return }
-    tasks[record.id] = Task {
+    guard let options = record.options, store != nil, tasks[record.id] == nil else { return }
+    tasks[record.id] = Task { [self] in
       var current = record
       var mediaPublished = false
       let temporary = AppModel.support.appendingPathComponent("Transfers").appendingPathComponent(record.id)
@@ -107,9 +107,9 @@ import SwiftUI
           let preferences = PlaybackPreferences(codec: codec, quality: options.quality)
           let choice = try PlaybackSelector.select(manifest, preferences: preferences, supportsHardware: { _ in true })
           let audio = choice.audioURL
-          let vFile = try await DownloadWorker.resumeTransfer(request: service.request(choice.videoURL), to: temporary.appendingPathComponent("video.m4s"), identity: "aid:\(video.aid ?? 0):cid:\(video.cid ?? 0):video:\(choice.video.quality):codec:\(choice.video.codecID):bw:\(choice.video.bandwidth)") { [weak self] progress in Task { @MainActor in self?.updateProgress(record.id, progress * 0.8) } }
+          let vFile = try await DownloadWorker.resumeTransfer(request: service.request(choice.videoURL), to: temporary.appendingPathComponent("video.m4s"), identity: "aid:\(video.aid ?? 0):cid:\(video.cid ?? 0):video:\(choice.video.quality):codec:\(choice.video.codecID):bw:\(choice.video.bandwidth)") { progress in Task { @MainActor in self.updateProgress(record.id, progress * 0.8) } }
           try await checkIdentity(snapshot)
-          let aFile = try await DownloadWorker.resumeTransfer(request: service.request(audio), to: temporary.appendingPathComponent("audio.m4s"), identity: "aid:\(video.aid ?? 0):cid:\(video.cid ?? 0):audio:\(choice.audio.quality):codec:\(choice.audio.codecID):bw:\(choice.audio.bandwidth)") { [weak self] progress in Task { @MainActor in self?.updateProgress(record.id, 0.8 + progress * 0.15) } }
+          let aFile = try await DownloadWorker.resumeTransfer(request: service.request(audio), to: temporary.appendingPathComponent("audio.m4s"), identity: "aid:\(video.aid ?? 0):cid:\(video.cid ?? 0):audio:\(choice.audio.quality):codec:\(choice.audio.codecID):bw:\(choice.audio.bandwidth)") { progress in Task { @MainActor in self.updateProgress(record.id, 0.8 + progress * 0.15) } }
           try await checkIdentity(snapshot); current.state = "merging"; current.progress = 0.95; try update(current)
           let staged = temporary.appendingPathComponent("output.mp4")
           if FileManager.default.fileExists(atPath: staged.path) { try FileManager.default.removeItem(at: staged) }
@@ -119,7 +119,7 @@ import SwiftUI
           mediaPublished = true
         case .audio:
           guard let audio = manifest?.audio.first else { throw BiliError.invalidResponse("没有可下载的音频。") }
-          let file = try await DownloadWorker.resumeTransfer(request: service.request(audio.url), to: temporary.appendingPathComponent("audio.m4a"), identity: "aid:\(video.aid ?? 0):cid:\(video.cid ?? 0):audio:\(audio.quality):codec:\(audio.codecID):bw:\(audio.bandwidth)") { [weak self] progress in Task { @MainActor in self?.updateProgress(record.id, progress) } }
+          let file = try await DownloadWorker.resumeTransfer(request: service.request(audio.url), to: temporary.appendingPathComponent("audio.m4a"), identity: "aid:\(video.aid ?? 0):cid:\(video.cid ?? 0):audio:\(audio.quality):codec:\(audio.codecID):bw:\(audio.bandwidth)") { progress in Task { @MainActor in self.updateProgress(record.id, progress) } }
           output = directory.appendingPathComponent(stem + ".m4a")
           try await checkIdentity(snapshot)
           output = try await DownloadCompletion.publish(staged: file, to: output, checkpoint: checkpoint)

@@ -65,10 +65,12 @@ struct LivePlayerPage: View {
       installPlaybackShortcuts()
     }
     .onChange(of: live.roomID) { _, _ in installPlaybackShortcuts() }
-    .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
-      if DebugUIFixtures.usesLiveSceneMemory {
-        fixtureSidebarHidden = PerformanceEnvironment.defaults.bool(
-          forKey: PlayerPreferences.sidebarHiddenKey)
+    .task {
+      for await _ in NotificationCenter.default.messages(for: UserDefaults.DidChangeMessage.self) {
+        if DebugUIFixtures.usesLiveSceneMemory {
+          fixtureSidebarHidden = PerformanceEnvironment.defaults.bool(
+            forKey: PlayerPreferences.sidebarHiddenKey)
+        }
       }
     }
     .onChange(of: sidebarHidden) { _, _ in updateComposerVisibility() }

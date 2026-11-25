@@ -1107,7 +1107,7 @@ import SwiftUI
       uniqueKeysWithValues: names.map { name in
         var buffer = [CChar](repeating: 0, count: name == "vo-passes" ? 131_072 : 2048)
         let status = bili_mpv_string(engine, name, &buffer, buffer.count)
-        let value = String(cString: buffer)
+        let value = String(nullTerminatedCString: buffer)
         return (
           name,
           status < 0

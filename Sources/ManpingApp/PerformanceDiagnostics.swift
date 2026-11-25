@@ -235,7 +235,7 @@ enum PerformanceFixtures {
   // Production covers are cached bitmaps. Rasterize the synthetic artwork once
   // so this test does not add a GeometryReader/gradient/text tree to every cover.
   static let covers: [NSImage?] = (0..<8).map { index in
-    let renderer = ImageRenderer(content: DebugFixtureImage(index: index).frame(width: 512, height: 288))
+    let renderer = ImageRenderer(content: AnyView(DebugFixtureImage(index: index).frame(width: 512, height: 288)))
     renderer.scale = 1
     return renderer.nsImage
   }

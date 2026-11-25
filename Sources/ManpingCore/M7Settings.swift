@@ -1,6 +1,18 @@
 import CoreFoundation
 import Foundation
 
+private struct AnyCodingKey: CodingKey {
+  let stringValue: String
+  var intValue: Int? { nil }
+  init?(stringValue: String) { self.stringValue = stringValue }
+  init?(intValue: Int) { return nil }
+}
+
+// Enum-backed containers can omit unknown JSON keys, so inspect them with an open key type.
+private func exactCodingKeys(in decoder: any Decoder) throws -> Set<String> {
+  try decoder.container(keyedBy: AnyCodingKey.self).allKeys.reduce(into: []) { $0.insert($1.stringValue) }
+}
+
 /// The categories of the settings window, in sidebar order.
 public enum MacSettingGroup: String, CaseIterable, Sendable {
   case general = "通用", playback = "播放", danmaku = "弹幕", live = "直播", network = "网络", download = "下载与截图"
@@ -52,7 +64,7 @@ public enum MacSettingValue: Sendable, Equatable, Codable {
   private enum CodingKeys: String, CodingKey, CaseIterable { case type, value }
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    guard Set(container.allKeys) == Set(CodingKeys.allCases) else {
+    guard try exactCodingKeys(in: decoder) == Set(CodingKeys.allCases.map(\.rawValue)) else {
       throw DecodingError.dataCorruptedError(forKey: .type, in: container,
         debugDescription: "A setting value must contain exactly type and value.")
     }
@@ -344,7 +356,7 @@ public struct MacSettingsBackup: Codable, Equatable, Sendable {
 
   public init(from decoder: any Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    guard Set(container.allKeys) == Set(CodingKeys.allCases) else {
+    guard try exactCodingKeys(in: decoder) == Set(CodingKeys.allCases.map(\.rawValue)) else {
       throw MacSettingsBackupError.malformedBackup("顶层必须且只能包含 schemaVersion 和 values。")
     }
     let version = try container.decode(Int.self, forKey: .schemaVersion)

@@ -79,12 +79,15 @@ actor ImageCache {
     guard !clearing else { return }
     clearing = true; generation &+= 1
     defer { clearing = false }
-    let flights = Array(pending.values)
-    for flight in flights { flight.cancel() }
-    for flight in flights { _ = await flight.result }
-    pending.removeAll(); memory.removeAll()
-    if FileManager.default.fileExists(atPath: directory.path) {
-      try FileManager.default.removeItem(at: directory)
+    // A closed settings sheet cancels its task; the user still asked for the cache to be gone.
+    try await withTaskCancellationShield {
+      let flights = Array(pending.values)
+      for flight in flights { flight.cancel() }
+      for flight in flights { _ = await flight.result }
+      pending.removeAll(); memory.removeAll()
+      if FileManager.default.fileExists(atPath: directory.path) {
+        try FileManager.default.removeItem(at: directory)
+      }
     }
   }
   fileprivate func image(for original: URL) async throws -> DecodedImage {

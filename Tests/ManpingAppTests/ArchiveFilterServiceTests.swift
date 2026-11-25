@@ -142,8 +142,8 @@ private actor ArchiveFilterHTTP {
     XCTAssertFalse(model.canLoadMore)
     let bodies = await http.calls.filter { $0.path == "/api/client/history" }.map(\.body)
     XCTAssertEqual(bodies.count, 3)
-    for body in bodies {
-      XCTAssertEqual(body["keyword"] as? String, "样本")
+    for (index, body) in bodies.enumerated() {
+      XCTAssertEqual(body["keyword"] as? String, index == 0 ? nil : "样本")
       XCTAssertEqual(body["main_category"] as? String, "知识")
       XCTAssertEqual(body["sub_category"] as? String, "科普")
       XCTAssertEqual(body["min_duration"] as? Int, 301)

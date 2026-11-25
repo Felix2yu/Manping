@@ -130,11 +130,12 @@ private struct ShellContent: View {
     .environment(\.cardActions, CardActions(model: model))
     .environment(\.watchHistory, model.watchHistory)
     .environment(\.viewLaterActions, model.viewLaterActions)
-      .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) {
-        _ in
-        if DebugUIFixtures.usesLiveSceneMemory {
-          fixtureSidebarHidden = PerformanceEnvironment.defaults.bool(
-            forKey: ShellPreferences.sidebarHiddenKey)
+      .task {
+        for await _ in NotificationCenter.default.messages(for: UserDefaults.DidChangeMessage.self) {
+          if DebugUIFixtures.usesLiveSceneMemory {
+            fixtureSidebarHidden = PerformanceEnvironment.defaults.bool(
+              forKey: ShellPreferences.sidebarHiddenKey)
+          }
         }
       }
   }

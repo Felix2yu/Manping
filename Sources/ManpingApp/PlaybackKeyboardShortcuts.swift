@@ -113,7 +113,7 @@ enum PlaybackKeyboardInput {
   private weak var delegate: AppDelegate?
   private var downMonitor: Any?
   private var upMonitor: Any?
-  private var resignObserver: NSObjectProtocol?
+  private var resignObserver: NotificationCenter.ObservationToken?
   private var holdTask: Task<Void, Never>?
   private var shareTask: Task<Void, Never>?
   private var heldAction: PlaybackShortcut?
@@ -132,8 +132,8 @@ enum PlaybackKeyboardInput {
       self?.keyUp(event)
       return event
     }
-    resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] _ in
-      Task { @MainActor in self?.cancelHold() }
+    resignObserver = NotificationCenter.default.addObserver(for: NSWindow.DidResignKeyMessage.self) {
+      [weak self] _ in self?.cancelHold()
     }
   }
 

@@ -202,7 +202,7 @@ The interface is in Simplified Chinese. Requires macOS 27 on Apple silicon; down
 
 ## 从源码构建
 
-需要 Apple Silicon Mac、macOS 27、Xcode 27（Swift 6）、Python 3 和 Homebrew（用于 mpv 与 FFmpeg 的依赖）。
+需要 Apple Silicon Mac、macOS 27、Xcode 27（Swift 6.4）、Python 3 和 Homebrew（用于 mpv 与 FFmpeg 的依赖）。
 
 ```sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer

@@ -78,7 +78,7 @@ import ManpingCore
   private var revision: UInt64 = 0
   private var draftTask: Task<Void, Never>?
   private var poll: Task<Void, Never>?
-  private var observation: AnyCancellable?
+  private var observation: NotificationCenter.ObservationToken?
   private let fixturePolicySource: LiveGiftPolicySource?
   private var clickGate = LiveGiftClickGate()
   private var settingsRevision: UInt64 = 0
@@ -103,9 +103,12 @@ import ManpingCore
     self.gate = gate
     self.fixturePolicySource = fixturePolicySource
     settings = MacSettings.load(from: PerformanceEnvironment.defaults)
-    observation = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-      .sink { [weak self] _ in self?.reloadSettings() }
+    observation = NotificationCenter.default.addObserver(for: UserDefaults.DidChangeMessage.self) {
+      [weak self] _ in
+      await MainActor.run { self?.reloadSettings() }
+    }
   }
+  deinit { if let observation { NotificationCenter.default.removeObserver(observation) } }
   var pinned: Bool { detailShown || focused || composeShown || panel != nil || quote != nil }
   var canInteract: Bool { context?.accountMid != nil && context?.identity.state != .needsLogin }
   var limit: Int? { user?.danmakuLength }

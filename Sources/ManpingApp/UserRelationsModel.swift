@@ -97,6 +97,11 @@ import SwiftUI
     let revision = generation
     busy.insert(mid); errors[mid] = nil
     let task = Task { [weak self, service] in
+      defer {
+        if let self, self.generation == revision {
+          self.busy.remove(mid); self.writes[mid] = nil
+        }
+      }
       do {
         let initial: AuthSnapshot
         if let expected { initial = expected }
@@ -132,8 +137,6 @@ import SwiftUI
           requiresLogin()
         } else if !(error is CancellationError) { self.errors[mid] = error.localizedDescription }
       }
-      guard let self, self.generation == revision else { return }
-      self.busy.remove(mid); self.writes[mid] = nil
     }
     writes[mid] = task
     await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }

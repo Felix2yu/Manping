@@ -376,7 +376,11 @@ int bili_mpv_event(bili_mpv *e,char *buffer,size_t capacity) {
     }
     return (int)event->event_id;
 }
+// Bilibili's WBI signature requires MD5; this is protocol compatibility, not a security hash.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 void bili_md5(const void *bytes,unsigned long length,unsigned char output[16]) { CC_MD5(bytes,(CC_LONG)length,output); }
+#pragma clang diagnostic pop
 
 void bili_mpv_log_level(bili_mpv *e,const char *level) {if(e) e->request_log_messages(e->handle,level);}
 void bili_mpv_report_swap(bili_mpv *e) {if(e && e->render) e->render_report_swap(e->render);}

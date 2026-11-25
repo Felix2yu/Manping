@@ -50,7 +50,7 @@ struct M3UserSpacePage: View {
             .performanceScrollTarget(target: "space")
         }.cardGrid().performanceScrollProbe(page: "space")
           .prefetchOnScroll(enabled: selection.tab != "主页" && library.hasMore && !library.isLoading
-            && library.playAllProgress == nil && library.error == nil) { Task { await library.loadNext() } }
+            && !library.playAllProgress && library.error == nil) { Task { await library.loadNext() } }
       }
     }.foregroundStyle(Theme.text(scheme))
       .pageToolbar(title: profile?.name ?? "UID \(mid)", refresh: refresh) {
@@ -300,7 +300,7 @@ struct M3UserSpacePage: View {
     if let error = library.error {
       PageStateView(.error, title: "没能加载内容", message: error, actionTitle: "重试") { Task { await library.loadNext() } }
     } else if library.isLoading { ProgressView().frame(maxWidth: .infinity).padding() }
-    else if library.hasMore && selection.tab != "主页" { LoadMoreFooter(isLoading: library.isLoading || library.playAllProgress != nil, autoLoad: false) { Task { await library.loadNext() } } }
+    else if library.hasMore && selection.tab != "主页" { LoadMoreFooter(isLoading: library.isLoading || library.playAllProgress, autoLoad: false) { Task { await library.loadNext() } } }
     else if library.entries.isEmpty && library.collections.isEmpty { Text("还没有可显示的内容").font(Theme.Font.body).foregroundStyle(Theme.secondaryText(scheme)).padding() }
   }
   private func loadCurrent() async {

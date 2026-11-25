@@ -370,7 +370,7 @@ enum MpvParkingBudget {
     let handle = reference?.pointer
     guard let handle, let reference else {
       if isolated { PerformanceRun.log("PERF media_isolation requested=1 verified=0") }
-      error = String(cString: message)
+      error = String(nullTerminatedCString: message)
       return
     }
     // Process argv is immutable, so the engine pool cannot cross production/perf modes.
@@ -422,7 +422,7 @@ enum MpvParkingBudget {
             seconds.isFinite, seconds >= 0 else { return nil }
           var title = [CChar](repeating: 0, count: 2048)
           _ = bili_mpv_string(handle, "chapter-list/\(index)/title", &title, title.count)
-          let text = String(cString: title)
+          let text = String(nullTerminatedCString: title)
           return PlaybackChapter(index: index, title: text.isEmpty ? "章节 \(index + 1)" : text, time: seconds)
         }
       }
@@ -438,7 +438,7 @@ enum MpvParkingBudget {
       if reportsMedia && slow {
         var hardware = [CChar](repeating: 0, count: 128)
         _ = bili_mpv_string(handle, "hwdec-current", &hardware, hardware.count)
-        hardwareText = String(cString: hardware)
+        hardwareText = String(nullTerminatedCString: hardware)
       }
       // The source transfer picks EDR or SDR output: read it every tick until this load's video
       // reports one, then once a second. An empty value (no video yet) never replaces a known one.
@@ -455,7 +455,7 @@ enum MpvParkingBudget {
         }
         var buffer = [CChar](repeating: 0, count: 64)
         if bili_mpv_string(handle, "video-params/gamma", &buffer, buffer.count) >= 0, buffer[0] != 0 {
-          gamma = String(cString: buffer)
+          gamma = String(nullTerminatedCString: buffer)
           reference.gammaGeneration = sampledGeneration
         }
       }
@@ -464,7 +464,7 @@ enum MpvParkingBudget {
       if reportsMedia && slow {
         var passes = [CChar](repeating: 0, count: 32768)
         _ = bili_mpv_passes(handle, &passes, passes.count)
-        passText = String(cString: passes)
+        passText = String(nullTerminatedCString: passes)
         let names = [
           "audio-codec-name", "video-params/pixelformat", "video-params/hw-pixelformat",
           "video-params/primaries", "video-params/gamma", "video-params/colormatrix",
@@ -473,7 +473,7 @@ enum MpvParkingBudget {
           uniqueKeysWithValues: names.map { name in
             var buffer = [CChar](repeating: 0, count: 256)
             _ = bili_mpv_string(handle, name, &buffer, buffer.count)
-            return (name, String(cString: buffer))
+            return (name, String(nullTerminatedCString: buffer))
           })
       }
       var logs: [String] = []
@@ -481,7 +481,7 @@ enum MpvParkingBudget {
         var message = [CChar](repeating: 0, count: 2048)
         let event = bili_mpv_event(handle, &message, message.count)
         if event == 0 { break }
-        let line = DiagnosticRedactor.sanitize(String(cString: message))
+        let line = DiagnosticRedactor.sanitize(String(nullTerminatedCString: message))
         if !line.hasPrefix("event:") { logs.append(line) }
       }
       let events = logs
@@ -501,14 +501,14 @@ enum MpvParkingBudget {
         if diagnosticMode { measured["residentBytes"] = Double(bili_process_resident_bytes()) }
         var ao = [CChar](repeating: 0, count: 64)
         _ = bili_mpv_string(handle, "current-ao", &ao, ao.count)
-        media?["current-ao"] = DiagnosticAudioTuning.outputCategory(String(cString: ao))
+        media?["current-ao"] = DiagnosticAudioTuning.outputCategory(String(nullTerminatedCString: ao))
         let count = bili_mpv_number(handle, "track-list/count")
         var hasAudio = false
         if count.isFinite, count > 0 {
           for index in 0..<Int(min(256, count)) {
             var kind = [CChar](repeating: 0, count: 32)
             _ = bili_mpv_string(handle, "track-list/\(index)/type", &kind, kind.count)
-            if String(cString: kind) == "audio" { hasAudio = true; break }
+            if String(nullTerminatedCString: kind) == "audio" { hasAudio = true; break }
           }
         }
         measured["audio-present"] = hasAudio ? 1 : 0
@@ -732,7 +732,7 @@ enum MpvParkingBudget {
         continuation.resume(returning: DiagnosticLoadSample(held: bili_mpv_load_held(engine) != 0,
           loadedFiles: Int(bili_mpv_loaded_files(engine)), paused: bili_mpv_flag(engine, "pause") != 0,
           audioSelected: (number("aid") ?? 0) > 0, eof: bili_mpv_flag(engine, "eof-reached") != 0, time: number("time-pos"),
-          audioTime: number("audio-pts"), audioOutput: DiagnosticAudioTuning.outputCategory(String(cString: output))))
+          audioTime: number("audio-pts"), audioOutput: DiagnosticAudioTuning.outputCategory(String(nullTerminatedCString: output))))
       }
     }
   }
@@ -864,7 +864,7 @@ enum MpvParkingBudget {
       var list = [CChar](repeating: 0, count: 131_072)
       var keys = fallback
       if bili_mpv_string(handle, "profile-list", &list, list.count) >= 0,
-        let profiles = (try? JSONSerialization.jsonObject(with: Data(String(cString: list).utf8))) as? [[String: Any]],
+        let profiles = (try? JSONSerialization.jsonObject(with: Data(String(nullTerminatedCString: list).utf8))) as? [[String: Any]],
         let fast = profiles.first(where: { $0["name"] as? String == "fast" }),
         let options = fast["options"] as? [[String: Any]] {
         keys = options.compactMap { $0["key"] as? String }
@@ -872,7 +872,7 @@ enum MpvParkingBudget {
       for key in keys {
         var value = [CChar](repeating: 0, count: 1024)
         guard bili_mpv_string(handle, "option-info/\(key)/default-value", &value, value.count) >= 0 else { continue }
-        _ = bili_mpv_set(handle, key, String(cString: value))
+        _ = bili_mpv_set(handle, key, String(nullTerminatedCString: value))
       }
       let words: [String] = ["apply-profile", "high-quality"]
       let copies = words.map { strdup($0) }

@@ -77,7 +77,7 @@ public struct ArchiveHistoryFilter: Equatable, Sendable {
 
   public init() {}
 
-  public var isEmpty: Bool { mainCategory.isEmpty && subCategory.isEmpty && duration == .all }
+  public var isEmpty: Bool { mainCategory.isEmpty && duration == .all }
   public var activeCount: Int { (mainCategory.isEmpty ? 0 : 1) + (duration == .all ? 0 : 1) }
 }
 

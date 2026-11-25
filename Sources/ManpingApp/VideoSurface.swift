@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import ManpingCore
 import CMpv
 import OpenGL.GL3
@@ -11,7 +10,7 @@ final class VideoSurface: NSView {
   let model: PlayerModel
   private var videoLayer: VideoLayer?
   private var metalView: DanmakuView!
-  private var observers: [NSObjectProtocol] = []
+  private var observers: [NotificationCenter.ObservationToken] = []
   private var displayTimer: Timer?
   private var lastDisplay = ""
   private var lastLayerSignature = ""
@@ -71,16 +70,18 @@ final class VideoSurface: NSView {
     attachRendererIfNeeded()
     metalView = DanmakuView(model: model)
     addSubview(metalView)
-    for name in [
-      NSWindow.didChangeScreenNotification, NSWindow.didChangeBackingPropertiesNotification,
-      NSApplication.didChangeScreenParametersNotification,
-    ] {
-      observers.append(
-        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) {
-          [weak self] _ in
-          MainActor.assumeIsolated { self?.updateDisplay() }
-        })
-    }
+    observers.append(
+      NotificationCenter.default.addObserver(for: NSWindow.DidChangeScreenMessage.self) {
+        [weak self] _ in self?.updateDisplay()
+      })
+    observers.append(
+      NotificationCenter.default.addObserver(for: NSWindow.DidChangeBackingPropertiesMessage.self) {
+        [weak self] _ in self?.updateDisplay()
+      })
+    observers.append(
+      NotificationCenter.default.addObserver(for: NSApplication.DidChangeScreenParametersMessage.self) {
+        [weak self] _ in self?.updateDisplay()
+      })
     // Headroom changes with brightness even without a screen-change notification.
     displayTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated { self?.updateDisplay() }

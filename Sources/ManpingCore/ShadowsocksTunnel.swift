@@ -380,7 +380,7 @@ public final class ShadowsocksTunnel: @unchecked Sendable {
     }
 
     fileprivate func finished(_ s: SSSession) {
-        lock.withLock {
+        _ = lock.withLock {
             sessions.removeValue(forKey: ObjectIdentifier(s))
         }
     }
@@ -533,7 +533,7 @@ final class SSSession: @unchecked Sendable {
 
     // MARK: SOCKS5 握手（只支持无认证 + CONNECT）
 
-    private func need(_ n: Int, _ then: @escaping () -> Void) {
+    private func need(_ n: Int, _ then: @escaping @Sendable () -> Void) {
         if inBuf.count >= n { then(); return }
         client.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, done, err in
             guard let self, !self.closed else { return }
@@ -626,7 +626,7 @@ final class SSSession: @unchecked Sendable {
 
     /// 发送客户端数据（首次附带盐 + 目标地址）
     /// then：本批数据交给系统发送完成后调用（上行背压：发完再读下一批）；没有要发的数据时立即调用
-    private func flushUp(then: (() -> Void)? = nil) {
+    private func flushUp(then: (@Sendable () -> Void)? = nil) {
         guard remoteReady, let r = remote else { then?(); return }
         do {
             var out = Data()

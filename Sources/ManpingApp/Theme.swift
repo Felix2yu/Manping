@@ -356,7 +356,7 @@ private struct CardGridModifier: ViewModifier {
       .onChange(of: browsingPageActive) { _, active in if !active { hover.stop() } }
       .onDisappear { hover.stop() }
       // The setting is changed in System Settings, so re-read it whenever the app comes back.
-      .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      .onMainActorNotification(NSApplication.DidBecomeActiveMessage.self) { _ in
         let enabled = NSApp.isFullKeyboardAccessEnabled
         if keyboardNavigation != enabled { keyboardNavigation = enabled }
       }

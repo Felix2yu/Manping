@@ -15,7 +15,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = ("M8AIStreamParser.swift", "AITranscript.swift", "DownloadSubtitleCue.swift", "AITimecode.swift")
 TESTS = ("PortableAIStreamTests.swift", "PortableTranscriptTests.swift")
-MANIFEST = '''// swift-tools-version: 6.0
+MANIFEST = '''// swift-tools-version: 6.4
 import PackageDescription
 let package = Package(
   name: "ManpingPortableCore",

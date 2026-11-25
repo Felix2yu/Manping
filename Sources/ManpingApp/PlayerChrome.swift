@@ -402,20 +402,22 @@ private struct PlayerVolumePanel: View {
     guard requested, !scheduled, newFrame.width > 0 else { return }
     scheduled = true
     DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-      let frame = latest
-      guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }),
-        let content = window.contentView else { return }
-      // `.global` is relative to the hosting view that draws the page, which may sit inside the window.
-      func hosts(_ view: NSView) -> [NSView] {
-        (String(describing: type(of: view)).contains("HostingView") ? [view] : []) + view.subviews.flatMap(hosts)
-      }
-      let host = hosts(content).filter { $0.bounds.width >= frame.maxX && $0.bounds.height >= frame.maxY }
-        .min { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height } ?? content
-      let local = NSPoint(x: frame.midX, y: host.isFlipped ? frame.midY : host.bounds.height - frame.midY)
-      let point = host.convert(local, to: nil)
-      if let down = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
-        window.sendEvent(down)
+      MainActor.assumeIsolated {
+        let frame = latest
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }),
+          let content = window.contentView else { return }
+        // `.global` is relative to the hosting view that draws the page, which may sit inside the window.
+        @MainActor func hosts(_ view: NSView) -> [NSView] {
+          (String(describing: type(of: view)).contains("HostingView") ? [view] : []) + view.subviews.flatMap(hosts)
+        }
+        let host = hosts(content).filter { $0.bounds.width >= frame.maxX && $0.bounds.height >= frame.maxY }
+          .min { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height } ?? content
+        let local = NSPoint(x: frame.midX, y: host.isFlipped ? frame.midY : host.bounds.height - frame.midY)
+        let point = host.convert(local, to: nil)
+        if let down = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+          windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+          window.sendEvent(down)
+        }
       }
     }
   }
@@ -540,8 +542,8 @@ struct PlayerBarRow<Leading: View>: View {
     }
     PlaybackBookmarkNotice(model: model)
     .onAppear(perform: refreshFullScreen)
-    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in refreshFullScreen() }
-    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in refreshFullScreen() }
+    .onMainActorNotification(NSWindow.DidEnterFullScreenMessage.self) { _ in refreshFullScreen() }
+    .onMainActorNotification(NSWindow.DidExitFullScreenMessage.self) { _ in refreshFullScreen() }
     .sheet(item: $bookmarkDraft) { draft in
       PlaybackBookmarkEditor(
         model: model, draft: draft, time: draft.time, delete: nil,

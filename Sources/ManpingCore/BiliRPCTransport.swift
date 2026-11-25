@@ -105,28 +105,31 @@ public actor NativeBiliRPCTransport: BiliRPCTransport {
   }
 
   public func shutdown(grace: Duration = .seconds(2)) async {
-    if let stopping {
-      await stopping.value
-      return
-    }
-    guard !closed else { return }
-    closed = true
-    client.beginGracefulShutdown()
-    guard let connections else { return }
-    let cancelCalls = Array(calls.values)
-    // Clamp caller-provided grace to keep shutdown bounded, even during a broken peer connection.
-    let deadline = min(max(grace, .zero), .seconds(5))
-    let stopping = Task {
-      let timer = Task {
-        do { try await Task.sleep(for: deadline) } catch { return }
-        for cancel in cancelCalls { cancel() }
-        connections.cancel()
+    // Closing a view or deinit may cancel its task; connections still need a bounded graceful stop.
+    await withTaskCancellationShield {
+      if let stopping {
+        await stopping.value
+        return
       }
-      _ = await connections.result
-      timer.cancel()
+      guard !closed else { return }
+      closed = true
+      client.beginGracefulShutdown()
+      guard let connections else { return }
+      let cancelCalls = Array(calls.values)
+      // Clamp caller-provided grace to keep shutdown bounded, even during a broken peer connection.
+      let deadline = min(max(grace, .zero), .seconds(5))
+      let stopping = Task {
+        let timer = Task {
+          do { try await Task.sleep(for: deadline) } catch { return }
+          for cancel in cancelCalls { cancel() }
+          connections.cancel()
+        }
+        _ = await connections.result
+        timer.cancel()
+      }
+      self.stopping = stopping
+      await stopping.value
     }
-    self.stopping = stopping
-    await stopping.value
   }
 
   deinit {

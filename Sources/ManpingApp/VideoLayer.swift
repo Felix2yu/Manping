@@ -13,6 +13,8 @@ private final class WeakVideoLayer: @unchecked Sendable {
   weak var layer: VideoLayer?
   init(_ layer: VideoLayer) { self.layer = layer }
 }
+// The mpv renderer intentionally stays on the OpenGL/CVDisplayLink path.
+@diagnose(DeprecatedDeclaration, as: ignored)
 final class VideoLayer: CAOpenGLLayer, @unchecked Sendable {
   private let gate = NSRecursiveLock()
   private var engine: OpaquePointer?
@@ -369,7 +371,7 @@ final class VideoLayer: CAOpenGLLayer, @unchecked Sendable {
     guard let engine else { return "stopped" }
     var result = [CChar](repeating: 0, count: 512)
     bili_mpv_render_stats(engine, &result, result.count)
-    return String(cString: result) + " pollMilliseconds=250"
+    return String(nullTerminatedCString: result) + " pollMilliseconds=250"
   }
   func stop() {
     isAsynchronous = false

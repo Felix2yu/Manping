@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.4
 import PackageDescription
 
 let package = Package(
@@ -23,7 +23,9 @@ let package = Package(
         .product(name: "SwiftProtobuf", package: "swift-protobuf"),
       ]),
     .target(
-      name: "CMpv", publicHeadersPath: "include", linkerSettings: [.linkedFramework("OpenGL")]),
+      name: "CMpv", publicHeadersPath: "include",
+      cSettings: [.define("GL_SILENCE_DEPRECATION")],
+      linkerSettings: [.linkedFramework("OpenGL")]),
     .systemLibrary(name: "CSQLite"),
     .target(
       name: "ManpingCore",

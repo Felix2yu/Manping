@@ -213,7 +213,7 @@ extension BiliService {
       case .article: fallback = "https://www.bilibili.com/read/cv\(id)"
       default: fallback = ""
       }
-      let cover = item["cover"] ?? item["pic"] ?? (item["image_urls"] as? [String])?.first
+      let cover = item["cover"] as? String ?? item["pic"] as? String ?? (item["image_urls"] as? [String])?.first
       return LibraryEntry(id: "\(type.rawValue)\(id)", title: Self.libraryPlain(title),
                           subtitle: item["desc"] as? String ?? item["uname"] as? String ?? "",
                           cover: JSONValue.url(cover),

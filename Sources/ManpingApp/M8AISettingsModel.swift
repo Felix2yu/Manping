@@ -79,7 +79,7 @@ struct M8AIProviderDraft {
     chatGPTBusy = true; chatGPTStatus = "已在浏览器中打开 ChatGPT 登录页，完成授权后会自动返回。"
     defer { chatGPTBusy = false }
     do {
-      let account = try await auth.signIn { url in await MainActor.run { ExternalWebLink.open(url) } }
+      let account = try await auth.signIn { url in _ = await MainActor.run { ExternalWebLink.open(url) } }
       let models = try await auth.models()
       try await store.setChatGPTPlan(signedIn: true, models: models)
       configurations = try await store.allConfigurations()

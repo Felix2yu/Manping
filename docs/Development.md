@@ -4,7 +4,7 @@
 
 ## 环境与源码构建
 
-需要 Apple Silicon Mac、macOS 27、完整 Xcode 27、Python 3 和 Homebrew。Swift targets 使用 Swift 6 严格并发模式。不需要改动全局 `xcode-select`；所有命令显式指定当前构建使用的 Xcode。
+需要 Apple Silicon Mac、macOS 27、完整 Xcode 27（Swift 6.4）、Python 3 和 Homebrew。Swift targets 使用 Swift 6 严格并发模式。不需要改动全局 `xcode-select`；所有命令显式指定当前构建使用的 Xcode。
 
 ```sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -70,7 +70,7 @@ python3 scripts/verify_bundle.py --static-only
 
 若在另一台机器上 Homebrew 依赖的实际 SHA 或绝对源路径与锁文件不同，`--verify-inputs` 会明确失败。核对依赖版本和来源后，可显式运行 `python3 scripts/bundle.py --update-lock --verify-inputs` 记录该机器的输入；不要把校验失败当作成功。
 
-打包脚本在独立 `.build/release-bundle/` scratch 目录运行 `swift build -c release --arch arm64`，避免与 Debug 共用 Xcode 构建数据库；可用 `--scratch-path` 指定另一项目内目录。脚本递归收集 libmpv/FFmpeg 动态库闭包、检查 arm64、重写 install name/RPATH、复制 CA 根证书与许可证，然后按 [Signing.md](Signing.md) 的固定证书顺序逐库及 `.app` 签名，最后 `codesign --verify --deep --strict`。包内不依赖 Homebrew 运行路径。HTTPS 保持 ATS/TLS 验证，封面 HTTP 地址统一升级 HTTPS；不放宽 ATS。`dist/release/BundleManifest.json` 记录最终签名后二进制哈希。
+打包脚本在独立 `.build/release-bundle/` scratch 目录运行 `swift build -c release --arch arm64`，避免与 Debug 共用 Xcode 构建数据库；可用 `--scratch-path` 指定另一项目内目录。脚本递归收集 libmpv/FFmpeg 动态库闭包、检查 arm64、重写 install name/RPATH、复制 CA 根证书与许可证，并生成 SwiftPM 依赖的 SPDX 3 与 CycloneDX SBOM 到 `Contents/Resources/SBOM/`；原生库清单仍由 `Dependencies.lock.json`、`DependencyOrigins.json` 和 `BundleManifest.json` 记录。随后按 [Signing.md](Signing.md) 的固定证书顺序逐库及 `.app` 签名，最后 `codesign --verify --deep --strict`。包内不依赖 Homebrew 运行路径。HTTPS 保持 ATS/TLS 验证，封面 HTTP 地址统一升级 HTTPS；不放宽 ATS。`dist/release/BundleManifest.json` 记录最终签名后二进制哈希。
 
 ## 覆盖安装到应用程序目录
 
@@ -147,7 +147,7 @@ dist/release/满屏.app/Contents/MacOS/Manping --perf-fixture --perf-stability -
 
 ## Linux／云环境的核心回归与基准
 
-Linux 无法构建 AppKit／Metal 播放器，但可使用 Swift 6.2.4 与 Python 3 测试 AI 流式解析、字幕清理、时间码的生产源码：
+Linux 无法构建 AppKit／Metal 播放器，但可使用 Swift 6.4 与 Python 3 测试 AI 流式解析、字幕清理、时间码的生产源码：
 
 ```sh
 python3 scripts/portable_core_check.py

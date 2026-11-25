@@ -116,6 +116,22 @@ def verify_lock(lock, actual, mpv_metadata, ffmpeg):
     if lock.get('mpvPatchedBuild') != mpv_metadata:
         raise RuntimeError('MpvBuild metadata mismatch')
 
+def generate_sbom(destination):
+    staging = pathlib.Path(tempfile.mkdtemp(prefix='manping-sbom-'))
+    try:
+        run('swift', 'package', '--package-path', str(ROOT), 'generate-sbom',
+            '--sbom-spec', 'spdx', '--sbom-spec', 'cyclonedx', '--sbom-filter', 'all',
+            '--sbom-output-dir', str(staging))
+        destination.mkdir(parents=True, exist_ok=True)
+        for prefix, name in (('spdx', 'swift-dependencies.spdx.json'),
+                             ('cyclonedx', 'swift-dependencies.cyclonedx.json')):
+            produced = sorted(staging.glob(prefix + '*.json'))
+            if not produced:
+                raise RuntimeError(f'SwiftPM did not generate a {prefix} SBOM')
+            shutil.copy2(produced[-1], destination / name)
+    finally:
+        shutil.rmtree(staging)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--mpv', default=str(ROOT / '.build/mpv-build/libmpv.2.dylib'))
@@ -294,6 +310,7 @@ def main():
     shutil.copy2(ROOT/'LICENSE',resources/'LICENSE')
     if (ROOT/'Dependencies.lock.json').exists(): shutil.copy2(ROOT/'Dependencies.lock.json',resources/'Dependencies.lock.json')
     (resources/'DependencyOrigins.json').write_text(json.dumps(origins,indent=2)+'\n')
+    generate_sbom(resources / 'SBOM')
     for item in manifest:
         item['signaturePhase'] = 'nested-signed' if item['bundledPath'] != f'Contents/MacOS/{EXECUTABLE_NAME}' else 'before-app-resource-seal'
     (resources / 'BundleManifest.json').write_text(json.dumps(manifest, indent=2) + '\n')

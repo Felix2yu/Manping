@@ -29,7 +29,7 @@ final class DanmakuRendererTests: XCTestCase {
     XCTAssertEqual(result["unconfirmedPresents"], 1)
     XCTAssertEqual(DanmakuMotionProbe.drain()["skippedInFlight"], 0)
   }
-  func testFullscreenBlackDoesNotAffectWindowedAmbientChoice() {
+  @MainActor func testFullscreenBlackDoesNotAffectWindowedAmbientChoice() {
     XCTAssertTrue(PlayerStageBackdrop.usesBlack(immersive: true, selection: "black"))
     XCTAssertFalse(PlayerStageBackdrop.usesBlack(immersive: true, selection: "ambient"))
     XCTAssertFalse(PlayerStageBackdrop.usesBlack(immersive: false, selection: "black"))

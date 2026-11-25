@@ -9,7 +9,7 @@ import ManpingCore
 /// overlay draws at most 60 fps and a new engine may pick mpv's `fast` profile, each only when
 /// its switch is on; the strongest step can also limit the overlay to 40 lines and make the stage
 /// backdrop plain. Video decoding and loading are untouched. Settings changes from any window
-/// arrive through `UserDefaults.didChangeNotification`.
+/// arrive through the typed `UserDefaults.DidChangeMessage`.
 @MainActor final class PowerState: ObservableObject {
   static let shared = PowerState()
   /// The effective level, after the 省电模式 setting.
@@ -18,20 +18,21 @@ import ManpingCore
   @Published private(set) var preferences = PowerPreferences(MacSettings())
   /// The strongest step with 「进一步省电」 on: 40 danmaku lines, plain stage backdrop.
   var constrained: Bool { level.furtherSaving(preferences) }
-  private var observers: [NSObjectProtocol] = []
+  private var observers: [NotificationCenter.ObservationToken] = []
   private var powerSource: CFRunLoopSource?
 
   private init() {
     update()
     let center = NotificationCenter.default
-    for name in [ProcessInfo.thermalStateDidChangeNotification, Notification.Name.NSProcessInfoPowerStateDidChange] {
-      observers.append(center.addObserver(forName: name, object: nil, queue: .main) { _ in
-        MainActor.assumeIsolated { PowerState.shared.update() }
-      })
-    }
+    observers.append(center.addObserver(for: ProcessInfo.ThermalStateDidChangeMessage.self) { _ in
+      await MainActor.run { PowerState.shared.update() }
+    })
+    observers.append(center.addObserver(for: ProcessInfo.PowerStateDidChangeMessage.self) { _ in
+      await MainActor.run { PowerState.shared.update() }
+    })
     // Any window's settings write; only the stored choices are re-read, not the hardware state.
-    observers.append(center.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { _ in
-      MainActor.assumeIsolated { PowerState.shared.update(readingHardware: false) }
+    observers.append(center.addObserver(for: UserDefaults.DidChangeMessage.self) { _ in
+      await MainActor.run { PowerState.shared.update(readingHardware: false) }
     })
     // Power adapter plugged in or removed; the source is added to the main run loop.
     if let source = IOPSNotificationCreateRunLoopSource({ _ in

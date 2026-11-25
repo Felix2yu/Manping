@@ -796,7 +796,7 @@ import WebKit
           target.command(["screenshot-to-file", url.path, "video"])
           var ready = false
           for _ in 0..<100 {
-            try await Task.checkCancellation()
+            try Task.checkCancellation()
             if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber,
               size.intValue > 0 { ready = true; break }
             try await Task.sleep(for: .milliseconds(50))
@@ -865,7 +865,7 @@ import WebKit
       service = BiliService(transport: DebugUITransport(), credentials: DebugUICredentialStore())
       let transport = M3FixtureRPCTransport(richUI: true)
       libraryRPCTransport = transport
-      libraryStandardRPC = try? NativeBiliRPCService(auth: service, transport: transport, installationID: "ui-fixture")
+      libraryStandardRPC = NativeBiliRPCService(auth: service, transport: transport, installationID: "ui-fixture")
       observeQueueIdentity()
       return
     }
@@ -1167,7 +1167,7 @@ import WebKit
     if let libraryStandardRPC { return libraryStandardRPC }
     let installationID = InstallationIdentity.rpc
     let rpc = if let libraryRPCTransport {
-      try NativeBiliRPCService(auth: service, transport: libraryRPCTransport, installationID: installationID)
+      NativeBiliRPCService(auth: service, transport: libraryRPCTransport, installationID: installationID)
     } else {
       try NativeBiliRPCService(auth: service, installationID: installationID)
     }

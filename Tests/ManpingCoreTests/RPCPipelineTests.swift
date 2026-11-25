@@ -60,7 +60,7 @@ private struct LoopbackRPC {
     let address = try await serverTransport.listeningAddress
     let port = try XCTUnwrap(address.ipv4?.port)
     let clientTransport = try HTTP2ClientTransport.TransportServices(
-      target: .ipv4(host: "127.0.0.1", port: port), transportSecurity: .plaintext,
+      target: .ipv4(address: "127.0.0.1", port: port), transportSecurity: .plaintext,
       config: .defaults { $0.compression.enabledAlgorithms = [.gzip, .deflate] })
     let core = GRPCClient(transport: clientTransport)
     return Self(
@@ -93,7 +93,7 @@ private struct LoopbackRPC {
 }
 
 // Send HTTP status without grpc-status to test the HTTP-to-RPC failure mapping on the wire.
-private final class HTTP503Fixture: ChannelInboundHandler {
+private final class HTTP503Fixture: ChannelInboundHandler, @unchecked Sendable {
   typealias InboundIn = HTTP2Frame.FramePayload
   typealias OutboundOut = HTTP2Frame.FramePayload
   var sent = false
@@ -131,7 +131,7 @@ final class RPCPipelineTests: XCTestCase, @unchecked Sendable {
       ) { response in
         (
           try response.message, Array(response.metadata[stringValues: "grpc-encoding"]),
-          Array(try response.trailingMetadata[stringValues: "fixture-trailer"])
+          Array(response.trailingMetadata[stringValues: "fixture-trailer"])
         )
       }
       XCTAssertEqual(result.0.dynamicList.historyOffset, body)
@@ -234,7 +234,7 @@ final class RPCPipelineTests: XCTestCase, @unchecked Sendable {
       }.bind(host: "127.0.0.1", port: 0).get()
     let port = try XCTUnwrap(listener.localAddress?.port)
     let transport = try HTTP2ClientTransport.TransportServices(
-      target: .ipv4(host: "127.0.0.1", port: port), transportSecurity: .plaintext)
+      target: .ipv4(address: "127.0.0.1", port: port), transportSecurity: .plaintext)
     let native = NativeBiliRPCTransport(client: GRPCClient(transport: transport))
     do {
       _ = try await native.unary(

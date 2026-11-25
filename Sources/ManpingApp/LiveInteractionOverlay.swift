@@ -66,12 +66,12 @@ private struct LiveEffectCapsule: View {
         Circle())
       Group {
         if let user = effect.user {
-          Text(user).bold()
-            + Text(
-              effect.kind == .gift
-                ? " 送出 " + (effect.giftName ?? "")
-                : effect.kind == .guardPurchase
-                  ? " 开通了" + (effect.giftName ?? "大航海") : " · ¥" + String(effect.price ?? 0))
+          let detail = effect.kind == .gift
+            ? " 送出 " + (effect.giftName ?? "")
+            : effect.kind == .guardPurchase
+              ? " 开通了" + (effect.giftName ?? "大航海")
+              : " · ¥" + String(effect.price ?? 0)
+          Text("\(Text(user).bold())\(Text(detail))")
         } else {
           Text(effect.title)
         }

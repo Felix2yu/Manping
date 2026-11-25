@@ -182,7 +182,7 @@
     {
       "source": ".build/mpv-build/libmpv.2.dylib",
       "library": "libmpv.2.dylib",
-      "sha256": "513022f6127e7286b957c6e64a7c653b8504bdcd89ec722d6af7b0085bb3d0e1"
+      "sha256": "9821c72aa61a5a5c6d69969a07519a17869a4d521939bd26b0d6c791d7c03436"
     },
     {
       "formula": "mujs",
@@ -348,7 +348,7 @@
       "-Dvulkan=disabled",
       "-Dswift-flags="
     ],
-    "librarySHA256": "513022f6127e7286b957c6e64a7c653b8504bdcd89ec722d6af7b0085bb3d0e1"
+    "librarySHA256": "9821c72aa61a5a5c6d69969a07519a17869a4d521939bd26b0d6c791d7c03436"
   },
   "biliKernelNuget": {
     "version": "0.0.2-preview2",

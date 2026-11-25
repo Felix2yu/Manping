@@ -91,7 +91,7 @@ struct AITimelineMarks: Equatable {
           guard !Task.isCancelled else { return }
           let mid = await service.accountMid()
           try? await coordinator.apply(mid: mid, state: event.state)
-          await self?.identityChanged()
+          self?.identityChanged()
         }
       }
     }
@@ -100,7 +100,7 @@ struct AITimelineMarks: Equatable {
       for await _ in await configuration.changes() {
         guard !Task.isCancelled else { return }
         if first { first = false; continue }
-        await self?.configurationChanged()
+        self?.configurationChanged()
       }
     }
     guard !fixtures, let conversations else { return }

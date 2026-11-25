@@ -186,7 +186,7 @@ struct M3HistoryPage: View {
 
   @ViewBuilder private var archiveHeaderControls: some View {
     SegmentedTabs(options: ArchiveBrowserModel.Segment.allCases.map { ($0, $0.rawValue) }, selection: Binding(
-      get: { archive.segment }, set: { segment in Task { await archive.load(segment: segment, reset: true) } }
+      get: { archive.segment }, set: { segment in Task<Void, Never> { await archive.load(segment: segment, reset: true) } }
     ))
     if archive.segment == .favorites, let folder = archive.selectedFolder {
       Button { archive.closeFolder() } label: { Label("所有收藏夹", systemImage: "chevron.left") }

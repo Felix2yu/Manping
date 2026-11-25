@@ -62,10 +62,12 @@ public enum AppleLocalModel {
           continuation.finish(throwing: CancellationError())
         } catch let failure as AIChatFailure {
           continuation.finish(throwing: failure)
-        } catch let error as LanguageModelSession.GenerationError {
-          if case .exceededContextWindowSize = error { continuation.finish(throwing: AIChatFailure.localContextTooLong) }
-          else if case .guardrailViolation = error { continuation.finish(throwing: AIChatFailure.localRefused) }
-          else { continuation.finish(throwing: AIChatFailure.localModelUnavailable) }
+        } catch let error as LanguageModelError {
+          switch error {
+          case .contextSizeExceeded: continuation.finish(throwing: AIChatFailure.localContextTooLong)
+          case .guardrailViolation, .refusal: continuation.finish(throwing: AIChatFailure.localRefused)
+          default: continuation.finish(throwing: AIChatFailure.localModelUnavailable)
+          }
         } catch {
           continuation.finish(throwing: AIChatFailure.localModelUnavailable)
         }

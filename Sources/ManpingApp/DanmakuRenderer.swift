@@ -729,7 +729,7 @@ final class DanmakuView: NSView {
   private let metalLayer = CAMetalLayer()
   private var engine: DanmakuEngine?
   private var observations: [AnyCancellable] = []
-  private var screenObserver: NSObjectProtocol?
+  private var screenObserver: NotificationCenter.ObservationToken?
   private var version = 0
   private var stopped = false
   private static weak var diagnosticEngine: DanmakuEngine?
@@ -791,9 +791,9 @@ final class DanmakuView: NSView {
     if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
     screenObserver = nil
     if let window, !stopped {
-      screenObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification,
-        object: window, queue: .main) { [weak self] _ in
-          MainActor.assumeIsolated { self?.resize() }
+      screenObserver = NotificationCenter.default.addObserver(
+        of: window, for: NSWindow.DidChangeScreenMessage.self) { [weak self] _ in
+          self?.resize()
         }
     }
     resize()
