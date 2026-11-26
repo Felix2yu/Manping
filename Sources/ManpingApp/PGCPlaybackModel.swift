@@ -9,6 +9,7 @@ import VideoToolbox
   @Published private(set) var episode: PGCEpisode?
   @Published private(set) var manifest: PlaybackManifest?
   @Published private(set) var selectedStream: MediaStream?
+  @Published private(set) var selectedAudio: MediaStream?
   @Published private(set) var isLoading = false
   @Published private(set) var error: String?
   @Published private(set) var identityVersion = 0
@@ -52,7 +53,7 @@ import VideoToolbox
             self.reload(episode, at: self.player.time)
           } else {
             self.cancelRequests(); self.expected = nil
-            self.details = nil; self.episode = nil; self.manifest = nil; self.selectedStream = nil
+            self.details = nil; self.episode = nil; self.manifest = nil; self.selectedStream = nil; self.selectedAudio = nil
             self.player.command(["stop"]); self.identityVersion &+= 1
             self.error = "登录状态已改变，请重新打开剧集。"
           }
@@ -76,7 +77,7 @@ import VideoToolbox
     cancelRequests(); self.selection = selection
     player.command(["stop"]); player.resetPlaybackEnd(); player.timeline = DanmakuTimeline(comments: [])
     interactions.reset(episodeID: nil, seasonID: nil, aid: nil)
-    details = nil; episode = nil; manifest = nil; selectedStream = nil; error = nil; isLoading = true
+    details = nil; episode = nil; manifest = nil; selectedStream = nil; selectedAudio = nil; error = nil; isLoading = true
     let revision = generation
     let task = Task { @MainActor [weak self] in
       guard let self else { return }
@@ -132,7 +133,7 @@ import VideoToolbox
     cancelRequests(); player.command(["stop"]); player.resetPlaybackEnd(); player.timeline = DanmakuTimeline(comments: [])
     self.selection = PGCSelection(seasonID: episode.seasonID, episodeID: episode.id)
     interactions.reset(episodeID: episode.id, seasonID: episode.seasonID, aid: episode.aid)
-    self.episode = episode; manifest = nil; selectedStream = nil; error = nil; isLoading = true
+    self.episode = episode; manifest = nil; selectedStream = nil; selectedAudio = nil; error = nil; isLoading = true
     skipTracker.reset(episode: episode.id)
     let revision = generation
     let task = Task { @MainActor [weak self] in
@@ -158,7 +159,7 @@ import VideoToolbox
     let streams = try await service.pgcPlayback(episode, expectedIdentity: expected)
     try await check(revision, expected: expected)
     let choice = try PlaybackSelector.select(streams, preferences: preferences, supportsHardware: Self.supportsHardware)
-    manifest = streams; selectedStream = choice.video
+    manifest = streams; selectedStream = choice.video; selectedAudio = choice.audio
     fixturePosition = start
     if usesFixtures { player.status = "本地样本 · 未加载在线媒体" }
     else if let cdn {
@@ -236,10 +237,15 @@ import VideoToolbox
       let target = skipTracker.target(skips, at: time, automatic: automaticSkip()) else { return }
     seek(target)
   }
+  func updatePreferences(_ value: PlaybackPreferences) {
+    let audioPreferenceChanged = preferences.audio != value.audio
+    preferences = value
+    if audioPreferenceChanged { preferences.audioStreamID = nil }
+  }
   /// `persist: false` is used by automatic downgrades so they do not overwrite the user's choice.
   func changeQuality(_ stream: MediaStream, persist: Bool = true, recovering: Bool = false) {
     guard let expected, let manifest,
-      manifest.video.contains(where: { $0.id == stream.id }), let audio = manifest.audio.max(by: { $0.bandwidth < $1.bandwidth }) else { return }
+      manifest.video.contains(where: { $0.id == stream.id }), let audio = selectedAudio ?? manifest.audio.first else { return }
     let revision = generation
     Task { [weak self] in
       guard let self, (try? await check(revision, expected: expected)) != nil else { return }
@@ -267,12 +273,43 @@ import VideoToolbox
       }
     }
   }
+  func changeAudio(_ stream: MediaStream) {
+    guard let expected, let manifest, let video = selectedStream,
+      manifest.audio.contains(where: { $0.id == stream.id }) else { return }
+    let revision = generation
+    Task { [weak self] in
+      guard let self, (try? await check(revision, expected: expected)) != nil else { return }
+      selectedAudio = stream; preferences.audioStreamID = stream.id
+      guard !usesFixtures else { return }
+      if let cdn {
+        let time = player.time, paused = player.paused
+        let result = await cdn.prepare(video: video, audio: stream, avoidP2P: preferences.avoidP2P,
+          allowProbe: false, reportFailureTo: player)
+        guard (try? await check(revision, expected: expected)) != nil,
+          selectedAudio?.id == stream.id, selectedStream?.id == video.id else { return }
+        switch result {
+        case .prepared(let prepared):
+          player.load(video: prepared.video, audio: prepared.audio, start: time, paused: paused)
+          attachCDN(ticket: prepared.ticket)
+        case .superseded, .failed:
+          return
+        }
+      } else {
+        guard let videoURL = preferredURL(video), let audioURL = preferredURL(stream) else {
+          player.failPlayback("当前音轨没有可用的非 P2P 节点，请关闭「不使用 P2P」或选择其他音轨。")
+          return
+        }
+        player.load(video: videoURL, audio: audioURL, start: player.time, paused: player.paused)
+      }
+    }
+  }
   private func attachCDN(ticket: Int) {
     let revision = generation
     let target = player
     let episode = episode
     let identity = expected
     let stream = selectedStream
+    let audioStream = selectedAudio
     cdn?.attach(player: player, ticket: ticket, reload: { [weak player] video, audio in
       guard let player else { return }
       player.load(video: video, audio: audio, start: player.time, paused: player.paused)
@@ -291,8 +328,10 @@ import VideoToolbox
       guard self.player === target else { throw CancellationError() }
       let choice = try PlaybackSelector.select(streams, preferences: self.preferences, supportsHardware: Self.supportsHardware)
       let selected = streams.video.first { $0.quality == stream?.quality && $0.codec == stream?.codec } ?? choice.video
-      self.manifest = streams; self.selectedStream = selected
-      return (selected, choice.audio)
+      let audio = streams.audio.first { $0.id == audioStream?.id } ?? streams.audio.first { $0.id == self.selectedAudio?.id } ?? choice.audio
+      self.manifest = streams; self.selectedStream = selected; self.selectedAudio = audio
+      self.preferences.audioStreamID = audio.id
+      return (selected, audio)
     })
   }
   private func preferredURL(_ stream: MediaStream) -> URL? {

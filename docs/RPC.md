@@ -35,11 +35,11 @@
 
 logout、beginLogin、恢复／替换身份取消已登记 RPC。refresh 失败先确认仍属原身份，再递增 identityRevision、只取消 RPC、清 Token并发布事件；保留 authEpoch、Web Cookie、HTTP requests 和 refresh flight，所有共享 refresh waiter 保留原失败。迟到成功或失败都重新检查 epoch／revision，失效后返回 `CancellationError`。
 
-`identityEvents()` 使用 `AsyncStream`／`bufferingNewest(1)`，只提供 epoch、identityRevision、state、mid；不广播 Token。内部 invalidate 不发布中间清空 Token 的状态；restore、beginLogin、commit、refresh 成功／失败与 logout 在最外层发布一次最终状态。存储失败也通过 defer 发布最终内存状态；refresh 的嵌套 persist 不重复发布，不取消自身 refresh flight。onTermination 弱引用 actor，actor 销毁结束 stream。事件并非 Token 到期定时器；请求时仍须检查／刷新。UI 尚未订阅这些事件，接线时还需在 UI 提交响应前检查自己的身份／request generation。
+`identityEvents()` 使用 `AsyncStream`／`bufferingNewest(1)`，只提供 epoch、identityRevision、state、mid；不广播 Token。内部 invalidate 不发布中间清空 Token 的状态；restore、beginLogin、commit、refresh 成功／失败与 logout 在最外层发布一次最终状态。存储失败也通过 defer 发布最终内存状态；refresh 的嵌套 persist 不重复发布，不取消自身 refresh flight。onTermination 弱引用 actor，actor 销毁结束 stream。事件并非 Token 到期定时器；请求时仍须检查／刷新。AppModel 与 PGC／直播播放模型已订阅事件，取消旧请求并在 UI 提交响应前检查 request generation。
 
 ## Metadata 与传输
 
-metadata profile 逐字段移植 exact `GrpcConfig.cs`：`build=6070600`、iphone profile、locale zh/CN、Wi-Fi、Fawkes prod、空 Restriction。保留上游 `bili-universal/80200100` user-agent 与 profile build 的差异。header 中的 profile buvid 保留上游常量；外层 buvid 依上游 Buvid 算法从应用安装 ID 派生。完整来源与 hash 在 `Protocols/BiliKernel/manifest.json`。
+metadata profile 逐字段移植 exact `GrpcConfig.cs`：`build=6070600`、iphone profile、locale zh/CN、Wi-Fi、Fawkes prod、空 Restriction。保留 `bili-universal/80200100` 协议前缀与 profile build 的差异，但 user-agent 明确标识实际客户端 `Manping/1.0 (iPhone; iOS 16.6)` 和实际传输 `grpc-swift-2/2.4.3`，不再声称 Cronet、grpc-c 或 grpc-objc。device protobuf 的 `buvid`、metadata protobuf 的 `buvid` 与外层 `buvid` header 统一使用同一安装 ID，按上游 Buvid 算法派生；安装 ID 不取账号 ID。完整来源与 hash 在 `Protocols/BiliKernel/manifest.json`。该保守一致选择没有做风控绕过，线上服务接受情况仍未验证。
 
 `x-bili-*-bin` 添加原始 protobuf bytes，由 GRPCCore 在 HTTP/2 wire 上执行一次 unpadded base64；没有把已编码字符串再次编码。匿名或过期状态没有 authorization／mid／access_key。trace 与 aurora eid 按上游格式构建；不记录 header、请求体、Token或服务错误消息。
 
@@ -80,7 +80,7 @@ swift test --arch arm64
 
 loopback 实测大于 255 bytes（约 15 KiB）的双向消息、实际 gzip negotiation、binary metadata、HTTP 503、message 后权限失败 trailer、解压后 8 MiB 超限拒绝、并发／请求大小限制、单 stream 取消隔离、100 ms shutdown、未启动即 shutdown。脱敏证据在 `docs/evidence/rpc-module.json`；原始测试 log 在 `.build/rpc-all-tests.log`。
 
-仍未验证：真实服务／账户权限／线上 route 差异、远端 TLS／ALPN、真实消息的全部扩展形态、UI 订阅／接线、完整页面与写功能。没有将本模块的 fixture 通过称为完整移植或线上通过。
+仍未验证：真实服务／账户权限／线上 route 差异、远端 TLS／ALPN、真实消息的全部扩展形态与完整页面、写功能。AppModel 和播放模型的订阅与 request generation 隔离已有 fixture 覆盖，fixture 通过不等于线上通过。
 
 
 ## 独立 review 修复验证（2026-10-13）

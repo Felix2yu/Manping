@@ -176,3 +176,68 @@ struct BrowseFeedState {
     isLoading = false
   }
 }
+
+/// Search and other filters share the partition browser's directory and visual language.
+struct VideoPartitionMenu: View {
+  let service: BiliService
+  @Binding var tid: Int
+  @StateObject private var directory = BrowsePartitionDirectory()
+  @Environment(\.colorScheme) private var scheme
+
+  var body: some View {
+    Menu {
+      Button { tid = 0 } label: { Label("全部分区", systemImage: "rectangle.grid.2x2") }
+      if directory.isLoading && directory.partitions.isEmpty {
+        Text("正在加载分区…")
+      }
+      ForEach(directory.partitions, id: \.id) { parent in
+        if parent.children.isEmpty {
+          partitionButton(parent)
+        } else {
+          Menu {
+            partitionButton(parent)
+            Divider()
+            ForEach(parent.children, id: \.id) { child in partitionButton(child) }
+          } label: { partitionLabel(parent) }
+        }
+      }
+      if let error = directory.error {
+        Divider()
+        Text("没能加载分区：\(error)").foregroundStyle(Theme.danger(scheme))
+        Button("重试") { directory.load(service: service) }
+      }
+    } label: {
+      if let selected = partition(id: tid, in: directory.partitions) {
+        HStack(spacing: 6) {
+          PartitionSymbol(partition: selected); Text(selected.title)
+          Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold)).opacity(0.7)
+        }
+      } else {
+        MenuLabel(title: tid > 0 ? "分区 \(tid)" : "全部分区", symbol: "rectangle.grid.2x2")
+      }
+    }.appMenuStyle()
+      .accessibilityLabel("视频分区")
+      .task { directory.loadIfNeeded(service: service) }
+      .onDisappear { directory.cancel() }
+  }
+
+  private func partitionButton(_ partition: VideoPartition) -> some View {
+    Button { tid = partition.id } label: {
+      HStack(spacing: 6) {
+        PartitionSymbol(partition: partition)
+        Text(partition.title)
+        if tid == partition.id { Spacer(); Image(systemName: "checkmark") }
+      }
+    }
+  }
+  private func partitionLabel(_ partition: VideoPartition) -> some View {
+    HStack(spacing: 6) { PartitionSymbol(partition: partition); Text(partition.title) }
+  }
+  private func partition(id: Int, in partitions: [VideoPartition]) -> VideoPartition? {
+    for partition in partitions {
+      if partition.id == id { return partition }
+      if let child = self.partition(id: id, in: partition.children) { return child }
+    }
+    return nil
+  }
+}

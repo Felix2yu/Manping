@@ -37,7 +37,7 @@ def main():
             print(json.dumps({"route": name, "method": "GET", "url": url}))
             continue
         request = urllib.request.Request(url, method="GET", headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15",
+            "User-Agent": "Manping/1.0 (macOS; Native)",
             "Origin": "https://live.bilibili.com", "Referer": "https://live.bilibili.com/",
         })
         try:

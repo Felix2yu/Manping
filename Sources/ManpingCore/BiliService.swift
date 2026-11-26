@@ -16,7 +16,7 @@ public actor BiliService {
   /// failing direct attempt for a while.
   private var regionStickyUntil = Date.distantPast
   public private(set) var regionRetries = 0
-  static let regionLimitedCodes: Set<Int> = [-10403, 6002003]
+  static let regionLimitedCodes: Set<Int> = [-10403, 6_002_003]
   private let now: @Sendable () -> Date
   private let localID: String
   private var jar = BiliCookieJar()
@@ -35,10 +35,10 @@ public actor BiliService {
   private var identityRevision: UInt64 = 0
   private var requests: [UUID: Task<AuthHTTPResponse, Error>] = [:]
   #if DEBUG
-  private var transportDispatchBarrierForTesting: (@Sendable (URLRequest) async -> Void)?
-  func setTransportDispatchBarrierForTesting(_ barrier: (@Sendable (URLRequest) async -> Void)?) {
-    transportDispatchBarrierForTesting = barrier
-  }
+    private var transportDispatchBarrierForTesting: (@Sendable (URLRequest) async -> Void)?
+    func setTransportDispatchBarrierForTesting(_ barrier: (@Sendable (URLRequest) async -> Void)?) {
+      transportDispatchBarrierForTesting = barrier
+    }
   #endif
   private var rpcRequests: [UUID: @Sendable () -> Void] = [:]
   private var identityObservers: [UUID: AsyncStream<AuthIdentityEvent>.Continuation] = [:]
@@ -54,7 +54,8 @@ public actor BiliService {
     webDeviceCookies: Bool = false
   ) {
     usesWebDeviceCookies = webDeviceCookies
-    self.transport = transport ?? IsolatedAuthTransport(configuration: session?.configuration ?? .ephemeral)
+    self.transport =
+      transport ?? IsolatedAuthTransport(configuration: session?.configuration ?? .ephemeral)
     self.credentials = credentials
     self.now = now
     self.localID = localID
@@ -99,24 +100,25 @@ public actor BiliService {
   }
   /// Applies credentials read off the actor. With `expected`, nothing changes when a logout or
   /// another login happened while the Keychain was being read: the snapshot is stale and must
-  /// neither replace the new identity nor delete its token. Returns false in that case.
+  /// neither replace the new identity nor delete its token. Returns false when stale.
   @discardableResult
-  public func restore(_ stored: StoredCredentials, ifUnchangedSince expected: AuthSnapshot? = nil) throws -> Bool {
-    if let expected, expected.epoch != authEpoch || expected.identityRevision != identityRevision { return false }
-    defer { publishIdentity() }
-    invalidateIdentity()
-    // Device cookies identify the browser, not the account; keep them across a restore.
-    let device = jar.cookies.filter { Self.deviceCookieNames.contains($0.name) }
-    jar = BiliCookieJar()
-    jar.merge(device, now: now())
-    jar.merge(stored.cookies, now: now())
-    let token = stored.token
-    if let token, !cookiesMatch(token, jar: jar) {
-      appToken = nil
-      try credentials.saveToken(nil)
-      throw AuthFailure.invalidResponse
+  public func restore(
+    _ stored: StoredCredentials, ifUnchangedSince expected: AuthSnapshot? = nil
+  ) throws -> Bool {
+    if let expected, expected.epoch != authEpoch || expected.identityRevision != identityRevision {
+      return false
     }
+    let device = jar.cookies.filter { Self.deviceCookieNames.contains($0.name) }
+    var replacement = BiliCookieJar()
+    replacement.merge(device, now: now())
+    replacement.merge(stored.cookies, now: now())
+    let token = stored.token
+    if let token, !cookiesMatch(token, jar: replacement) { throw AuthFailure.invalidResponse }
+    try validateIdentity(cookies: replacement.cookies, token: token)
+    invalidateIdentity()
+    jar = replacement
     appToken = token
+    publishIdentity()
     return true
   }
   public func synchronizeCookies(_ cookies: [HTTPCookie], token: UInt64) throws -> Bool {
@@ -222,6 +224,18 @@ public actor BiliService {
   private func cookiesMatch(_ token: AppToken, jar: BiliCookieJar) -> Bool {
     jar.cookies.filter { $0.name == "DedeUserID" }.allSatisfy { Int64($0.value) == token.mid }
   }
+  private func validateIdentity(cookies: [HTTPCookie], token: AppToken?) throws {
+    let ids = cookies.filter { $0.name == "DedeUserID" }
+    if let token {
+      guard token.isComplete, ids.count <= 1,
+        ids.allSatisfy({ Int64($0.value) == token.mid })
+      else { throw AuthFailure.invalidResponse }
+    } else if cookies.contains(where: { $0.name == "SESSDATA" && !$0.value.isEmpty }) {
+      guard ids.count == 1, let mid = Int64(ids[0].value), mid > 0 else {
+        throw AuthFailure.invalidResponse
+      }
+    }
+  }
   private func persistIdentity(
     _ replacement: BiliCookieJar, token: AppToken?, replacingIdentity: Bool,
     publishingIdentity: Bool = true
@@ -229,28 +243,40 @@ public actor BiliService {
     defer { if publishingIdentity { publishIdentity() } }
     if replacingIdentity { invalidateIdentity() }
     appToken = nil
-    // Do not write a new Cookie identity unless the old Token was reliably removed.
+    try validateIdentity(cookies: replacement.cookies, token: token)
     try credentials.saveToken(nil)
     try credentials.save(replacement.cookies)
     jar = replacement
     if let token {
       do { try credentials.saveToken(token) } catch {
-        // A failed write must never restore the old identity in memory.
         try? credentials.saveToken(nil)
         throw error
       }
       appToken = token
     }
   }
-  /// A complete desktop browser user agent. The bare "Mozilla/5.0" used before trips
-  /// Bilibili's risk control (HTTP 412) on several web endpoints.
-  public static let browserUserAgent =
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+  /// Honest, stable profiles instead of mixing a Safari desktop UA with native App endpoints.
+  /// These are ordinary client identifiers, not a risk-control bypass.
+  public static let webUserAgent = "Manping/1.0 (macOS; Native)"
+  /// Compatibility name for live WebSocket callers outside this change's file scope.
+  public static let browserUserAgent = webUserAgent
+  public static let appUserAgent = "Manping/1.0 (iPhone; iOS 16.6)"
+  public static let webReferer = "https://www.bilibili.com/"
+  public static let appReferer = "https://app.bilibili.com/"
   public nonisolated func request(_ url: URL) -> URLRequest {
     var request = URLRequest(url: url)
     request.timeoutInterval = 30
-    request.setValue(Self.browserUserAgent, forHTTPHeaderField: "User-Agent")
-    request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
+    request.setValue(Self.webUserAgent, forHTTPHeaderField: "User-Agent")
+    if let host = url.host, BiliCookieJar.allowedDomain(host) {
+      request.setValue(Self.webReferer, forHTTPHeaderField: "Referer")
+    }
+    return request
+  }
+  private nonisolated func appRequest(_ url: URL) -> URLRequest {
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 30
+    request.setValue(Self.appUserAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue(Self.appReferer, forHTTPHeaderField: "Referer")
     return request
   }
   /// Web device cookies (`buvid3`/`buvid4`/`b_nut`) that Bilibili's risk control expects on
@@ -262,10 +288,15 @@ public actor BiliService {
   static let deviceCookieNames: Set<String> = ["buvid3", "buvid4", "b_nut"]
   private func ensureDeviceCookies() async {
     guard usesWebDeviceCookies,
-      !jar.matching(URL(string: "https://api.bilibili.com/")!, now: now()).contains(where: { $0.name == "buvid3" })
+      !jar.matching(URL(string: "https://api.bilibili.com/")!, now: now()).contains(where: {
+        $0.name == "buvid3"
+      })
     else { return }
     // Concurrent first requests wait for the same fetch instead of going out without buvid.
-    if let running = deviceCookieTask { await running.value; return }
+    if let running = deviceCookieTask {
+      await running.value
+      return
+    }
     // At most one attempt a minute, so an offline start does not add a request per call.
     if let last = deviceCookieAttempt, now().timeIntervalSince(last) < 60 { return }
     deviceCookieAttempt = now()
@@ -277,15 +308,23 @@ public actor BiliService {
   private func fetchDeviceCookies() async {
     // Routed like every other API request: in `.always` the device id must not leak out directly.
     let transport = routedTransport()
-    guard let response = try? await transport.send(request(URL(string: "https://api.bilibili.com/x/frontend/finger/spi")!)),
+    guard
+      let response = try? await transport.send(
+        request(URL(string: "https://api.bilibili.com/x/frontend/finger/spi")!)),
       let root = try? JSONSerialization.jsonObject(with: response.body) as? [String: Any],
       let data = root["data"] as? [String: Any], let b3 = data["b_3"] as? String, !b3.isEmpty
     else { return }
     let expiry = now().addingTimeInterval(365 * 24 * 3600)
     var cookies: [HTTPCookie] = []
-    for (name, value) in [("buvid3", b3), ("buvid4", data["b_4"] as? String ?? ""), ("b_nut", String(Int(now().timeIntervalSince1970)))]
+    for (name, value) in [
+      ("buvid3", b3), ("buvid4", data["b_4"] as? String ?? ""),
+      ("b_nut", String(Int(now().timeIntervalSince1970))),
+    ]
     where !value.isEmpty {
-      if let cookie = HTTPCookie(properties: [.name: name, .value: value, .domain: ".bilibili.com", .path: "/", .expires: expiry, .secure: "FALSE"]) {
+      if let cookie = HTTPCookie(properties: [
+        .name: name, .value: value, .domain: ".bilibili.com", .path: "/", .expires: expiry,
+        .secure: "FALSE",
+      ]) {
         cookies.append(cookie)
       }
     }
@@ -306,11 +345,11 @@ public actor BiliService {
     let id = UUID()
     let transport = routedTransport()
     #if DEBUG
-    let dispatchBarrier = transportDispatchBarrierForTesting
+      let dispatchBarrier = transportDispatchBarrierForTesting
     #endif
     let task = Task {
       #if DEBUG
-      if let dispatchBarrier { await dispatchBarrier(request) }
+        if let dispatchBarrier { await dispatchBarrier(request) }
       #endif
       // This task may start after its caller's checks. Revalidate at the actual transport
       // handoff, after every dispatch suspension, while still isolated to this service.
@@ -355,8 +394,12 @@ public actor BiliService {
   /// direct first and repeats through the proxy once when the API reports a region limit; after
   /// such a success, related requests use the proxy straight away for ten minutes.
   func regionAware<T>(_ body: () async throws -> T) async throws -> T {
-    guard regionRoute == .auto, proxyTransport != nil, !BiliRoute.viaProxy else { return try await body() }
-    if now() < regionStickyUntil { return try await BiliRoute.$viaProxy.withValue(true) { try await body() } }
+    guard regionRoute == .auto, proxyTransport != nil, !BiliRoute.viaProxy else {
+      return try await body()
+    }
+    if now() < regionStickyUntil {
+      return try await BiliRoute.$viaProxy.withValue(true) { try await body() }
+    }
     do {
       return try await body()
     } catch BiliError.api(let code, _) where Self.regionLimitedCodes.contains(code) {
@@ -369,10 +412,14 @@ public actor BiliService {
 
   /// A cookie the jar would send to bilibili.com (device ids, CSRF), or nil.
   public func cookieValue(_ name: String) -> String? {
-    jar.matching(URL(string: "https://api.bilibili.com/")!, now: now()).first { $0.name == name && !$0.value.isEmpty }?.value
+    jar.matching(URL(string: "https://api.bilibili.com/")!, now: now()).first {
+      $0.name == name && !$0.value.isEmpty
+    }?.value
   }
   public func data(_ url: URL) async throws -> Data {
-    if url.host == "api.bilibili.com" || url.host == "api.live.bilibili.com" { await ensureDeviceCookies() }
+    if url.host == "api.bilibili.com" || url.host == "api.live.bilibili.com" {
+      await ensureDeviceCookies()
+    }
     return try await send(request(url), epoch: authEpoch).body
   }
   public func json(_ path: String, params: [String: String] = [:], signed: Bool = false)
@@ -386,7 +433,9 @@ public actor BiliService {
       return try await envelope(path, params: params, signed: signed)
     }
   }
-  private func envelope(_ path: String, params: [String: String], signed: Bool) async throws -> [String: Any] {
+  private func envelope(_ path: String, params: [String: String], signed: Bool) async throws
+    -> [String: Any]
+  {
     let epoch = authEpoch
     let revision = identityRevision
     var parts = URLComponents(
@@ -417,19 +466,26 @@ public actor BiliService {
   /// DedeUserID while a SESSDATA cookie exists. nil when nobody is signed in.
   public func accountMid() -> Int64? {
     if let mid = authSnapshot().token?.mid, mid > 0 { return mid }
-    guard cookieValue("SESSDATA") != nil, let raw = cookieValue("DedeUserID"), let mid = Int64(raw), mid > 0 else { return nil }
+    guard cookieValue("SESSDATA") != nil, let raw = cookieValue("DedeUserID"), let mid = Int64(raw),
+      mid > 0
+    else { return nil }
     return mid
   }
   /// WBI-signed GET returning the raw body, so callers can interpret non-zero envelope codes.
-  func wbiSignedBody(_ path: String, params: [String: String], expectedIdentity: AuthSnapshot) async throws -> Data {
+  func wbiSignedBody(_ path: String, params: [String: String], expectedIdentity: AuthSnapshot)
+    async throws -> Data
+  {
     let body = try await signedBody(path, params: params, expectedIdentity: expectedIdentity)
     // A signature made with rotated keys: fetch them again and retry once, as `json` does.
     guard let root = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-      let code = root["code"] as? Int, code == -403 || code == -352 else { return body }
+      let code = root["code"] as? Int, code == -403 || code == -352
+    else { return body }
     keys = nil
     return try await signedBody(path, params: params, expectedIdentity: expectedIdentity)
   }
-  private func signedBody(_ path: String, params: [String: String], expectedIdentity: AuthSnapshot) async throws -> Data {
+  private func signedBody(_ path: String, params: [String: String], expectedIdentity: AuthSnapshot)
+    async throws -> Data
+  {
     try checkRESTIdentity(expectedIdentity)
     if wbiKeysStale { try await refreshKeys() }
     try checkRESTIdentity(expectedIdentity)
@@ -467,10 +523,16 @@ public actor BiliService {
     if let expectedIdentity { try checkRESTIdentity(expectedIdentity) }
     return try Video.parse(payload)
   }
-  public func playback(_ video: Video, quality: Int? = nil, expectedIdentity: AuthSnapshot? = nil) async throws -> PlaybackManifest {
-    try await regionAware { try await unroutedPlayback(video, quality: quality, expectedIdentity: expectedIdentity) }
+  public func playback(_ video: Video, quality: Int? = nil, expectedIdentity: AuthSnapshot? = nil)
+    async throws -> PlaybackManifest
+  {
+    try await regionAware {
+      try await unroutedPlayback(video, quality: quality, expectedIdentity: expectedIdentity)
+    }
   }
-  private func unroutedPlayback(_ video: Video, quality: Int?, expectedIdentity: AuthSnapshot?) async throws -> PlaybackManifest {
+  private func unroutedPlayback(_ video: Video, quality: Int?, expectedIdentity: AuthSnapshot?)
+    async throws -> PlaybackManifest
+  {
     if let expectedIdentity { try checkRESTIdentity(expectedIdentity) }
     let epoch = authEpoch
     let revision = identityRevision
@@ -497,11 +559,14 @@ public actor BiliService {
         payload = try await appObject(
           .playback,
           fields: [
-            "fnver": "0", "cid": String(cid), "fourk": "1", "fnval": "4048", "qn": String(quality ?? 64),
+            "fnver": "0", "cid": String(cid), "fourk": "1", "fnval": "4048",
+            "qn": String(quality ?? 64),
             "oType": "json", "avid": String(aid),
           ], expectedIdentity: expectedIdentity)
       } else {
-        var params = ["cid": String(cid), "qn": String(quality ?? 127), "fnval": "4048", "fourk": "1"]
+        var params = [
+          "cid": String(cid), "qn": String(quality ?? 127), "fnval": "4048", "fourk": "1",
+        ]
         if let aid = video.aid, aid > 0 {
           params["avid"] = String(aid)
         } else if !video.bvid.isEmpty {
@@ -525,31 +590,43 @@ public actor BiliService {
 
   func liveBuvid(expectedIdentity: AuthSnapshot) throws -> String {
     try checkRESTIdentity(expectedIdentity)
-    return jar.matching(LiveRoute.danmuInfo.url, now: now()).first { $0.name == "buvid3" && !$0.value.isEmpty }?.value ?? ""
+    return jar.matching(LiveRoute.danmuInfo.url, now: now()).first {
+      $0.name == "buvid3" && !$0.value.isEmpty
+    }?.value ?? ""
   }
 
   /// Caller-owned identity boundary for live requests, including preparation awaits.
-  public func liveRequest(_ route: LiveRoute, fields: [String: String] = [:],
-    expectedIdentity: AuthSnapshot, gate: LiveMutationGate = LiveMutationGate()) async throws -> LiveEnvelope {
-    let prepared = try await prepareLiveRequest(route, fields: fields, expectedIdentity: expectedIdentity, gate: gate)
+  public func liveRequest(
+    _ route: LiveRoute, fields: [String: String] = [:],
+    expectedIdentity: AuthSnapshot, gate: LiveMutationGate = LiveMutationGate()
+  ) async throws -> LiveEnvelope {
+    let prepared = try await prepareLiveRequest(
+      route, fields: fields, expectedIdentity: expectedIdentity, gate: gate)
     return try await executeLiveRequest(prepared)
   }
 
-  func prepareLiveRequest(_ route: LiveRoute, fields: [String: String] = [:],
-    expectedIdentity: AuthSnapshot, gate: LiveMutationGate = LiveMutationGate()) async throws -> LivePreparedRequest {
+  func prepareLiveRequest(
+    _ route: LiveRoute, fields: [String: String] = [:],
+    expectedIdentity: AuthSnapshot, gate: LiveMutationGate = LiveMutationGate()
+  ) async throws -> LivePreparedRequest {
     try checkRESTIdentity(expectedIdentity)
     guard gate.allows(route) else { throw LiveRouteError.mutationClosed(route) }
     var (query, body) = try route.fields(fields, timestamp: Int64(now().timeIntervalSince1970))
     // Fail missing login/CSRF before device or WBI preparation can send anything.
     let cookies = jar.matching(route.url, now: now())
     if route.isMutation {
-      guard cookies.contains(where: { $0.name == "SESSDATA" && !$0.value.isEmpty }) else { throw LiveRouteError.missingWebIdentity }
-      guard let csrf = cookies.first(where: { $0.name == "bili_jct" && !$0.value.isEmpty })?.value else { throw AuthFailure.missingCSRF }
+      guard cookies.contains(where: { $0.name == "SESSDATA" && !$0.value.isEmpty }) else {
+        throw LiveRouteError.missingWebIdentity
+      }
+      guard let csrf = cookies.first(where: { $0.name == "bili_jct" && !$0.value.isEmpty })?.value
+      else { throw AuthFailure.missingCSRF }
       switch route.csrf {
       case .none: break
       case .query: query["csrf"] = csrf
       case .form: body["csrf"] = csrf
-      case .formBoth: body["csrf"] = csrf; body["csrf_token"] = csrf
+      case .formBoth:
+        body["csrf"] = csrf
+        body["csrf_token"] = csrf
       }
       for key in ["uid"] where fields[key] != nil {
         guard fields[key] == accountMid().map(String.init) else { throw CancellationError() }
@@ -562,8 +639,11 @@ public actor BiliService {
       if wbiKeysStale { try await refreshKeys() }
       try checkRESTIdentity(expectedIdentity)
       guard let keys else { throw BiliError.invalidResponse("Missing WBI keys") }
-      target.percentEncodedQuery = try WBI.sign(query, imageKey: keys.0, subKey: keys.1, timestamp: Int(now().timeIntervalSince1970))
-    } else { target.queryItems = query.keys.sorted().map { URLQueryItem(name: $0, value: query[$0]) } }
+      target.percentEncodedQuery = try WBI.sign(
+        query, imageKey: keys.0, subKey: keys.1, timestamp: Int(now().timeIntervalSince1970))
+    } else {
+      target.queryItems = query.keys.sorted().map { URLQueryItem(name: $0, value: query[$0]) }
+    }
     var outgoing = request(target.url!)
     outgoing.httpMethod = route.method
     outgoing.setValue("https://live.bilibili.com", forHTTPHeaderField: "Origin")
@@ -576,16 +656,22 @@ public actor BiliService {
     return LivePreparedRequest(request: outgoing, identity: expectedIdentity)
   }
 
-  func executeLiveRequest(_ prepared: LivePreparedRequest, beforeSend: @escaping @Sendable () throws -> Void = {}) async throws -> LiveEnvelope {
+  func executeLiveRequest(
+    _ prepared: LivePreparedRequest, beforeSend: @escaping @Sendable () throws -> Void = {}
+  ) async throws -> LiveEnvelope {
     try checkRESTIdentity(prepared.identity)
     try beforeSend()
-    let response = try await send(prepared.request, epoch: prepared.identity.epoch, receiveCookies: false, beforeSend: beforeSend)
+    let response = try await send(
+      prepared.request, epoch: prepared.identity.epoch, receiveCookies: false,
+      beforeSend: beforeSend)
     try checkRESTIdentity(prepared.identity)
     return try LiveEnvelope.parse(response.body)
   }
 
   /// Refreshes expired App authorization while preserving the caller's account boundary.
-  public func authorizeAppInteraction(expectedIdentity: AuthSnapshot? = nil) async throws -> AuthSnapshot {
+  public func authorizeAppInteraction(expectedIdentity: AuthSnapshot? = nil) async throws
+    -> AuthSnapshot
+  {
     if let expectedIdentity { try checkRESTIdentity(expectedIdentity) }
     let before = authSnapshot()
     _ = try await ensureAppToken()
@@ -594,14 +680,19 @@ public actor BiliService {
     return authSnapshot()
   }
 
-  public func webVideoOperationState(aid: Int64, expectedIdentity: AuthSnapshot) async throws -> VideoOperationState {
+  public func webVideoOperationState(aid: Int64, expectedIdentity: AuthSnapshot) async throws
+    -> VideoOperationState
+  {
     try checkRESTIdentity(expectedIdentity)
     guard aid > 0 else { throw BiliError.invalidResponse("Invalid identifier") }
-    guard jar.matching(URL(string: "https://api.bilibili.com/")!, now: now()).contains(where: {
-      $0.name == "SESSDATA" && !$0.value.isEmpty
-    }) else { throw BiliError.dependency("互动状态需要网页登录，当前账号没有有效的网页登录会话。") }
+    guard
+      jar.matching(URL(string: "https://api.bilibili.com/")!, now: now()).contains(where: {
+        $0.name == "SESSDATA" && !$0.value.isEmpty
+      })
+    else { throw BiliError.dependency("互动状态需要网页登录，当前账号没有有效的网页登录会话。") }
     // Exact PlayerClient.GetWebVideoOperationInformationAsync: WBI, cookies, no access_key.
-    let payload = try await json("/x/web-interface/archive/relation", params: ["aid": String(aid)], signed: true)
+    let payload = try await json(
+      "/x/web-interface/archive/relation", params: ["aid": String(aid)], signed: true)
     try checkRESTIdentity(expectedIdentity)
     return try VideoOperationState.parse(payload)
   }
@@ -627,7 +718,8 @@ public actor BiliService {
       }
       var fields = fields
       if route == .searchTrending {
-        fields["csrf"] = jar.matching(URL(string: route.url)!, now: now())
+        fields["csrf"] =
+          jar.matching(URL(string: route.url)!, now: now())
           .first(where: { $0.name == "bili_jct" })?.value ?? ""
         fields["access_key"] = nil
       }
@@ -644,8 +736,12 @@ public actor BiliService {
         fields["up_mid"] = token.map { String($0.mid) }
       }
       if route == .followGroupUsers { fields["mid"] = token.map { String($0.mid) } }
-      if [.articleRecommend, .articleList].contains(route) { fields["mid"] = token.map { String($0.mid) } }
-      let cookieMutation = [.articleLike, .articleFavoriteAdd, .articleFavoriteDelete, .danmakuSend].contains(route)
+      if [.articleRecommend, .articleList].contains(route) {
+        fields["mid"] = token.map { String($0.mid) }
+      }
+      let cookieMutation = [
+        .articleLike, .articleFavoriteAdd, .articleFavoriteDelete, .danmakuSend,
+      ].contains(route)
       if cookieMutation {
         let cookies = jar.matching(URL(string: route.url)!, now: now())
         guard cookies.contains(where: { $0.name == "SESSDATA" && !$0.value.isEmpty }),
@@ -656,18 +752,23 @@ public actor BiliService {
       // PGC mutations retain the fixed SDK's App-token/no-Cookie protocol.
       // Read CSRF only after token refresh and identity checks from this actor's
       // current cookie jar. Token-only identities remain valid App signers.
-      if [.pgcFollowAdd, .pgcFollowDelete, .pgcLike, .pgcCoin, .pgcTriple, .pgcFavorite].contains(route) {
+      if [.pgcFollowAdd, .pgcFollowDelete, .pgcLike, .pgcCoin, .pgcTriple, .pgcFavorite].contains(
+        route)
+      {
         let cookies = jar.matching(URL(string: route.url)!, now: now())
         fields["csrf"] = cookies.first(where: { $0.name == "bili_jct" && !$0.value.isEmpty })?.value
       }
-      let form = route == .pgcPlayback ? AppForm.webAuthorized(
-        fields, timestampMilliseconds: Int64(now().timeIntervalSince1970 * 1000), accessKey: token?.accessToken)
+      let form =
+        route == .pgcPlayback
+        ? AppForm.webAuthorized(
+          fields, timestampMilliseconds: Int64(now().timeIntervalSince1970 * 1000),
+          accessKey: token?.accessToken)
         : AppForm.authorized(
-        fields, timestamp: Int64(now().timeIntervalSince1970),
-        accessKey: token?.accessToken)
+          fields, timestamp: Int64(now().timeIntervalSince1970),
+          accessKey: token?.accessToken)
       var url = URLComponents(string: route.url)!
       if !route.isMutation { url.percentEncodedQuery = String(decoding: form, as: UTF8.self) }
-      var request = request(url.url!)
+      var request = appRequest(url.url!)
       if route.isMutation {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -676,8 +777,10 @@ public actor BiliService {
       try checkIdentity(revision, epoch: epoch)
       if let expectedIdentity { try checkRESTIdentity(expectedIdentity) }
       try beforeSend()
-      let response = try await send(request, epoch: epoch,
-        useCookies: cookieMutation || route == .librarySeasonContents || route == .curated, receiveCookies: false,
+      let response = try await send(
+        request, epoch: epoch,
+        useCookies: cookieMutation || route == .librarySeasonContents || route == .curated,
+        receiveCookies: false,
         beforeSend: beforeSend)
       try checkIdentity(revision, epoch: epoch)
       guard let root = try JSONSerialization.jsonObject(with: response.body) as? [String: Any],
@@ -686,7 +789,9 @@ public actor BiliService {
         throw BiliError.invalidResponse("Invalid App response envelope")
       }
       guard code == 0 else { throw BiliError.api(code, "请求失败") }
-      if [.favoriteBangumi, .favoriteCinema, .pgcTimeline, .pgcPlayback].contains(route) { return root["data"] ?? root["result"] }
+      if [.favoriteBangumi, .favoriteCinema, .pgcTimeline, .pgcPlayback].contains(route) {
+        return root["data"] ?? root["result"]
+      }
       return root["data"]
     } catch {
       try checkIdentity(revision, epoch: epoch)
@@ -697,7 +802,10 @@ public actor BiliService {
   func appObject(
     _ route: BiliAppRoute, fields: [String: String] = [:], expectedIdentity: AuthSnapshot? = nil
   ) async throws -> [String: Any] {
-    guard let object = try await appREST(route, fields: fields, expectedIdentity: expectedIdentity) as? [String: Any] else {
+    guard
+      let object = try await appREST(route, fields: fields, expectedIdentity: expectedIdentity)
+        as? [String: Any]
+    else {
       throw BiliError.invalidResponse("Missing App data object")
     }
     return object
@@ -708,8 +816,10 @@ public actor BiliService {
     guard id > 0 else { throw BiliError.invalidResponse("Invalid article identifier") }
     var url = URLComponents(string: "https://www.bilibili.com/read/native/")!
     url.queryItems = [URLQueryItem(name: "id", value: String(id))]
-    let body = try await send(request(url.url!), epoch: expectedIdentity.epoch,
-      useCookies: false, receiveCookies: false).body
+    let body = try await send(
+      request(url.url!), epoch: expectedIdentity.epoch,
+      useCookies: false, receiveCookies: false
+    ).body
     try checkRESTIdentity(expectedIdentity)
     guard body.count <= 8 * 1024 * 1024, let html = String(data: body, encoding: .utf8) else {
       throw BiliError.invalidResponse("Invalid native article HTML")
@@ -717,30 +827,43 @@ public actor BiliService {
     return html
   }
 
-  func messageWebREST(_ route: BiliMessageWebRoute, fields: [String: String] = [:],
-    expectedIdentity: AuthSnapshot? = nil) async throws -> Any? {
+  func messageWebREST(
+    _ route: BiliMessageWebRoute, fields: [String: String] = [:],
+    expectedIdentity: AuthSnapshot? = nil
+  ) async throws -> Any? {
     guard route != .send else { throw BiliError.invalidResponse("Use explicit message send") }
-    return try await messageWebRequest(route, fields: fields, expectedIdentity: expectedIdentity ?? authSnapshot())
+    return try await messageWebRequest(
+      route, fields: fields, expectedIdentity: expectedIdentity ?? authSnapshot())
   }
 
-  func messageWebSend(fields: [String: String], expectedIdentity: AuthSnapshot) async throws -> [String: Any] {
-    guard let object = try await messageWebRequest(.send, fields: fields, expectedIdentity: expectedIdentity) as? [String: Any] else {
+  func messageWebSend(fields: [String: String], expectedIdentity: AuthSnapshot) async throws
+    -> [String: Any]
+  {
+    guard
+      let object = try await messageWebRequest(
+        .send, fields: fields, expectedIdentity: expectedIdentity) as? [String: Any]
+    else {
       throw BiliError.invalidResponse("Invalid message send response")
     }
     return object
   }
 
-  private func messageWebRequest(_ route: BiliMessageWebRoute, fields: [String: String],
-    expectedIdentity: AuthSnapshot) async throws -> Any? {
+  private func messageWebRequest(
+    _ route: BiliMessageWebRoute, fields: [String: String],
+    expectedIdentity: AuthSnapshot
+  ) async throws -> Any? {
     try checkRESTIdentity(expectedIdentity)
     let target = URL(string: route.url)!
     var values = fields
-    values["access_key"] = nil; values["sign"] = nil; values["w_rid"] = nil
+    values["access_key"] = nil
+    values["sign"] = nil
+    values["w_rid"] = nil
     if route == .send {
       let token = try await ensureAppToken()
       try checkRESTIdentity(expectedIdentity)
       guard values["msg[sender_uid]"] == String(token.mid),
-        expectedIdentity.token?.mid == token.mid else { throw CancellationError() }
+        expectedIdentity.token?.mid == token.mid
+      else { throw CancellationError() }
 
     }
     if wbiKeysStale { try await refreshKeys() }
@@ -751,10 +874,12 @@ public actor BiliService {
       throw BiliError.dependency("私信需要有效的网页登录信息，请重新登录。")
     }
     if route.isPOST {
-      guard let csrf = cookies.first(where: { $0.name == "bili_jct" && !$0.value.isEmpty })?.value else {
+      guard let csrf = cookies.first(where: { $0.name == "bili_jct" && !$0.value.isEmpty })?.value
+      else {
         throw AuthFailure.missingCSRF
       }
-      values["csrf"] = csrf; values["csrf_token"] = csrf
+      values["csrf"] = csrf
+      values["csrf_token"] = csrf
     }
     let seconds = Int64(now().timeIntervalSince1970)
     values["build"] = "80200100"
@@ -769,47 +894,67 @@ public actor BiliService {
     let form = AppForm.encoded(values)
     var components = URLComponents(url: target, resolvingAgainstBaseURL: false)!
     if !route.isPOST { components.percentEncodedQuery = String(decoding: form, as: UTF8.self) }
-    var request = request(components.url!)
+    var request = route == .users ? request(components.url!) : appRequest(components.url!)
     if route.isPOST {
-      request.httpMethod = "POST"; request.httpBody = form
+      request.httpMethod = "POST"
+      request.httpBody = form
       request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
     }
     try checkRESTIdentity(expectedIdentity)
-    let body = try await send(request, epoch: expectedIdentity.epoch,
-      useCookies: true, receiveCookies: false).body
+    let body = try await send(
+      request, epoch: expectedIdentity.epoch,
+      useCookies: true, receiveCookies: false
+    ).body
     try checkRESTIdentity(expectedIdentity)
     guard let root = try JSONSerialization.jsonObject(with: body) as? [String: Any],
-      let code = root["code"] as? Int else { throw BiliError.invalidResponse("Invalid message envelope") }
+      let code = root["code"] as? Int
+    else { throw BiliError.invalidResponse("Invalid message envelope") }
     guard code == 0 else { throw BiliError.api(code, "请求失败") }
     return root["data"]
   }
 
-  func subtitleMetadataObject(aid: Int64, cid: Int64, expectedIdentity: AuthSnapshot) async throws -> [String: Any] {
+  func subtitleMetadataObject(aid: Int64, cid: Int64, expectedIdentity: AuthSnapshot) async throws
+    -> [String: Any]
+  {
     try checkRESTIdentity(expectedIdentity)
     guard aid > 0, cid > 0 else { throw BiliError.invalidResponse("Invalid subtitle identifiers") }
     var url = URLComponents(string: "https://api.bilibili.com/x/player/wbi/v2")!
-    url.percentEncodedQuery = String(decoding: AppForm.authorized(["aid": String(aid), "cid": String(cid)],
-      timestamp: Int64(now().timeIntervalSince1970)), as: UTF8.self)
-    let body = try await send(request(url.url!), epoch: expectedIdentity.epoch, useCookies: true, receiveCookies: false).body
+    url.percentEncodedQuery = String(
+      decoding: AppForm.authorized(
+        ["aid": String(aid), "cid": String(cid)],
+        timestamp: Int64(now().timeIntervalSince1970)), as: UTF8.self)
+    let body = try await send(
+      appRequest(url.url!), epoch: expectedIdentity.epoch, useCookies: true, receiveCookies: false
+    ).body
     try checkRESTIdentity(expectedIdentity)
-    guard let root = try JSONSerialization.jsonObject(with: body) as? [String: Any], let code = root["code"] as? Int else {
+    guard let root = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+      let code = root["code"] as? Int
+    else {
       throw BiliError.invalidResponse("Invalid subtitle metadata envelope")
     }
     guard code == 0 else { throw BiliError.api(code, "没能获取字幕信息") }
-    guard let data = root["data"] as? [String: Any] else { throw BiliError.invalidResponse("Missing subtitle metadata") }
+    guard let data = root["data"] as? [String: Any] else {
+      throw BiliError.invalidResponse("Missing subtitle metadata")
+    }
     return data
   }
   func subtitleBodyData(_ url: URL, expectedIdentity: AuthSnapshot) async throws -> Data {
     try checkRESTIdentity(expectedIdentity)
     let host = url.host?.lowercased() ?? ""
-    guard url.scheme == "https", url.user == nil, url.password == nil, url.port == nil || url.port == 443,
+    guard url.scheme == "https", url.user == nil, url.password == nil,
+      url.port == nil || url.port == 443,
       host == "hdslb.com" || host.hasSuffix(".hdslb.com"),
-      url.path.hasPrefix("/bfs/subtitle/") || url.path.hasPrefix("/bfs/ai_subtitle/") else {
+      url.path.hasPrefix("/bfs/subtitle/") || url.path.hasPrefix("/bfs/ai_subtitle/")
+    else {
       throw BiliError.invalidResponse("Untrusted subtitle URL")
     }
-    let body = try await send(request(url), epoch: expectedIdentity.epoch, useCookies: false, receiveCookies: false).body
+    let body = try await send(
+      request(url), epoch: expectedIdentity.epoch, useCookies: false, receiveCookies: false
+    ).body
     try checkRESTIdentity(expectedIdentity)
-    guard body.count <= 16 * 1024 * 1024 else { throw BiliError.invalidResponse("Subtitle file is too large") }
+    guard body.count <= 16 * 1024 * 1024 else {
+      throw BiliError.invalidResponse("Subtitle file is too large")
+    }
     return body
   }
   public func exportDanmakuXML(cid: Int64, expectedIdentity: AuthSnapshot) async throws -> Data {
@@ -817,23 +962,29 @@ public actor BiliService {
     guard cid > 0 else { throw BiliError.invalidResponse("Invalid danmaku identifier") }
     let body = try await data(URL(string: "https://api.bilibili.com/x/v1/dm/list.so?oid=\(cid)")!)
     try checkRESTIdentity(expectedIdentity)
-    guard body.count <= 64 * 1024 * 1024, let xml = String(data: body, encoding: .utf8), xml.contains("<i>") || xml.contains("<i ") else {
+    guard body.count <= 64 * 1024 * 1024, let xml = String(data: body, encoding: .utf8),
+      xml.contains("<i>") || xml.contains("<i ")
+    else {
       throw BiliError.invalidResponse("Invalid danmaku XML")
     }
     return body
   }
-  public func comments(cid: Int64, expectedIdentity: AuthSnapshot? = nil) async throws -> [DanmakuComment] {
+  public func comments(cid: Int64, expectedIdentity: AuthSnapshot? = nil) async throws
+    -> [DanmakuComment]
+  {
     if let expectedIdentity { try checkRESTIdentity(expectedIdentity) }
     let body = try await data(URL(string: "https://api.bilibili.com/x/v1/dm/list.so?oid=\(cid)")!)
     if let expectedIdentity { try checkRESTIdentity(expectedIdentity) }
-    guard body.count <= 64 * 1024 * 1024 else { throw BiliError.invalidResponse("Invalid danmaku XML") }
+    guard body.count <= 64 * 1024 * 1024 else {
+      throw BiliError.invalidResponse("Invalid danmaku XML")
+    }
     return try DanmakuParser.parse(body, limit: 20_000)
   }
   private func appPost(
     _ path: String, fields: [String: String], epoch: UInt64,
     accessKey: String? = nil, useCookies: Bool = false
   ) async throws -> [String: Any] {
-    var request = request(URL(string: "https://passport.bilibili.com" + path)!)
+    var request = appRequest(URL(string: "https://passport.bilibili.com" + path)!)
     request.httpMethod = "POST"
     request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
     request.httpBody = AppForm.authorized(

@@ -1,5 +1,12 @@
 public enum LibraryUserSearchOrder: String, CaseIterable, Sendable {
   case relevance = "0", followers = "fans", level = "level"
+  public var title: String {
+    switch self {
+    case .relevance: "综合排序"
+    case .followers: "粉丝最多"
+    case .level: "等级最高"
+    }
+  }
 }
 import Foundation
 
@@ -26,6 +33,57 @@ public enum LibrarySearchOrder: String, CaseIterable, Sendable {
     case .danmaku: "最多弹幕"
     case .newest: "最新发布"
     }
+  }
+}
+public enum LibrarySearchDuration: Int, CaseIterable, Sendable {
+  case all, underTenMinutes, tenToThirtyMinutes, thirtyToSixtyMinutes, overSixtyMinutes
+  public var title: String {
+    switch self {
+    case .all: "全部时长"
+    case .underTenMinutes: "不足 10 分钟"
+    case .tenToThirtyMinutes: "10–30 分钟"
+    case .thirtyToSixtyMinutes: "30–60 分钟"
+    case .overSixtyMinutes: "超过 60 分钟"
+    }
+  }
+}
+public enum LibrarySearchPubtime: Int, CaseIterable, Sendable {
+  case all, oneDay, oneWeek, oneMonth, oneYear
+  public var title: String {
+    switch self {
+    case .all: "全部发布时间"
+    case .oneDay: "一天内"
+    case .oneWeek: "一周内"
+    case .oneMonth: "一月内"
+    case .oneYear: "一年内"
+    }
+  }
+}
+/// Web video-search filters. Zero means all; `tid` is omitted from the request when zero.
+public struct LibraryVideoSearchFilters: Equatable, Sendable {
+  public var duration: Int
+  public var pubtime: Int
+  public var tid: Int
+  public init(duration: Int = 0, pubtime: Int = 0, tid: Int = 0) {
+    self.duration = duration; self.pubtime = pubtime; self.tid = tid
+  }
+  public var isActive: Bool { duration != 0 || pubtime != 0 || tid != 0 }
+}
+/// Every input that can change a search request, shared by the UI task identity and model.
+public struct LibrarySearchQuery: Equatable, Sendable {
+  public let term: String
+  public let type: LibrarySearchType
+  public let order: LibrarySearchOrder
+  public let userOrder: LibraryUserSearchOrder
+  public let filters: LibraryVideoSearchFilters
+  public init(term: String, type: LibrarySearchType = .video, order: LibrarySearchOrder = .relevance,
+              userOrder: LibraryUserSearchOrder = .relevance,
+              filters: LibraryVideoSearchFilters = LibraryVideoSearchFilters()) {
+    self.term = term; self.type = type; self.order = order
+    self.userOrder = userOrder; self.filters = filters
+  }
+  public func queryID(refreshToken: Int) -> String {
+    "\(term):\(type.rawValue):\(order.rawValue):\(userOrder.rawValue):\(filters.duration):\(filters.pubtime):\(filters.tid):\(refreshToken)"
   }
 }
 public struct LibraryUser: Identifiable, Equatable, Sendable {
@@ -179,7 +237,15 @@ extension BiliService {
   // Video follows exact SDK SearchClient. Other types are a Web fallback; the original
   // uses polymer SearchByType with server-provided Nav.Type and opaque pagination.
   public func librarySearch(_ keyword: String, type: LibrarySearchType = .video,
-                            order: LibrarySearchOrder = .relevance, page: Int = 1)
+                            order: LibrarySearchOrder = .relevance,
+                            duration: Int = 0, pubtime: Int = 0, tid: Int = 0, page: Int = 1)
+    async throws -> LibraryPage<LibraryEntry> {
+    try await librarySearch(keyword, type: type, order: order,
+      filters: LibraryVideoSearchFilters(duration: duration, pubtime: pubtime, tid: tid), page: page)
+  }
+  public func librarySearch(_ keyword: String, type: LibrarySearchType = .video,
+                            order: LibrarySearchOrder = .relevance,
+                            filters: LibraryVideoSearchFilters, page: Int = 1)
     async throws -> LibraryPage<LibraryEntry> {
     if type == .user {
       let result = try await searchUsers(term: keyword, page: page)
@@ -191,9 +257,17 @@ extension BiliService {
     guard !keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw BiliError.invalidResponse("Empty search keyword")
     }
-    let data = try await json("/x/web-interface/wbi/search/type", params: [
-      "keyword": keyword, "search_type": type.rawValue, "order": order.rawValue,
-      "page": String(page)], signed: true)
+    var params = ["keyword": keyword, "search_type": type.rawValue, "order": order.rawValue,
+      "page": String(page)]
+    if type == .video {
+      guard (0...4).contains(filters.duration), (0...4).contains(filters.pubtime), filters.tid >= 0 else {
+        throw BiliError.invalidResponse("Invalid video search filters")
+      }
+      params["duration"] = String(filters.duration)
+      params["pubtime"] = String(filters.pubtime)
+      if filters.tid > 0 { params["tid"] = String(filters.tid) }
+    }
+    let data = try await json("/x/web-interface/wbi/search/type", params: params, signed: true)
     let raw = try Self.libraryList(data, key: "result")
     let items = try raw.map { item -> LibraryEntry in
       if type == .video { return .video(try Self.libraryVideo(item)) }

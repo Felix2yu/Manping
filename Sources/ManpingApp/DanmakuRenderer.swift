@@ -373,14 +373,14 @@ final class DanmakuEngine: NSObject, CAMetalDisplayLinkDelegate, @unchecked Send
     else { return }
     prefetchVersion = scene.version; prefetchedUntil = media + prefetchWindow
     let upcoming = scene.timeline.visible(at: media + prefetchWindow, speed: scene.speed).prefix(400)
-    workshop.request(Set(upcoming.flatMap { Array($0.comment.text) }), raster: raster)
+    workshop.request(Set(upcoming.flatMap { Array($0.comment.displayedText) }), raster: raster)
   }
 
   /// Plans the glyph atlas for the lines on screen and those about to enter. Runs only when a
   /// line appears that has no layout yet (a few times a second), not every frame.
   private func replan(_ lines: [PositionedComment], raster: GlyphRaster,
     blits: inout [(MTLTexture, MTLOrigin, MTLTexture, MTLOrigin)]) -> Bool {
-    let characters = lines.flatMap { Array($0.comment.text) }
+    let characters = lines.flatMap { Array($0.comment.displayedText) }
     let cell = raster.cell
     var nextCache = cache
     let plan = nextCache.prepare(characters)
@@ -418,12 +418,12 @@ final class DanmakuEngine: NSObject, CAMetalDisplayLinkDelegate, @unchecked Send
     layouts.removeAll(keepingCapacity: true)
     let scale = Float(raster.scale)
     for line in lines {
-      let key = LineKey(time: line.comment.time, lane: line.lane, mode: line.comment.mode, text: line.comment.text)
+      let key = LineKey(time: line.comment.time, lane: line.lane, mode: line.comment.mode, text: line.comment.displayedText)
       guard layouts[key] == nil else { continue }
       var dx: Float = 0
       var glyphs: [(page: Int, dx: Float, u: Float, v: Float)] = []
-      glyphs.reserveCapacity(line.comment.text.count)
-      for character in line.comment.text {
+      glyphs.reserveCapacity(line.comment.displayedText.count)
+      for character in line.comment.displayedText {
         guard let address = plan.addresses[character], let page = plannedPages[address.page] else { continue }
         let glyph = page.glyphs[address.slot]
         glyphs.append((address.page, dx, glyph.u, glyph.v))
@@ -447,7 +447,7 @@ final class DanmakuEngine: NSObject, CAMetalDisplayLinkDelegate, @unchecked Send
       ? Array(scene.timeline.visible(at: media, speed: scene.speed).prefix(scene.lineLimit)) : []
     let raster = prepareRaster(scene)
     func key(_ line: PositionedComment) -> LineKey {
-      LineKey(time: line.comment.time, lane: line.lane, mode: line.comment.mode, text: line.comment.text)
+      LineKey(time: line.comment.time, lane: line.lane, mode: line.comment.mode, text: line.comment.displayedText)
     }
     var blits: [(MTLTexture, MTLOrigin, MTLTexture, MTLOrigin)] = []
     // Re-plan when a line without a layout can now be laid out (its glyphs are ready), or
@@ -459,8 +459,8 @@ final class DanmakuEngine: NSObject, CAMetalDisplayLinkDelegate, @unchecked Send
       (atlasValid && atlasCharacters.contains(character)) || workshop.bitmap(character, raster: raster) != nil
     }
     let waiting = visible.filter { layouts[key($0)] == nil }
-    if !waiting.isEmpty { workshop.request(Set(waiting.flatMap { Array($0.comment.text) }), raster: raster) }
-    if planRaster != raster || waiting.contains(where: { $0.comment.text.allSatisfy(usable) }) {
+    if !waiting.isEmpty { workshop.request(Set(waiting.flatMap { Array($0.comment.displayedText) }), raster: raster) }
+    if planRaster != raster || waiting.contains(where: { $0.comment.displayedText.allSatisfy(usable) }) {
       // Upcoming lines join the plan early, so their rasterization lands on frames before
       // they enter instead of the frame they appear in.
       let upcoming = enabled
@@ -469,9 +469,9 @@ final class DanmakuEngine: NSObject, CAMetalDisplayLinkDelegate, @unchecked Send
       // Lines whose glyphs the workshop has not finished yet wait a few frames (a cold start
       // or a seek); rendering a screenful synchronously would stall this thread for ~80 ms.
       let candidates = visible + upcoming
-      let ready = candidates.filter { $0.comment.text.allSatisfy(usable) }
+      let ready = candidates.filter { $0.comment.displayedText.allSatisfy(usable) }
       if ready.count < candidates.count {
-        workshop.request(Set(candidates.flatMap { Array($0.comment.text) }), raster: raster)
+        workshop.request(Set(candidates.flatMap { Array($0.comment.displayedText) }), raster: raster)
       }
       guard replan(ready, raster: raster, blits: &blits) else { return .failed }
     }

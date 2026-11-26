@@ -8,6 +8,8 @@ struct M3SearchPage: View {
   @StateObject private var suggestions: SearchSuggestionModel
   @State private var type: LibrarySearchType = .video
   @State private var order: LibrarySearchOrder = .relevance
+  @State private var userOrder: LibraryUserSearchOrder = .relevance
+  @State private var filters = LibraryVideoSearchFilters()
   @Environment(\.colorScheme) private var scheme
   private let types: [LibrarySearchType] = [.video, .anime, .cinema, .live, .user, .article]
   init(model: AppModel, term: String) {
@@ -15,7 +17,10 @@ struct M3SearchPage: View {
     _library = StateObject(wrappedValue: LibraryModel(model: model))
     _suggestions = StateObject(wrappedValue: SearchSuggestionModel(model: model))
   }
-  private var queryID: String { "\(term):\(type.rawValue):\(order.rawValue):\(model.refreshToken)" }
+  private var query: LibrarySearchQuery {
+    LibrarySearchQuery(term: term, type: type, order: order, userOrder: userOrder, filters: filters)
+  }
+  private var queryID: String { query.queryID(refreshToken: model.refreshToken) }
   var body: some View {
     HStack(spacing: 0) {
       VStack(spacing: 0) {
@@ -33,23 +38,65 @@ struct M3SearchPage: View {
       Hairline(axis: .vertical)
       VStack(spacing: 0) {
         if term.isEmpty { discovery }
-        else { LibraryResults(library: library, model: model) { type = .user } }
+        else {
+          if type == .video || type == .user { filterBar }
+          LibraryResults(library: library, model: model) { type = .user }
+        }
       }
     }
       .pageToolbar(title: term.isEmpty ? "搜索" : "「\(term)」", subtitle: library.total > 0 ? "\(library.total) 个结果" : nil,
-        refresh: { if term.isEmpty { suggestions.loadTrending() } else { Task { await library.refresh() } } }) {
-        if type == .video && !term.isEmpty {
-          Menu {
-            Picker("排序", selection: $order) {
-              ForEach(LibrarySearchOrder.allCases, id: \.self) { Text($0.title).tag($0) }
-            }.pickerStyle(.inline).labelsHidden()
-          } label: { MenuLabel(title: order.title) }.appMenuStyle(toolbar: true)
-        }
-      }
+        refresh: { if term.isEmpty { suggestions.loadTrending() } else { Task { await library.refresh() } } })
       .task(id: queryID) {
         if term.isEmpty { suggestions.update(""); suggestions.loadTrending() }
-        else { await library.load(.search(term, type, order)) }
+        else {
+          let request = query
+          await library.load(.filteredSearch(request))
+        }
       }.onDisappear { library.cancel(); suggestions.cancel() }
+  }
+
+  private var filterBar: some View {
+    PageFilterBar {
+      Menu {
+        if type == .user {
+          Picker("排序", selection: $userOrder) {
+            ForEach(LibraryUserSearchOrder.allCases, id: \.self) { Text($0.title).tag($0) }
+          }.pickerStyle(.inline).labelsHidden()
+        } else {
+          Picker("排序", selection: $order) {
+            ForEach(LibrarySearchOrder.allCases, id: \.self) { Text($0.title).tag($0) }
+          }.pickerStyle(.inline).labelsHidden()
+        }
+      } label: {
+        MenuLabel(title: type == .user ? userOrder.title : order.title)
+      }.appMenuStyle()
+      if type == .video {
+        Menu {
+          Picker("时长", selection: $filters.duration) {
+            ForEach(LibrarySearchDuration.allCases, id: \.rawValue) { option in
+              Text(option.title).tag(option.rawValue)
+            }
+          }.pickerStyle(.inline).labelsHidden()
+        } label: {
+          MenuLabel(title: LibrarySearchDuration(rawValue: filters.duration)?.title ?? "全部时长", symbol: "clock")
+        }.appMenuStyle()
+        Menu {
+          Picker("发布时间", selection: $filters.pubtime) {
+            ForEach(LibrarySearchPubtime.allCases, id: \.rawValue) { option in
+              Text(option.title).tag(option.rawValue)
+            }
+          }.pickerStyle(.inline).labelsHidden()
+        } label: {
+          MenuLabel(title: LibrarySearchPubtime(rawValue: filters.pubtime)?.title ?? "全部发布时间", symbol: "calendar")
+        }.appMenuStyle()
+        VideoPartitionMenu(service: model.service, tid: $filters.tid)
+        if filters.isActive {
+          Button("重置筛选") { filters = LibraryVideoSearchFilters() }
+            .buttonStyle(AppButtonStyle(size: .small))
+        }
+      }
+      Spacer(minLength: 0)
+    }
   }
   private var discovery: some View {
     ScrollView {

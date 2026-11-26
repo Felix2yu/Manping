@@ -39,11 +39,8 @@ private enum HistoryError: LocalizedError {
   private var flushTask: Task<Void, Never>?
   private var reportTask: Task<Void, Never>?
   private var retryTask: Task<Void, Never>?
-  private let fixedCacheURL: URL?
-  private let fixedOutboxURL: URL?
-  private var cacheURL: URL?
-  private var outboxURL: URL?
-  private var accountID: Int64?
+  private let cacheURL: URL?
+  private let outboxURL: URL?
   private var storageGeneration: UInt64 = 0
   private let transport: @MainActor (URLRequest) async throws -> (Data, URLResponse)
   private var configuredOnce = false
@@ -73,14 +70,12 @@ private enum HistoryError: LocalizedError {
     }
   ) {
     self.fetchOfficial = fetchOfficial
-    self.fixedCacheURL = cacheURL
     let resolvedOutboxURL = outboxURL ?? cacheURL.map {
       $0.deletingLastPathComponent().appendingPathComponent(
         $0.lastPathComponent.replacingOccurrences(of: "watch-history", with: "watch-history-outbox"))
     }
-    self.fixedOutboxURL = resolvedOutboxURL
-    self.cacheURL = cacheURL ?? WatchHistoryCache.fileURL()
-    self.outboxURL = resolvedOutboxURL ?? WatchHistoryCache.outboxFileURL()
+    self.cacheURL = cacheURL
+    self.outboxURL = resolvedOutboxURL
     self.transport = transport
     if let cacheURL { records = WatchHistoryCache.load(from: cacheURL) }
     if let url = self.outboxURL,
@@ -104,8 +99,7 @@ private enum HistoryError: LocalizedError {
 
   /// Called from settings and at launch. The first call only adopts the settings; changing
   /// server or token afterwards means a different data set, so the saved cache is dropped.
-  func configure(enabled: Bool, baseURL: String, token: String? = nil, accountID: Int64? = nil) {
-    if self.accountID != accountID { switchAccount(to: accountID) }
+  func configure(enabled: Bool, baseURL: String, token: String? = nil) {
     let normalized = BiliHistoryConfig.normalizedBaseURL(baseURL) ?? ""
     let nextToken = token ?? self.token
     let addressChanged = self.baseURL != normalized || self.token != nextToken
@@ -134,23 +128,6 @@ private enum HistoryError: LocalizedError {
     persistOutbox()
     persist(immediate: true)
     flushOutbox()
-  }
-
-  private func switchAccount(to nextAccountID: Int64?) {
-    persist(immediate: true)
-    persistOutbox()
-    storageGeneration &+= 1
-    flushTask?.cancel(); flushTask = nil
-    reportTask?.cancel(); reportTask = nil
-    retryTask?.cancel(); retryTask = nil
-    officialTask?.cancel(); officialTask = nil
-    accountID = nextAccountID
-    cacheURL = fixedCacheURL ?? WatchHistoryCache.fileURL(accountID: nextAccountID)
-    outboxURL = fixedOutboxURL ?? WatchHistoryCache.outboxFileURL(accountID: nextAccountID)
-    records = cacheURL.map { WatchHistoryCache.load(from: $0) } ?? [:]
-    outbox = loadOutbox()
-    pending.removeAll(); requested.removeAll(); sessions.removeAll(); seenSessions.removeAll()
-    failureCount = 0; blockedUntil = nil; officialBlockedUntil = nil; testStatus = nil
   }
 
   /// Wipes the on-disk states so the next appearance of each card reads the server again.

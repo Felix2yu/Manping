@@ -278,9 +278,9 @@ struct PGCPlayerPage: View {
   /// 画质 and 字幕 come from this page; the rest of the bar is shared (设置 › 控制条).
   private var barPage: PlayerBarPage {
     PlayerBarPage(slots: [
-      .quality: .quality(streams: streams, selected: playback.selectedStream, enabled: playback.manifest != nil) {
-        playback.changeQuality($0)
-      },
+      .quality: .quality(streams: streams, selected: playback.selectedStream, enabled: playback.manifest != nil,
+        choose: { playback.changeQuality($0) }, audioStreams: playback.manifest?.audio ?? [],
+        selectedAudio: playback.selectedAudio, chooseAudio: { playback.changeAudio($0) }),
       .subtitle: .subtitle(features: features, player: player, filterAI: model.appSettings.bool(.filterAISubtitle)),
     ], downloadEnabled: playback.manifest != nil,
       bookmarkTime: { playback.usesFixtures ? playback.fixturePosition : player.time },

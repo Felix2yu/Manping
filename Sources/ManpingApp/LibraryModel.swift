@@ -5,9 +5,18 @@ import SwiftUI
 @MainActor final class LibraryModel: ObservableObject {
   enum Mode: Equatable {
     case search(String, LibrarySearchType, LibrarySearchOrder)
+    case filteredSearch(LibrarySearchQuery)
     case space(SpaceArchiveQuery)
     case collections(Int64), collection(SpaceCollection, Bool)
     case following(Int64, Int64?), followers(Int64)
+    var searchQuery: LibrarySearchQuery? {
+      switch self {
+      case .search(let term, let type, let order):
+        LibrarySearchQuery(term: term, type: type, order: order)
+      case .filteredSearch(let query): query
+      default: nil
+      }
+    }
   }
   @Published private(set) var entries: [LibraryEntry] = []
   @Published private(set) var relatedUsers: [LibraryUser] = []
@@ -107,17 +116,18 @@ import SwiftUI
   }
   func load(_ mode: Mode) async {
     clear(); self.mode = mode; hasMore = true
-    if PerformanceOptions.requested, case .search = mode {
+    if PerformanceOptions.requested, mode.searchQuery != nil {
       entries = PerformanceFixtures.videos.map { LibraryEntry.video($0) }
       total = entries.count; hasMore = false; return
     }
-    if case .search(let term, .video, _) = mode, !term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    if let query = mode.searchQuery, query.type == .video,
+      !query.term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       let revision = generation
       relatedFlight = Task { [weak self] in
         guard let self else { return }
         do {
           let identity = await service.authSnapshot()
-          let result = try await service.searchUsers(term: term)
+          let result = try await service.searchUsers(term: query.term)
           try await checkIdentity(identity); try check(revision)
           relatedUsers = Array(result.items.prefix(8))
         } catch { if generation == revision { relatedUsers = [] } }
@@ -142,6 +152,15 @@ import SwiftUI
             try await checkIdentity(snapshot); try check(revision); appendUsers(result.items)
             batch = LibraryPage(items: [], hasMore: result.hasMore && !result.items.isEmpty, total: result.total)
           } else { batch = try await service.librarySearch(term, type: type, order: order, page: page) }
+        case .filteredSearch(let query):
+          if query.type == .user {
+            let result = try await service.searchUsers(term: query.term, order: query.userOrder, page: page)
+            try await checkIdentity(snapshot); try check(revision); appendUsers(result.items)
+            batch = LibraryPage(items: [], hasMore: result.hasMore && !result.items.isEmpty, total: result.total)
+          } else {
+            batch = try await service.librarySearch(query.term, type: query.type, order: query.order,
+              filters: query.filters, page: page)
+          }
         case .space(var query):
           query.cursor = nextCursor
           if nextCursor == nil, fallbackContext == query.contextKey, Date() < fallbackUntil { query.provider = .appCursor }

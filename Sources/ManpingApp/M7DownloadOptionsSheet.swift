@@ -54,7 +54,7 @@ struct M7DownloadOptionsSheet: View {
   }
   var body: some View {
     VStack(spacing: 0) {
-      PageHeader(title: "下载选项", symbol: "arrow.down.circle") {
+      PageHeader(title: "留影下载", symbol: "arrow.down.circle") {
         Button { model.showingDownloadOptions = false } label: { Image(systemName: "xmark") }
           .buttonStyle(AppButtonStyle(role: .plain, size: .small, iconOnly: true)).help("关闭")
       }
@@ -103,7 +103,7 @@ struct M7DownloadOptionsSheet: View {
                   choice(track.title + (track.isAI ? " · AI" : ""), selected: subtitleID == track.id) { subtitleID = track.id }
                 }
               }
-              if availableTracks.isEmpty { unavailable(subtitleError ?? "当前没有可用的字幕；可拷贝 BBDown 命令由外部工具获取。") }
+              if availableTracks.isEmpty { unavailable(subtitleError ?? "当前没有可用的在线字幕。") }
             } else if !canSave {
               unavailable(content == .audio ? "当前没有可用的音频流" : content == .cover ? "当前没有封面地址" : "当前没有可下载的弹幕")
             }

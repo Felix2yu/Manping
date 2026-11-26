@@ -27,6 +27,44 @@ public struct MediaStream: Identifiable, Equatable, Sendable {
   }
 }
 
+public enum PlaybackAudioKind: String, Sendable {
+  case aac, hires, flac, dolby, unknown
+
+  public init(stream: MediaStream) {
+    let codec = stream.codec.lowercased()
+    if codec.hasPrefix("ec-3") || codec.hasPrefix("ec3") || codec.hasPrefix("ac-3") { self = .dolby }
+    else if stream.quality == 30250 { self = .dolby }
+    else if stream.quality == 30251 { self = .hires }
+    else if codec.hasPrefix("flac") { self = .flac }
+    else if codec.hasPrefix("mp4a") { self = .aac }
+    else { self = .unknown }
+  }
+
+  public var title: String {
+    switch self {
+    case .aac: "AAC"
+    case .hires: "Hi-Res"
+    case .flac: "FLAC"
+    case .dolby: "杜比"
+    case .unknown: "其他"
+    }
+  }
+}
+
+public extension MediaStream {
+  var audioKind: PlaybackAudioKind? {
+    guard quality >= 30216 || codec.lowercased().contains("mp4a") else { return nil }
+    return PlaybackAudioKind(stream: self)
+  }
+  var audioTitle: String {
+    guard let kind = audioKind else { return label }
+    if kind == .dolby, codec.lowercased().hasPrefix("ec-3") { return "Dolby Digital Plus" }
+    if kind == .dolby, quality == 30250 { return "杜比全景声" }
+    if kind == .unknown { return codec.isEmpty ? label : codec.uppercased() }
+    return kind.title
+  }
+}
+
 public struct PlaybackFormat: Sendable, Equatable {
   public let quality: Int
   public let format: String
@@ -158,19 +196,37 @@ public enum PlaybackCodec: String, CaseIterable, Sendable {
   }
 }
 
+public enum PlaybackAudioPreference: String, CaseIterable, Sendable {
+  case auto, hires, flac, dolby, aac
+  public var title: String {
+    switch self {
+    case .auto: "自动"
+    case .hires: "Hi-Res 优先"
+    case .flac: "FLAC 优先"
+    case .dolby: "杜比优先"
+    case .aac: "AAC"
+    }
+  }
+}
+
 public struct PlaybackPreferences: Sendable, Equatable {
   public var codec: PlaybackCodec
   public var quality: Int?
   public var lastQuality: Int?
   public var avoidP2P: Bool
+  public var audio: PlaybackAudioPreference
+  public var audioStreamID: String?
   public init(
     codec: PlaybackCodec = .h264, quality: Int? = nil,
-    lastQuality: Int? = nil, avoidP2P: Bool = false
+    lastQuality: Int? = nil, avoidP2P: Bool = false,
+    audio: PlaybackAudioPreference = .auto, audioStreamID: String? = nil
   ) {
     self.codec = codec
     self.quality = quality
     self.lastQuality = lastQuality
     self.avoidP2P = avoidP2P
+    self.audio = audio
+    self.audioStreamID = audioStreamID
   }
 }
 
@@ -200,13 +256,29 @@ public enum PlaybackSelector {
     let eligibleAudio = manifest.audio.filter { stream in
       !preferences.avoidP2P || ([stream.url] + stream.backupURLs).contains(where: { !isP2P($0) })
     }
-    guard !eligible.isEmpty, !eligibleAudio.isEmpty,
-      let audio = eligibleAudio.max(by: {
-        $0.quality < $1.quality || ($0.quality == $1.quality && $0.bandwidth < $1.bandwidth)
-      })
-    else {
+    guard !eligible.isEmpty, !eligibleAudio.isEmpty else {
       throw BiliError.invalidResponse(
         preferences.avoidP2P ? "没有可用的非 P2P 播放节点，请关闭「不使用 P2P」或选择其他画质。" : "No compatible playback streams")
+    }
+    let highestAudio = eligibleAudio.max {
+      $0.quality < $1.quality || ($0.quality == $1.quality && $0.bandwidth < $1.bandwidth)
+    }
+    let preferredKinds: [PlaybackAudioKind]
+    switch preferences.audio {
+    case .auto: preferredKinds = [.dolby, .hires, .flac, .aac]
+    case .hires: preferredKinds = [.hires, .flac]
+    case .flac: preferredKinds = [.flac, .hires]
+    case .dolby: preferredKinds = [.dolby]
+    case .aac: preferredKinds = [.aac]
+    }
+    let preferredAudio = preferences.audioStreamID.flatMap { id in eligibleAudio.first { $0.id == id } }
+      ?? preferredKinds.lazy.compactMap { kind in
+        eligibleAudio.filter({ $0.audioKind == kind }).max {
+          $0.quality < $1.quality || ($0.quality == $1.quality && $0.bandwidth < $1.bandwidth)
+        }
+      }.first
+    guard let audio = preferredAudio ?? highestAudio else {
+      throw BiliError.invalidResponse("No compatible audio stream")
     }
     let qualities = Set(eligible.map(\.quality)).sorted(by: >)
     // With no preference yet, start at 1080P 60 (116) rather than 8K / Dolby Vision: the

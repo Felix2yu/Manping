@@ -8,15 +8,23 @@ struct PlaybackSubtitleItems: View {
   let filterAI: Bool
   var body: some View {
     let visible = DownloadSubtitleTrack.filtered(features.tracks, filterAI: filterAI)
-    Toggle("关闭字幕", isOn: Binding(get: { features.selectedTrackID == nil }, set: { if $0 { features.selectSubtitle(nil, player: player) } }))
+    Toggle("关闭字幕", isOn: Binding(get: { features.selectedTrackID == nil }, set: { _ in features.selectSubtitle(nil, player: player) }))
+    if let local = features.localSubtitle {
+      Toggle("本地 · " + local.title, isOn: Binding(get: { features.selectedTrackID == local.id }, set: { on in
+        if !on { features.selectSubtitle(nil, player: player) }
+      }))
+    }
     ForEach(visible) { track in
       Toggle(track.title, isOn: Binding(get: { features.selectedTrackID == track.id }, set: { if $0 { features.selectSubtitle(track, player: player) } }))
     }
+    Divider()
+    Button("导入本地字幕…") { Task { await features.importLocalSubtitle(player: player) } }
     if let note = Self.emptyNote(features: features, visible: visible) { Text(note) }
   }
   /// What the list says when it has no track to offer (shared with 播放 › 字幕 in the menu bar).
   @MainActor static func emptyNote(features: PlaybackFeaturesModel, visible: [DownloadSubtitleTrack]) -> String? {
     if features.subtitleLoading || features.tracksLoading { return "正在加载字幕…" }
+    if features.localSubtitle != nil { return nil }
     if !visible.isEmpty { return nil }
     return features.tracks.isEmpty ? "这个视频没有字幕" : "只有 AI 字幕（已在设置中隐藏）"
   }

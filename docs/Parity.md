@@ -16,10 +16,10 @@
 | 视频分区/子分区/排序 | ✅ | 动画分区实网只读通过；子分区/各排序与其它分区待复验；partitions.png为fixture |
 | 视频播放/信息/分P/合集/相关推荐 | 🚧 | 公开BV1xx411c7mD实网只读播放有画面及弹幕；原版信息/分集/评论布局；分P/合集/相关推荐全路径及真实写未验，video-player-dark.png / video-info-dark.png为fixture |
 | App签名播放/匿名WBI fallback | ✅ | 公开BV1xx411c7mD实网只读播放有画面及弹幕（Claude验收）；精确参数/身份绑定与匿名fallback fixture通过；换号播放仍待复验 |
-| 清晰度/编码偏好/备用URL | 🚧 | 真实默认播放通过；切清晰度/编码偏好/备用URL组合待复验；元数据/选择/记忆fixture通过 |
+| 清晰度/编码/音轨偏好 | 🚧 | 已接AAC、Hi-Res、FLAC、Dolby Digital Plus、杜比全景声识别与独立音轨菜单；设置音质偏好、显式音轨优先、缺失音轨回退；保留当前进度切轨，真实可用音轨与听感待复验 |
 | 评论排序/分页/楼中楼 | 🚧 | RPC+最热/最新+800预加载+楼中楼固定时间排序与分页；新shell fixture comments.png；inline表情已接ImageCache；线上RPC未验，新增布局见final-gaps-dark/video.png |
 | 点赞/投币/收藏/三连/关注 | 🚧 | expectedIdentity/Core+实际UI状态协调器fixture116tests与review通过；View/ReqUser+Web状态、换号/过期/中断状态恢复；未执行真实账号写操作 |
-| 搜索（视频及其它类型） | ✅ | 视频搜索实网只读通过；其它类型/Web fallback/区域搜索待复验；m3-fixture/search.png为fixture |
+| 搜索（视频及其它类型） | 🚧 | 视频搜索实网只读通过；已增加时长、发布时间、分区筛选和请求前校验，7项离线回归及搜索相关54项隔离测试通过；其它类型/Web fallback/区域搜索及新筛选实网待复验；m3-fixture/search.png为fixture |
 | 用户空间 | ✅ | 实网只读资料与投稿通过；获赞/等级/VIP资料卡已补，结构fixture通过，新增字段待实网复验；关注写仅fixture；final-gaps-dark/space.png为fixture |
 | 关注/粉丝 | ✅ | 关注分组/粉丝实网只读通过；按原版UserCard底部为MID；465e0b2修千分位格式后待复验，写仅fixture；m3-fixture/following.png、followers.png |
 | 收藏夹 | ✅ | 追番收藏实网只读通过；其它文件夹/视频内容及多选批处理待验，写仅fixture；m3-fixture/favorites.png为fixture |
@@ -29,10 +29,10 @@
 | PGC详情/播放 | 🚧 | 公开ep837204实网只读有画面及弹幕；pgc-player-dark.png / pgc-info-dark.png为fixture；EOF/付费地区待验；追番/追剧、点赞/投币/收藏/三连已接App签名接口、expectedIdentity/CSRF与UI迟到结果隔离，7项fixture+合并review通过；未真实写；信息区按固定XAML移除无有效入口的warning/extra，正文28pt行高，final-gaps-dark/pgc.png为fixture，视觉待实网复验；弹幕发送仅fixture、下载待验 |
 | 动漫时间线/索引 | ✅ | 实网索引原报Invalid PGC index list：68c32e3修page0→1，2026-10-14集中实网复验app内索引正常；timeline type2/3合并13天26条无丢失，10-13接口仅1条；0dcb829优先停更pub_index_show；真实结构fixture通过 |
 | 影视电影/电视剧/纪录片 | ✅ | 原实网三类均Invalid PGC index list；68c32e3修首page1，2026-10-14集中实网复验app内电影列表正常；cinema-dark.png / cinema-tv-dark.png / cinema-documentary-dark.png为fixture |
-| 直播分区/直播入口 | ✅ | 直播推荐和分区实网只读通过；live-dark.png / live-partition-dark.png 为 fixture。2026-10-18 新增 App 内直播播放（超出原版：原版打开网页直播间，右键菜单保留「在浏览器打开」）：web-room v2 getRoomPlayInfo（参数照 BiliKernel），FLV/HLS 线路并发竞速选最快节点，画质切换，看门狗断流自动重连（错误、EOF、画面停止），直播结束检测，实时弹幕（WebSocket，zlib 协议，弹幕叠加在画面上并列在侧栏）、在线和看过人数。匿名实测起播约 3 秒、断流后 5–9 秒恢复；登录态原画与弹幕昵称待使用者授权钥匙串后复验 |
+| 直播分区/直播入口 | ✅ | 直播推荐和分区实网只读通过；live-dark.png / live-partition-dark.png 为 fixture。2026-10-18 新增 App 内直播播放（超出原版：原版打开网页直播间，右键菜单保留「在浏览器打开」）：web-room v2 getRoomPlayInfo（参数照 BiliKernel），FLV/HLS 线路并发竞速选最快节点，画质切换，看门狗断流自动重连（错误、EOF、画面停止），直播结束检测，实时弹幕（WebSocket，zlib 协议，弹幕叠加在画面上并列在侧栏）、一秒内相同普通滚动弹幕聚合为「干杯 ×11」（聊天栏保留原文，58项Core与3项App弹幕隔离回归通过）、在线和看过人数。匿名实测起播约 3 秒、断流后 5–9 秒恢复；登录态原画与弹幕昵称待使用者授权钥匙串后复验 |
 | 专栏阅读与互动 | 🚧 | 推荐/分区子区/6排序/排行榜、native INITIAL_STATE原生正文图片链接+viewinfo合并已接；匿名分区推荐排行/native成功，viewinfo返回-352时保留正文、禁未知互动；点赞收藏/typed12评论楼中楼仅fixture，原版没有投币按钮/API；m6-fixture/article*.png；2026-10-14专栏推荐/排行实网只读通过，正文阅读页待复验 |
 | 消息/通知/私信 | ✅ | 回复/@/点赞通知分页、私信会话与历史分页/文本图片撤回、显式发送已接；读取不markread/ack；发送仅fixture，refresh Cookie/CSRF回归与一次合并review通过；m6-fixture/messages-*.png；2026-10-14回复/@/赞/私信实网只读通过；cf869a2补e_infos表情并按原版显示「不受支持的内容」，发送仍仅fixture |
-| 下载/合并/任务记录 | 🚧 | 原版画质/编码/分集选项，原生视频音频封面弹幕字幕下载、Range/IfRange恢复/取消/typed磁盘错误/SQLite旧JSON兼容；实际流身份绑定、媒体hash/inode完成记录与换号取消已接，31下载故障tests+5播放导航tests与集中review通过；m7-fixture/downloads*.png；真实媒体/外置跨卷未验 |
+| 下载/合并/任务记录 | 🚧 | 常规入口固定使用内置「留影」原生引擎，不再被旧BBDown开关拦截；原版画质/编码/分集选项，原生视频音频封面弹幕字幕下载、Range/IfRange恢复/取消/typed磁盘错误/SQLite旧JSON兼容；实际流身份绑定、媒体hash/inode完成记录与换号取消已接；真实媒体/外置跨卷未验 |
 | 外部BBDown/命令复制/弹幕导出 | 🚧 | 无凭据Shell正确转义BBDown命令，画质用外部工具格式描述；原始弹幕XML（含特殊模式）/字幕SRT/AI过滤已接，SDK匿名字幕metadata code0样本无tracks；外部工具仅复制不自动执行，实际导出待实网复验 |
 | 全量设置/Mac替代项 | 🚧 | 原版App全分组与Mac能力catalog、主题/画质编码/P2P/步进/速度音量/弹幕开关/VideoToolbox/声道/缓存限额/下载/截图保存打开复制/导航/建议/列表边界与推荐策略已接；清图缓存有确认；Windows项不可用。已恢复单列SettingsCard/Expander与应用/AI SelectorBar；长按倍速/弹幕样式/独立窗口/精确跳转/磁盘缓存/CoreAudio独占/自定义mpv/libmpv/profile/导航/滚轮/通知轮询已接；仅四个Windows项禁用；m7-finish-dark/settings*.png，通知重启/换号/点击/迟到投递4fake回归通过；系统授权与实网待复验，AI设置已接 |
 | 菜单/快捷键/系统媒体控制 | 🚧 | M7原生菜单与播放快捷键已补、保留文本输入；MPNowPlayingInfoCenter/MPRemoteCommandCenter已接播放暂停/上一下一/进度/封面，实际系统媒体键待使用者复验 |
@@ -43,7 +43,7 @@
 | shader菜单 | 🚧 | 冻结现状；ProMax有效播放未验，不再采样 |
 | HDR/外屏/睡眠/长期性能 | 🚧 | 300次修复browse引用环/Clipboard/关闭锁反转后无卡死；RSS/活跃MALLOC仍增长未平台，归因边界见Performance；物理HDR、外屏、睡眠和整夜播放缺使用者在场/硬件验收条件；GPU及能耗未测，不使用sudo |
 | 视觉截图对照/60fps/4K60目标 | 🚧 | Shell/流行/播放assets+XAML对照已存compare-popular.png/compare-player.png；M9实际600项滚动修正后推荐/搜索无>25ms回调，热门仍1次（0.0556%），不宣称全部稳定60fps；4K60掉帧与测量范围见Performance |
-| 独立窗口/外部mpv/字幕/章节/截图 | 🚧 | 同窗口小窗/独立窗口迁移与关闭恢复、字幕选择/AI过滤/本地SRT、mpv章节跳转、截图保存打开复制已接；外部mpv生产IPC本地mock状态/退出与有界取消PASS；m7-finish-dark/video.png、pgc.png；真实媒体及窗口交互待复验 |
+| 独立窗口/可缩放小窗/本地字幕/章节/截图 | 🚧 | 同窗口小窗/独立窗口迁移与关闭恢复；小窗新增360/480/720预设与自由缩放手柄、屏幕约束和持久化，11项几何回归通过；字幕选择/AI过滤/本地SRT与ASS安全导入已接；mpv章节跳转、截图保存打开复制已接；外部mpv生产IPC本地mock状态/退出与有界取消PASS；真实文件选择、媒体字幕、AppKit拖拽/热插拔/跨Space待复验 |
 | arm64独立app/来源/构建说明 | ✅ | 最终dist/release已重新打包，46arm64最终SHA/依赖闭包/无Homebrew RPATH/strict codesign通过，并实际运行本地性能页；README可照做，替换前stage验证且旧Release备份至.build，其它dist目录禁止写；使用者正式启动/公证范围见KnownIssues |
 
 播放布局核对：原PNG为216dpi（Windows225%）；流行1362×895、播放1426×893逻辑窗口。固定XAML分集Height86/cover120/spacing8用于新实现；旧PNG密度存在版本差异。常规fixture不加载媒体，显式M9性能入口只播放本地素材；UGC/PGC弹幕发送已按SDK POST/身份快照/CSRF接线，写操作仅fixture测试。小窗/全屏按钮实际交互仍待使用者复验。

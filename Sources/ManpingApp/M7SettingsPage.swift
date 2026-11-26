@@ -354,7 +354,6 @@ private struct SettingsCategoryView: View {
   @ViewBuilder private func footer(_ section: String) -> some View {
     switch (group, section) {
     case (.interface, "侧边栏项目"): Text("隐藏的项目仍可从菜单栏的「前往」打开。")
-    case (.download, "BBDown"): Text("生成的命令不含 Cookie、令牌等登录信息；拷贝后请自行检查再运行。")
     case (.playback, "省电"): PowerStatusLine()
     default: EmptyView()
     }

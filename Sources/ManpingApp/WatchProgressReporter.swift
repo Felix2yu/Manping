@@ -87,7 +87,7 @@ import Foundation
     inFlight = (item, seconds)
     Task {
       do {
-        // Bound to the identity checked for sign-in: a report that is late for an account switch
+        // Bound to the identity checked for sign-in: a report that is late for an identity change
         // is dropped instead of being written to the new account.
         try await service.reportProgress(aid: item.aid, cid: item.cid, seconds: seconds, episode: episode, expectedIdentity: identity)
         if self.item == item { self.lastSent = (item, seconds) }

@@ -48,7 +48,7 @@ public enum M3Fixture {
         case "media_bangumi", "media_ft": return ["season_id": 99 + offset, "title": "本地剧集 · \(offset + 1)", "cover": "https://fixture.invalid/cover/\(offset)"]
         case "live_room": return ["roomid": 88 + offset, "title": "本地直播 · \(offset + 1)", "uname": "本地主播", "cover": "https://fixture.invalid/cover/\(offset)"]
         case "article": return ["id": 77 + offset, "title": "本地专栏 · \(offset + 1)", "image_urls": ["https://fixture.invalid/cover/\(offset)"]]
-        default: return searchVideo(uiVideo(offset), mid: 10001)
+        default: return filteredSearchVideo(uiVideo(offset), parameters: parameters)
         }
       }
       data = ["result": page <= 2 ? items : [], "numPages": 2, "numResults": 24]
@@ -93,6 +93,19 @@ public enum M3Fixture {
   private static func searchVideo(_ video: [String: Any], mid: Int64) -> [String: Any] {
     var video = video; video["owner"] = nil; video["mid"] = mid
     video["author"] = "本地 UP 主"; video["upic"] = "//fixture.invalid/avatar/1"
+    return video
+  }
+  /// Echo selected video filters into deterministic metadata so request/paging tests can
+  /// verify that every page describes the same filtered result set.
+  private static func filteredSearchVideo(_ video: [String: Any], parameters: [String: String], mid: Int64 = 10001) -> [String: Any] {
+    var video = searchVideo(video, mid: mid)
+    if let duration = Int(parameters["duration"] ?? "0"), (1...4).contains(duration) {
+      video["duration"] = [600, 1200, 2700, 5400][duration - 1]
+    }
+    if let pubtime = Int(parameters["pubtime"] ?? "0"), (1...4).contains(pubtime) {
+      video["pubdate"] = 1_760_000_000 - [12 * 3600, 3 * 86400, 15 * 86400, 200 * 86400][pubtime - 1]
+    }
+    if let tid = Int(parameters["tid"] ?? "0"), tid > 0 { video["tid"] = tid }
     return video
   }
   private static func searchUser(_ mid: Int64, ui: Bool) -> [String: Any] {
@@ -150,6 +163,11 @@ public enum M3Fixture {
     let data: Any
     var result = false
     switch path {
+    case "/x/v2/region/index":
+      data = [["tid": 160, "name": "生活", "uri": "bilibili://region/160", "children": [
+        ["tid": 161, "name": "生活记录"], ["tid": 162, "name": "美食"]]],
+        ["tid": 36, "name": "知识", "uri": "bilibili://region/36", "children": [
+          ["tid": 37, "name": "科学科普"]]]]
     case "/x/web-interface/wbi/search/type":
       let kind = parameters["search_type"] ?? "video"
       let item: [String: Any]
@@ -158,7 +176,7 @@ public enum M3Fixture {
       case "media_bangumi", "media_ft": item = ["season_id": 99, "title": "Fixture series"]
       case "live_room": item = ["roomid": 88, "title": "Fixture room", "uname": "Fixture owner"]
       case "article": item = ["id": 77, "title": "Fixture article", "image_urls": ["https://fixture.invalid/cover/2"]]
-      default: item = searchVideo(video, mid: 123)
+      default: item = filteredSearchVideo(video, parameters: parameters, mid: 123)
       }
       data = ["result": parameters["page"] == "2" ? [] : [item], "numPages": 2, "numResults": 1]
     case "/x/web-interface/card": data = ["card": user, "space": ["l_img": "https://fixture.invalid/cover/3"], "archive_count": 8, "follower": 5, "follow": 2, "like_num": 321]

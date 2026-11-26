@@ -348,12 +348,15 @@ struct PlayerQualityItems: View {
   let streams: [MediaStream]
   let selected: MediaStream?
   let choose: (MediaStream) -> Void
+  var audioStreams: [MediaStream] = []
+  var selectedAudio: MediaStream? = nil
+  var chooseAudio: (MediaStream) -> Void = { _ in }
   var body: some View {
     let qualities = Self.qualities(streams)
     let current = selected ?? streams.first
     Section("画质") {
       ForEach(qualities, id: \.quality) { stream in
-        Toggle(stream.label, isOn: Binding(get: { current?.quality == stream.quality }, set: { on in
+        Toggle(Self.videoTitle(stream), isOn: Binding(get: { current?.quality == stream.quality }, set: { on in
           guard on else { return }
           choose(streams.first { $0.quality == stream.quality && $0.codec == current?.codec } ?? stream)
         }))
@@ -367,11 +370,28 @@ struct PlayerQualityItems: View {
         }
       }
     }
+    if !audioStreams.isEmpty {
+      Section("音轨") {
+        ForEach(Self.audioTracks(audioStreams)) { stream in
+          Toggle(stream.audioTitle + (stream.bandwidth > 0 ? " · \(stream.bandwidth / 1000) kbps" : ""),
+            isOn: Binding(get: { selectedAudio?.id == stream.id }, set: { if $0 { chooseAudio(stream) } }))
+        }
+      }
+    }
   }
   /// One entry per quality, best first, in the order the manifest offers them.
   static func qualities(_ streams: [MediaStream]) -> [MediaStream] {
     var seen = Set<Int>()
     return streams.sorted { $0.quality > $1.quality }.filter { seen.insert($0.quality).inserted }
+  }
+  static func audioTracks(_ streams: [MediaStream]) -> [MediaStream] {
+    var seen = Set<String>()
+    return streams.sorted { $0.quality > $1.quality }.filter { seen.insert($0.id).inserted }
+  }
+  static func videoTitle(_ stream: MediaStream) -> String {
+    if stream.quality == 126 { return "杜比视界" }
+    if stream.quality == 125 { return "HDR10" }
+    return stream.label
   }
 }
 
@@ -379,9 +399,13 @@ struct PlayerQualityMenu: View {
   let streams: [MediaStream]
   let selected: MediaStream?
   let choose: (MediaStream) -> Void
+  var audioStreams: [MediaStream] = []
+  var selectedAudio: MediaStream? = nil
+  var chooseAudio: (MediaStream) -> Void = { _ in }
   var body: some View {
-    Menu { PlayerQualityItems(streams: streams, selected: selected, choose: choose) } label: {
-      Text(selected?.label ?? "画质").font(.system(size: 12, weight: .semibold)).lineLimit(1)
+    Menu { PlayerQualityItems(streams: streams, selected: selected, choose: choose,
+      audioStreams: audioStreams, selectedAudio: selectedAudio, chooseAudio: chooseAudio) } label: {
+      Text(selected.map { $0.quality == 126 ? "杜比视界" : $0.label } ?? "画质").font(.system(size: 12, weight: .semibold)).lineLimit(1)
     }.playerMenuStyle().disabled(streams.isEmpty)
       .help(selected.map { "画质：\($0.label) · \(PlayerCodec.name($0.codec))" } ?? "画质")
   }
@@ -550,12 +574,15 @@ struct PlayerBarPage {
 extension PlayerBarPage.Slot {
   /// 画质 for videos and episodes: the text capsule, and 「画质 · 1080P」 in 「更多」.
   @MainActor static func quality(streams: [MediaStream], selected: MediaStream?, enabled: Bool = true,
-    choose: @escaping (MediaStream) -> Void) -> Self {
+    choose: @escaping (MediaStream) -> Void, audioStreams: [MediaStream] = [], selectedAudio: MediaStream? = nil,
+    chooseAudio: @escaping (MediaStream) -> Void = { _ in }) -> Self {
     Self(control: {
-      AnyView(PlayerQualityMenu(streams: streams, selected: selected, choose: choose).disabled(!enabled))
+      AnyView(PlayerQualityMenu(streams: streams, selected: selected, choose: choose,
+        audioStreams: audioStreams, selectedAudio: selectedAudio, chooseAudio: chooseAudio).disabled(!enabled))
     }, menu: {
       AnyView(Menu {
-        PlayerQualityItems(streams: streams, selected: selected, choose: choose)
+        PlayerQualityItems(streams: streams, selected: selected, choose: choose,
+          audioStreams: audioStreams, selectedAudio: selectedAudio, chooseAudio: chooseAudio)
       } label: {
         Label(selected.map { "画质 · \($0.label)" } ?? "画质", systemImage: PlayerBarItem.quality.symbol)
       }.disabled(streams.isEmpty || !enabled))

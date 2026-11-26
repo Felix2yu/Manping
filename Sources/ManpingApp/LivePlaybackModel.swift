@@ -1,6 +1,6 @@
-import ManpingCore
 import Combine
 import Foundation
+import ManpingCore
 
 /// Recent live chat lines for the side panel. Kept apart from the playback model so a busy
 /// room only re-renders the chat list, and flushed at most every 0.3 s.
@@ -11,27 +11,41 @@ import Foundation
   private var history = LiveChatHistory()
   private var flush: Task<Void, Never>?
 
-  func add(user: String, text: String, kind: Line.Kind, group: UUID? = nil, serverID: String? = nil,
-           uid: Int64 = 0, gift: LiveGiftMessage? = nil) {
-    history.add(user: user, text: text, kind: kind, group: group, serverID: serverID, uid: uid, gift: gift)
+  func add(
+    user: String, text: String, kind: Line.Kind, group: UUID? = nil, serverID: String? = nil,
+    uid: Int64 = 0, gift: LiveGiftMessage? = nil
+  ) {
+    history.add(
+      user: user, text: text, kind: kind, group: group, serverID: serverID, uid: uid, gift: gift)
     scheduleFlush()
   }
   func add(_ message: LiveDanmaku, accountMid: Int64?) {
-    history.add(message, accountMid: accountMid); scheduleFlush()
+    history.add(message, accountMid: accountMid)
+    scheduleFlush()
   }
   private func scheduleFlush() {
     guard flush == nil else { return }
     flush = Task { [weak self] in
       do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
       guard let self else { return }
-      self.lines = self.history.lines; self.flush = nil
+      self.lines = self.history.lines
+      self.flush = nil
     }
   }
   func removeSuperChats(_ ids: [String]) {
-    history.removeSuperChats(ids); lines = history.lines
+    history.removeSuperChats(ids)
+    lines = history.lines
   }
-  func hideGifts() { history.removeGifts(); lines = history.lines }
-  func reset() { flush?.cancel(); flush = nil; history = LiveChatHistory(); lines = [] }
+  func hideGifts() {
+    history.removeGifts()
+    lines = history.lines
+  }
+  func reset() {
+    flush?.cancel()
+    flush = nil
+    history = LiveChatHistory()
+    lines = []
+  }
   func setConnected(_ value: Bool) { if connected != value { connected = value } }
 }
 
@@ -60,9 +74,9 @@ import Foundation
     return stream.urls[lineIndex % stream.urls.count].host
   }
   #if DEBUG
-  /// Diagnostics: chat events received and whether the chat auth carried a device id.
-  private(set) var chatEvents = 0
-  private(set) var chatHasBuvid = false
+    /// Diagnostics: chat events received and whether the chat auth carried a device id.
+    private(set) var chatEvents = 0
+    private(set) var chatHasBuvid = false
   #endif
   let player: PlayerModel
   let chat = LiveChatModel()
@@ -100,20 +114,38 @@ import Foundation
   private var observedEOF = false
   private var generation = 0
   private var active = true
+  private var danmakuAggregator = DanmakuBatchAggregator()
+  private var danmakuFlushTask: Task<Void, Never>?
   static let qualityKey = "Manping.lastLiveQuality"
 
-  init(roomID: Int64, service: BiliService, player: PlayerModel, preferHEVC: Bool, avoidPeerAssisted: Bool, usesFixtures: Bool = false) {
-    self.roomID = roomID; self.service = service; self.player = player
-    self.preferHEVC = preferHEVC; self.avoidPeerAssisted = avoidPeerAssisted; self.usesFixtures = usesFixtures
+  init(
+    roomID: Int64, service: BiliService, player: PlayerModel, preferHEVC: Bool,
+    avoidPeerAssisted: Bool, usesFixtures: Bool = false
+  ) {
+    self.roomID = roomID
+    self.service = service
+    self.player = player
+    self.preferHEVC = preferHEVC
+    self.avoidPeerAssisted = avoidPeerAssisted
+    self.usesFixtures = usesFixtures
     let settings = MacSettings.load(from: PerformanceEnvironment.defaults)
+    danmakuAggregator = DanmakuBatchAggregator(
+      configuration: .load(from: PerformanceEnvironment.defaults))
     interactionSettings = settings.liveEffective
     let fixturePolicy = usesFixtures ? LiveGiftPolicySource(settings.liveGiftPolicy()) : nil
-    let gate = usesFixtures ? LiveMutationGate(enabled: Set(LiveRoute.allCases)) : LiveMutationGate.production
-    let interaction = LiveInteractionSession(service: service, gate: gate,
-      policy: settings.liveGiftPolicy(), policySource: fixturePolicy ?? LiveInteractionPreferences.shared.policySource, receipts: usesFixtures ? LiveContractFixture.receiptPolicy : .production)
+    let gate =
+      usesFixtures
+      ? LiveMutationGate(enabled: Set(LiveRoute.allCases)) : LiveMutationGate.production
+    let interaction = LiveInteractionSession(
+      service: service, gate: gate,
+      policy: settings.liveGiftPolicy(),
+      policySource: fixturePolicy ?? LiveInteractionPreferences.shared.policySource,
+      receipts: usesFixtures ? LiveContractFixture.receiptPolicy : .production)
     self.interaction = interaction
-    ui = LiveInteractionModel(session: interaction, fixtures: usesFixtures, gate: gate, fixturePolicySource: fixturePolicy)
-    interactionSettingsObservation = LiveInteractionPreferences.shared.$effective.sink { [weak self] effective in
+    ui = LiveInteractionModel(
+      session: interaction, fixtures: usesFixtures, gate: gate, fixturePolicySource: fixturePolicy)
+    interactionSettingsObservation = LiveInteractionPreferences.shared.$effective.sink {
+      [weak self] effective in
       guard let self else { return }
       self.interactionSettings = effective
       self.ui.reloadSettings()
@@ -133,47 +165,57 @@ import Foundation
   }
 
   #if DEBUG
-  /// README demo (DemoDirector): the offline room has no chat connection, so the interaction is
-  /// bound to the sample account here, as a connected chat would bind it.
-  func bindDemoInteraction() async {
-    guard usesFixtures, let room else { return }
-    let identity = await service.authSnapshot()
-    let account = await service.accountMid()
-    guard active, self.room?.roomID == room.roomID else { return }
-    let context = LiveInteractionContext(identity: identity, accountMid: account, roomID: room.roomID,
-      anchorID: room.anchorID, generation: chatGeneration)
-    interactionContext = context
-    await interaction.bind(context, lifetimeRevision: interaction.lifetime.revision)
-    guard active, interactionContext == context else { return }
-    ui.bind(context)
-  }
+    /// README demo (DemoDirector): the offline room has no chat connection, so the interaction is
+    /// bound to the sample account here, as a connected chat would bind it.
+    func bindDemoInteraction() async {
+      guard usesFixtures, let room else { return }
+      let identity = await service.authSnapshot()
+      let account = await service.accountMid()
+      guard active, self.room?.roomID == room.roomID else { return }
+      let context = LiveInteractionContext(
+        identity: identity, accountMid: account, roomID: room.roomID,
+        anchorID: room.anchorID, generation: chatGeneration)
+      interactionContext = context
+      await interaction.bind(context, lifetimeRevision: interaction.lifetime.revision)
+      guard active, interactionContext == context else { return }
+      ui.bind(context)
+    }
   #endif
 
   func start() {
     guard room == nil, loadTask == nil else { return }
+    startDanmakuFlush()
     #if DEBUG
-    if usesFixtures, let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--ui-live-scene"),
-      ProcessInfo.processInfo.arguments.indices.contains(index + 1) {
-      let scene = ProcessInfo.processInfo.arguments[index + 1]
-      room = LiveRoomInfo(roomID: roomID, anchorID: 900010, anchorName: "示例主播", status: .live, title: "直播解析样本")
-      chatTask = Task { [weak self] in
-        guard let self else { return }
-        do {
-          let room = try await self.service.liveRoom(self.roomID)
-          guard self.active, !Task.isCancelled else { return }
-          self.room = room
-          let identity = await self.service.authSnapshot()
-          let account = await self.service.accountMid()
-          guard await Self.matches(identity, service: self.service), self.active, !Task.isCancelled else { return }
-          self.chatIdentity = identity; self.chatAccountMid = account
-          let context = LiveInteractionContext(identity: identity, accountMid: account,
-            roomID: room.roomID, anchorID: room.anchorID, generation: self.chatGeneration)
-          self.interactionContext = context
-          let lifetimeRevision = self.interaction.lifetime.revision
-          await self.interaction.bind(context, lifetimeRevision: lifetimeRevision)
-          let messages = try await LiveSessionFixture.run(scene: scene, session: self.interaction, context: context,
-            waitForLateHandoff: { await DebugUITransport.waitForLiveMutation() })
-          guard self.active, !Task.isCancelled else { return }
+      if usesFixtures,
+        let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--ui-live-scene"),
+        ProcessInfo.processInfo.arguments.indices.contains(index + 1)
+      {
+        let scene = ProcessInfo.processInfo.arguments[index + 1]
+        room = LiveRoomInfo(
+          roomID: roomID, anchorID: 900010, anchorName: "示例主播", status: .live, title: "直播解析样本")
+        chatTask = Task { [weak self] in
+          guard let self else { return }
+          do {
+            let room = try await self.service.liveRoom(self.roomID)
+            guard self.active, !Task.isCancelled else { return }
+            self.room = room
+            let identity = await self.service.authSnapshot()
+            let account = await self.service.accountMid()
+            guard await Self.matches(identity, service: self.service), self.active,
+              !Task.isCancelled
+            else { return }
+            self.chatIdentity = identity
+            self.chatAccountMid = account
+            let context = LiveInteractionContext(
+              identity: identity, accountMid: account,
+              roomID: room.roomID, anchorID: room.anchorID, generation: self.chatGeneration)
+            self.interactionContext = context
+            let lifetimeRevision = self.interaction.lifetime.revision
+            await self.interaction.bind(context, lifetimeRevision: lifetimeRevision)
+            let messages = try await LiveSessionFixture.run(
+              scene: scene, session: self.interaction, context: context,
+              waitForLateHandoff: { await DebugUITransport.waitForLiveMutation() })
+            guard self.active, !Task.isCancelled else { return }
             let bound = await self.interaction.context
             guard self.active, !Task.isCancelled else { return }
             if scene == "unknown-cross-room", let original = bound {
@@ -203,22 +245,24 @@ import Foundation
                 ? LiveChatFixture.presentationFrame()
                 : LiveChatFixture.frame(includeDeletion: scene == "sc-deleted"))
             ).events { await self.handle(event) }
-          for text in messages { self.chat.add(user: "", text: text, kind: .notice) }
-          self.chat.setConnected(true)
+            for text in messages { self.chat.add(user: "", text: text, kind: .notice) }
+            self.chat.setConnected(true)
             if let bound = self.interactionContext {
               await self.ui.configureScene(scene, expected: bound)
             }
           } catch { self.chat.add(user: "", text: error.localizedDescription, kind: .notice) }
+        }
+        return
       }
-      return
-    }
     #endif
     load(quality: requestedQuality, refreshRoom: true)
     startChat()
   }
 
   func refresh() {
-    retryBudget.reset(); lineIndex = 0; ended = false
+    retryBudget.reset()
+    lineIndex = 0
+    ended = false
     load(quality: requestedQuality, refreshRoom: true)
     if chatTask == nil { startChat() }
   }
@@ -231,24 +275,33 @@ import Foundation
 
   func changeQuality(_ qn: Int) {
     PerformanceEnvironment.defaults.set(qn, forKey: Self.qualityKey)
-    retryBudget.reset(); lineIndex = 0
+    retryBudget.reset()
+    lineIndex = 0
     load(quality: qn, refreshRoom: false)
   }
 
   func shutdown() {
     active = false
     generation += 1
-    loadTask?.cancel(); loadTask = nil
+    loadTask?.cancel()
+    loadTask = nil
     chatGeneration &+= 1
-    chatTask?.cancel(); chatTask = nil
-    chatIdentityTask?.cancel(); chatIdentityTask = nil
+    chatTask?.cancel()
+    chatTask = nil
+    chatIdentityTask?.cancel()
+    chatIdentityTask = nil
+    danmakuFlushTask?.cancel()
+    danmakuFlushTask = nil
+    danmakuAggregator.reset()
     chatClient.disconnect()
     interactionContext = nil
     ui.retire()
     let retired = interaction.lifetime.retire()
     Task { await interaction.shutdown(lifetimeRevision: retired) }
-    watchdog?.invalidate(); watchdog = nil
-    errorObservation = nil; endObservation = nil
+    watchdog?.invalidate()
+    watchdog = nil
+    errorObservation = nil
+    endObservation = nil
     // The engine is pooled; do not leak live-only network options into the next video.
     player.set("stream-lavf-o", "")
     player.shutdown()
@@ -261,71 +314,103 @@ import Foundation
     let current = generation
     loadTask?.cancel()
     // This load takes over from any pending reconnect (its task was just cancelled).
-    isLoading = true; error = nil; reconnecting = nil
+    isLoading = true
+    error = nil
+    reconnecting = nil
     loadTask = Task { [weak self] in
       guard let self else { return }
       do {
         #if DEBUG
-        // The README demo shows the offline sample room playing its local file (the samples have no room API).
-        if DemoConfig.playsLocalMedia, let media = DemoConfig.media {
-          if let sample = M5LiveFixture.sampleRoom(self.roomID) {
-            self.room = LiveRoomInfo(roomID: self.roomID, anchorID: sample.anchorID, anchorName: sample.anchor,
-              status: .live, title: sample.title)
+          // The README demo shows the offline sample room playing its local file (the samples have no room API).
+          if DemoConfig.playsLocalMedia, let media = DemoConfig.media {
+            if let sample = M5LiveFixture.sampleRoom(self.roomID) {
+              self.room = LiveRoomInfo(
+                roomID: self.roomID, anchorID: sample.anchorID, anchorName: sample.anchor,
+                status: .live, title: sample.title)
+            }
+            let stream = LiveStream(
+              protocolName: "http_stream", formatName: "flv", codecName: "avc",
+              currentQuality: 10000, acceptedQualities: [10000], urls: [media])
+            self.stream = stream
+            self.lineIndex = 0
+            self.play(stream)
+            return
           }
-          let stream = LiveStream(protocolName: "http_stream", formatName: "flv", codecName: "avc",
-            currentQuality: 10000, acceptedQualities: [10000], urls: [media])
-          self.stream = stream; self.lineIndex = 0
-          self.play(stream)
-          return
-        }
         #endif
         if refreshRoom || self.room == nil {
           let room = try await self.service.liveRoom(self.roomID)
           guard current == self.generation else { return }
-          if let previous = self.room, previous.roomID != room.roomID || previous.anchorID != room.anchorID {
-            self.chatGeneration &+= 1; self.chatTask?.cancel(); self.chatTask = nil
-            self.chatClient.disconnect(); self.chat.reset(); self.chatReducer = LiveChatReducer()
+          if let previous = self.room,
+            previous.roomID != room.roomID || previous.anchorID != room.anchorID
+          {
+            self.chatGeneration &+= 1
+            self.chatTask?.cancel()
+            self.chatTask = nil
+            self.chatClient.disconnect()
+            self.chat.reset()
+            self.chatReducer = LiveChatReducer()
+            self.danmakuAggregator.reset()
             self.interactionContext = nil
             self.ui.retire()
             let retired = self.interaction.lifetime.retire()
             await self.interaction.shutdown(lifetimeRevision: retired)
             guard self.active, current == self.generation, !Task.isCancelled else { return }
-            self.room = room; self.startChat()
+            self.room = room
+            self.startChat()
           }
           self.room = room
           if room.status != .live {
-            self.markEnded(); return
+            self.markEnded()
+            return
           }
         }
-        let playback = try await self.service.livePlayback(roomID: self.room?.roomID ?? self.roomID, quality: quality)
+        let playback = try await self.service.livePlayback(
+          roomID: self.room?.roomID ?? self.roomID, quality: quality)
         guard current == self.generation else { return }
         self.playback = playback
-        let candidates = LiveStreamSelector.ranked(playback, preferHEVC: self.preferHEVC, requested: quality,
+        let candidates = LiveStreamSelector.ranked(
+          playback, preferHEVC: self.preferHEVC, requested: quality,
           avoidPeerAssisted: self.avoidPeerAssisted)
-        guard playback.status == .live else { self.markEnded(); return }
+        guard playback.status == .live else {
+          self.markEnded()
+          return
+        }
         guard !candidates.isEmpty else {
           throw BiliError.invalidResponse("当前直播没有可用的普通节点，请关闭「不使用 P2P」后重试。")
         }
         // Same quality only: a fallback format must not silently change what the user picked.
         let sameQuality = candidates.filter { $0.currentQuality == candidates[0].currentQuality }
-        guard let (stream, line) = await LiveStreamSelector.fastestLine(sameQuality.prefix(4), fetcher: self.probe) else {
+        guard
+          let (stream, line) = await LiveStreamSelector.fastestLine(
+            sameQuality.prefix(4), fetcher: self.probe)
+        else {
           throw BiliError.invalidResponse("所有直播线路都无法连接")
         }
         guard current == self.generation else { return }
-        self.stream = stream; self.lineIndex = line
+        self.stream = stream
+        self.lineIndex = line
         self.play(stream)
       } catch is CancellationError {
+        guard current == self.generation else { return }
+        self.isLoading = false
+        self.loadTask = nil
       } catch {
         guard current == self.generation else { return }
         self.isLoading = false
-        if self.retryBudget.attempts > 0 { self.scheduleReconnect(reason: "获取直播地址失败") }
-        else { self.error = Self.message(error) }
+        if self.retryBudget.attempts > 0 {
+          self.scheduleReconnect(reason: "获取直播地址失败")
+        } else {
+          self.error = Self.message(error)
+        }
       }
     }
   }
 
   private func play(_ stream: LiveStream) {
-    guard active, !ended, !stream.urls.isEmpty else { isLoading = false; return }
+    guard active, !ended, !stream.urls.isEmpty else {
+      isLoading = false
+      return
+    }
     let previousError = player.error
     let previousEOF = player.eofReached
     let url = stream.urls[lineIndex % stream.urls.count]
@@ -335,14 +420,22 @@ import Foundation
     // rw_timeout turns a dead edge into an error (and a watchdog reconnect) instead of a hang.
     // (HTTP options only: the README demo plays a local file.)
     if !url.isFileURL {
-      player.set("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=2,rw_timeout=8000000")
+      player.set(
+        "stream-lavf-o",
+        "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=2,rw_timeout=8000000"
+      )
     }
     player.load(video: url, audio: nil)
     AppModel.configurePlayerPreferences(player)
-    // A fresh stream restarts the media clock; start a new chat timeline with it.
+    // A fresh stream restarts the media clock; start a new chat timeline and batch window with it.
+    danmakuAggregator.reset()
     player.timeline = DanmakuTimeline(comments: [])
-    loadedAt = Date(); lastClock = -1; stalledSince = nil; playedSinceLoad = false
-    observedPlaybackError = previousError; observedEOF = previousEOF
+    loadedAt = Date()
+    lastClock = -1
+    stalledSince = nil
+    playedSinceLoad = false
+    observedPlaybackError = previousError
+    observedEOF = previousEOF
     isLoading = false
     startWatchdog()
   }
@@ -351,9 +444,14 @@ import Foundation
     // Invalidate the running load or pending reconnect: a line race that finishes after the
     // room ended must not start the stream again under the ended panel.
     generation += 1
-    loadTask?.cancel(); loadTask = nil
-    ended = true; isLoading = false; reconnecting = nil
-    watchdog?.invalidate(); watchdog = nil
+    loadTask?.cancel()
+    loadTask = nil
+    ended = true
+    isLoading = false
+    reconnecting = nil
+    danmakuAggregator.reset()
+    watchdog?.invalidate()
+    watchdog = nil
     player.command(["stop"])
   }
 
@@ -368,7 +466,10 @@ import Foundation
     let current = generation
     errorObservation = player.$error.removeDuplicates().sink { [weak self] value in
       guard let self else { return }
-      if value == nil { self.observedPlaybackError = nil; return }
+      if value == nil {
+        self.observedPlaybackError = nil
+        return
+      }
       guard value != self.observedPlaybackError else { return }
       self.observedPlaybackError = value
       Task { @MainActor [weak self] in
@@ -393,12 +494,18 @@ import Foundation
     guard active, !ended, !retryBudget.terminal, !isLoading, reconnecting == nil else { return }
     let now = Date()
     let clock = player.time
-    retryBudget.recordProgress(at: ProcessInfo.processInfo.systemUptime,
+    retryBudget.recordProgress(
+      at: ProcessInfo.processInfo.systemUptime,
       advancing: clock > lastClock + 0.2, paused: player.paused)
-    if player.paused { stalledSince = nil; lastClock = clock; return }
+    if player.paused {
+      stalledSince = nil
+      lastClock = clock
+      return
+    }
     if clock > lastClock + 0.2 {
       if lastClock >= 0 { playedSinceLoad = true }
-      lastClock = clock; stalledSince = nil
+      lastClock = clock
+      stalledSince = nil
       return
     }
     // Opening a live stream may take a few seconds; once frames flowed, a frozen clock is a drop.
@@ -415,17 +522,22 @@ import Foundation
     guard active, !ended, !retryBudget.terminal, reconnecting == nil else { return }
     guard let delay = retryBudget.nextDelay() else {
       generation += 1
-      loadTask?.cancel(); loadTask = nil
-      watchdog?.invalidate(); watchdog = nil
-      errorObservation = nil; endObservation = nil
-      isLoading = false; reconnecting = nil
+      loadTask?.cancel()
+      loadTask = nil
+      watchdog?.invalidate()
+      watchdog = nil
+      errorObservation = nil
+      endObservation = nil
+      isLoading = false
+      reconnecting = nil
       player.command(["stop"])
       error = "直播连接多次中断（\(reason)），请稍后点「重新连接」。"
       return
     }
     reconnects += 1
     reconnecting = "\(reason)，\(Int(delay)) 秒后重新连接（第 \(retryBudget.attempts) 次）"
-    watchdog?.invalidate(); watchdog = nil
+    watchdog?.invalidate()
+    watchdog = nil
     let current = generation
     loadTask?.cancel()
     loadTask = Task { [weak self] in
@@ -435,6 +547,44 @@ import Foundation
       // ended room shows as ended) and expiring tokens are renewed.
       self.reconnecting = nil
       self.load(quality: self.stream?.currentQuality ?? self.requestedQuality, refreshRoom: false)
+    }
+  }
+
+  // MARK: Live danmaku batching
+
+  private func startDanmakuFlush() {
+    guard danmakuFlushTask == nil else { return }
+    danmakuFlushTask = Task { [weak self] in
+      while !Task.isCancelled {
+        do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+        guard let self, self.active else { return }
+        self.flushDanmaku()
+      }
+    }
+  }
+
+  private func flushDanmaku() {
+    guard !ended else { return }
+    let clock = player.mediaClock
+    let configuration = DanmakuBatchAggregator.Configuration.load(
+      from: PerformanceEnvironment.defaults)
+    if configuration != danmakuAggregator.configuration {
+      // Publish the old window once before changing controls; never discard or rewrite a line.
+      publishDanmaku(danmakuAggregator.flush(at: clock), at: clock)
+      danmakuAggregator = DanmakuBatchAggregator(configuration: configuration)
+      return
+    }
+    publishDanmaku(danmakuAggregator.flush(at: clock), at: clock)
+  }
+
+  private func publishDanmaku(_ comments: [DanmakuComment], at clock: Double) {
+    for comment in comments {
+      // Append-only: a published vote is never replaced when more identical messages arrive.
+      player.timeline.append(
+        DanmakuComment(
+          time: clock + 0.05, mode: comment.mode, color: comment.color,
+          text: comment.text, weight: comment.weight, userHash: comment.userHash,
+          displayText: comment.displayText))
     }
   }
 
@@ -452,11 +602,16 @@ import Foundation
           guard let identity = self.chatIdentity else { continue }
           if identity.epoch != event.epoch || identity.identityRevision != event.identityRevision {
             self.chatGeneration &+= 1
-            self.chatTask?.cancel(); self.chatTask = nil
-            self.chatClient.disconnect(); self.chat.setConnected(false)
-            self.chatIdentity = nil; self.chatAccountMid = nil
-            self.interactionContext = nil; self.ui.retire()
+            self.chatTask?.cancel()
+            self.chatTask = nil
+            self.chatClient.disconnect()
+            self.chat.setConnected(false)
+            self.chatIdentity = nil
+            self.chatAccountMid = nil
+            self.interactionContext = nil
+            self.ui.retire()
             self.chat.reset()
+            self.danmakuAggregator.reset()
             let retired = self.interaction.lifetime.retire()
             await self.interaction.shutdown(lifetimeRevision: retired)
             guard self.active, !Task.isCancelled else { return }
@@ -472,7 +627,10 @@ import Foundation
     chatTask = Task { [weak self, service] in
       guard let self else { return }
       defer {
-        if self.chatGeneration == current { self.chatTask = nil; self.chat.setConnected(false) }
+        if self.chatGeneration == current {
+          self.chatTask = nil
+          self.chat.setConnected(false)
+        }
       }
       let identity: AuthSnapshot
       do {
@@ -501,7 +659,8 @@ import Foundation
         }
         do {
           guard let resolved = self.room else { return }
-          let context = LiveInteractionContext(identity: identity, accountMid: account, roomID: resolved.roomID,
+          let context = LiveInteractionContext(
+            identity: identity, accountMid: account, roomID: resolved.roomID,
             anchorID: resolved.anchorID, generation: current)
           self.interactionContext = context
           let lifetimeRevision = self.interaction.lifetime.revision
@@ -516,22 +675,30 @@ import Foundation
             load: { try await service.liveChatEndpoint(roomID: room, expectedIdentity: identity) },
             isIdentityCurrent: { await Self.matches(identity, service: service) })
           let endpointIdentityMatches = await Self.matches(identity, service: service)
-          guard endpointIdentityMatches, self.active, !Task.isCancelled, self.chatGeneration == current else { return }
+          guard endpointIdentityMatches, self.active, !Task.isCancelled,
+            self.chatGeneration == current
+          else { return }
           #if DEBUG
-          self.chatHasBuvid = !endpoint.buvid.isEmpty
+            self.chatHasBuvid = !endpoint.buvid.isEmpty
           #endif
-          for try await event in self.chatClient.connect(endpoint, budget: budget, isIdentityCurrent: {
-            await Self.matches(identity, service: service)
-          }) {
+          for try await event in self.chatClient.connect(
+            endpoint, budget: budget,
+            isIdentityCurrent: {
+              await Self.matches(identity, service: service)
+            })
+          {
             let eventIdentityMatches = await Self.matches(identity, service: service)
-            guard eventIdentityMatches, self.active, !Task.isCancelled, self.chatGeneration == current else { return }
+            guard eventIdentityMatches, self.active, !Task.isCancelled,
+              self.chatGeneration == current
+            else { return }
             await self.handle(event)
           }
           return
-        } catch is CancellationError { return }
-        catch {
+        } catch is CancellationError { return } catch {
           let failureIdentityMatches = await Self.matches(identity, service: service)
-          guard failureIdentityMatches, self.active, !Task.isCancelled, self.chatGeneration == current else { return }
+          guard failureIdentityMatches, self.active, !Task.isCancelled,
+            self.chatGeneration == current
+          else { return }
           let failure = LiveChatFailure.classify(error)
           self.chat.add(user: "", text: Self.chatMessage(failure), kind: .notice)
           return
@@ -540,7 +707,9 @@ import Foundation
     }
   }
 
-  nonisolated private static func matches(_ identity: AuthSnapshot, service: BiliService) async -> Bool {
+  nonisolated private static func matches(_ identity: AuthSnapshot, service: BiliService) async
+    -> Bool
+  {
     let latest = await service.authSnapshot()
     return identity.epoch == latest.epoch && identity.identityRevision == latest.identityRevision
   }
@@ -561,27 +730,34 @@ import Foundation
       guard active, interactionContext == context else { return }
     }
     #if DEBUG
-    chatEvents += 1
+      chatEvents += 1
     #endif
     guard let event = chatReducer.ingest(event, now: Date().timeIntervalSince1970) else { return }
     ui.receive(event)
     switch event {
     case .connected:
+      // A chat reconnect must not join votes from before and after the connection boundary.
+      danmakuAggregator.reset()
       chat.setConnected(true)
     case .danmaku(let message):
-      let text = message.text, color = message.color
       chat.add(message, accountMid: chatAccountMid)
-      // Stamp with the smooth clock the renderer uses, so a new line enters at the right edge
-      // (the polled time-pos lags it by up to one poll and one video frame).
-      if !ended { player.timeline.append(DanmakuComment(time: player.mediaClock + 0.05, color: color, text: text)) }
+      // The side panel keeps every original line. Only the overlay enters the media-clock batch.
+      if !ended { danmakuAggregator.ingest(message, at: player.mediaClock) }
     case .superChat(let message):
-      let user = message.user, text = message.text, price = message.price
-      chat.add(user: user, text: text, kind: .superChat(price), serverID: message.id, uid: message.uid)
+      let user = message.user
+      let text = message.text
+      let price = message.price
+      chat.add(
+        user: user, text: text, kind: .superChat(price), serverID: message.id, uid: message.uid)
     case .gift(let gift):
       guard interactionSettings.giftMessages else { return }
-      chat.add(user: gift.user, text: "赠送 \(gift.name) ×\(gift.count)", kind: .gift, group: gift.aggregationID, uid: gift.uid, gift: gift)
+      chat.add(
+        user: gift.user, text: "赠送 \(gift.name) ×\(gift.count)", kind: .gift,
+        group: gift.aggregationID, uid: gift.uid, gift: gift)
     case .guardPurchase(let guardMessage):
-      chat.add(user: guardMessage.user, text: "开通大航海 ×\(guardMessage.count)", kind: .guardPurchase(guardMessage.level))
+      chat.add(
+        user: guardMessage.user, text: "开通大航海 ×\(guardMessage.count)",
+        kind: .guardPurchase(guardMessage.level))
     case .superChatDeleted(let ids):
       chat.removeSuperChats(ids)
     case .like(let notice):
@@ -602,22 +778,28 @@ import Foundation
       break
     case .liveStarted:
       if retryBudget.shouldRestartRoom(after: event, roomEnded: ended) {
-        chat.add(user: "", text: "主播开播了", kind: .notice); refresh()
+        chat.add(user: "", text: "主播开播了", kind: .notice)
+        refresh()
       }
     case .liveEnded:
       chat.add(user: "", text: "直播已结束", kind: .notice)
       markEnded()
     case .titleChanged(let title):
-      if let room { self.room = LiveRoomInfo(roomID: room.roomID, shortID: room.shortID, anchorID: room.anchorID,
-        anchorName: room.anchorName, anchorAvatar: room.anchorAvatar, status: room.status, title: title, cover: room.cover,
-        area: room.area, online: room.online, description: room.description, startedAt: room.startedAt) }
+      if let room {
+        self.room = LiveRoomInfo(
+          roomID: room.roomID, shortID: room.shortID, anchorID: room.anchorID,
+          anchorName: room.anchorName, anchorAvatar: room.anchorAvatar, status: room.status,
+          title: title, cover: room.cover,
+          area: room.area, online: room.online, description: room.description,
+          startedAt: room.startedAt)
+      }
     }
   }
 
   static func message(_ error: Error) -> String {
     if case BiliError.api(let code, _) = error {
       switch code {
-      case 60004, 19002000: return "直播间不存在。"
+      case 60004, 19_002_000: return "直播间不存在。"
       case 60005: return "直播间已被封禁。"
       default: return "没能加载直播（代码 \(code)）。"
       }

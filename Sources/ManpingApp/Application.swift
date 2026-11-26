@@ -814,6 +814,11 @@ import SwiftUI
     let features = model.playbackFeatures
     let off = menu.addItem(withTitle: "关闭字幕", action: #selector(chooseSubtitle(_:)), keyEquivalent: "")
     off.target = self; off.state = features.selectedTrackID == nil ? .on : .off
+    if let local = features.localSubtitle {
+      let entry = menu.addItem(withTitle: "本地 · " + local.title, action: #selector(chooseSubtitle(_:)), keyEquivalent: "")
+      entry.target = self; entry.representedObject = local.id
+      entry.state = features.selectedTrackID == local.id ? .on : .off
+    }
     // The same list as the player's 字幕 menu (设置 › 隐藏 AI 字幕 applies here too); each item
     // carries its track id, so filtering never shifts which track an item selects.
     let visible = DownloadSubtitleTrack.filtered(features.tracks, filterAI: model.appSettings.bool(.filterAISubtitle))
@@ -825,6 +830,9 @@ import SwiftUI
       entry.target = self; entry.representedObject = track.id
       entry.state = features.selectedTrackID == track.id ? .on : .off
     }
+    menu.addItem(.separator())
+    let local = menu.addItem(withTitle: "导入本地字幕…", action: #selector(importLocalSubtitle(_:)), keyEquivalent: "")
+    local.target = self
   }
   /// One entry per quality of the open video, in the codec that is playing now.
   private var qualityChoices: [MediaStream] {
@@ -845,6 +853,30 @@ import SwiftUI
       entry.target = self; entry.tag = index
       entry.state = model.selectedStream?.quality == stream.quality ? .on : .off
     }
+    let audio = activeAudioStreams
+    if !audio.isEmpty {
+      menu.addItem(.separator())
+      menu.addItem(withTitle: "音轨", action: nil, keyEquivalent: "").isEnabled = false
+      for stream in audio {
+        let entry = menu.addItem(withTitle: stream.audioTitle + (stream.bandwidth > 0 ? " · \(stream.bandwidth / 1000) kbps" : ""),
+          action: #selector(chooseAudio(_:)), keyEquivalent: "")
+        entry.target = self; entry.representedObject = stream.id
+        entry.state = activeSelectedAudio?.id == stream.id ? .on : .off
+      }
+    }
+  }
+  private var activeAudioStreams: [MediaStream] {
+    if let playback = model.pgcPlayback { return playback.manifest?.audio ?? [] }
+    return model.livePlayback == nil ? model.manifest?.audio ?? [] : []
+  }
+  private var activeSelectedAudio: MediaStream? {
+    if let playback = model.pgcPlayback { return playback.selectedAudio }
+    return model.livePlayback == nil ? model.selectedAudio : nil
+  }
+  @objc private func chooseAudio(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String, let stream = activeAudioStreams.first(where: { $0.id == id }) else { return }
+    if let playback = model.pgcPlayback { playback.changeAudio(stream) }
+    else if model.livePlayback == nil { model.changeAudio(stream) }
   }
   @objc private func chooseSpeed(_ sender: NSMenuItem) {
     guard Self.speeds.indices.contains(sender.tag) else { return }
@@ -853,10 +885,14 @@ import SwiftUI
   @objc private func chooseSubtitle(_ sender: NSMenuItem) {
     let features = model.playbackFeatures
     guard let id = sender.representedObject as? String else { features.selectSubtitle(nil, player: activePlayer); return }
+    if id == features.localSubtitle?.id { return }
     let visible = DownloadSubtitleTrack.filtered(features.tracks, filterAI: model.appSettings.bool(.filterAISubtitle))
     // The list changed since the menu opened (another video, or the track is now filtered out).
     guard let track = visible.first(where: { $0.id == id }) else { return }
     features.selectSubtitle(track, player: activePlayer)
+  }
+  @objc private func importLocalSubtitle(_ sender: NSMenuItem) {
+    Task { await model.playbackFeatures.importLocalSubtitle(player: activePlayer) }
   }
   @objc private func chooseQuality(_ sender: NSMenuItem) {
     let choices = qualityChoices

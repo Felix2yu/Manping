@@ -55,6 +55,7 @@ public enum PlayerArrowAction: String, CaseIterable, Sendable {
 /// stay where they are. See `MacSettingsCatalog.retiredKeys`.
 public enum MacSettingKey: String, CaseIterable, Sendable {
   case theme = "appTheme", codec = "preferredCodec", quality = "preferredVideoQuality", avoidP2P = "playWithoutP2P"
+  case audioQuality = "Manping.audioQuality"
   case stepForward = "Manping.stepForward", stepBackward = "Manping.stepBackward", temporarySpeed = "Manping.temporarySpeed"
   case globalSpeed = "Manping.globalSpeed", bottomProgress = "Manping.bottomProgress", speed = "Manping.playbackSpeed"
   case reportProgress = "Manping.reportProgress", spotlightIndex = "Manping.spotlightIndex", autoSkipClips = "Manping.autoSkipClips"
@@ -66,6 +67,7 @@ public enum MacSettingKey: String, CaseIterable, Sendable {
   case liveSuperChatEffects = "Manping.liveSuperChatEffects", liveLotteryBanner = "Manping.liveLotteryBanner"
   case liveInteractNotices = "Manping.liveInteractNotices"
   case volume = "Manping.defaultVolume", danmakuEnabled = "Manping.danmakuEnabled", danmakuFontSize = "Manping.danmakuFontSize"
+  case liveDanmakuAggregation = "Manping.liveDanmakuAggregation"
   case danmakuOpacity = "Manping.danmakuOpacity", danmakuSpeed = "Manping.danmakuSpeed", screenshotFormat = "Manping.screenshotFormat"
   case danmakuFrameRate = "Manping.danmakuFrameRate", danmakuGlyphStyle = "Manping.danmakuGlyphStyle"
   case videoSmoothMotion = "Manping.videoSmoothMotion", fullscreenSurround = "Manping.fullscreenSurround"
@@ -138,10 +140,11 @@ public struct MacSettingDescriptor: Identifiable, Sendable {
   public let detail: String
   public let control: MacSettingControl
   public let defaultValue: MacSettingValue
+  public var hidden = false
   init(_ key: MacSettingKey, _ group: MacSettingGroup, _ section: String, _ title: String, _ detail: String = "",
-    _ control: MacSettingControl, _ defaultValue: MacSettingValue) {
+    _ control: MacSettingControl, _ defaultValue: MacSettingValue, hidden: Bool = false) {
     self.key = key; self.group = group; self.section = section; self.title = title; self.detail = detail
-    self.control = control; self.defaultValue = defaultValue
+    self.control = control; self.defaultValue = defaultValue; self.hidden = hidden
   }
 }
 /// 「打开视频时」: one choice in the settings window, stored in the two original keys
@@ -213,6 +216,7 @@ public enum MacSettingsCatalog {
     // 播放
     .init(.quality, .playback, "画质与编码", "首选画质", "视频没有这一档时选用最接近的画质。", .choice([MacSettingChoice(.number(0), "自动（沿用上次）"), MacSettingChoice(.number(127), "最高画质"), MacSettingChoice(.number(120), "4K 优先"), MacSettingChoice(.number(80), "1080P 优先"), MacSettingChoice(.number(64), "720P")]), .number(0)),
     .init(.codec, .playback, "画质与编码", "首选编码", "视频提供这种编码时优先使用它。", options([("h264", "H.264"), ("hevc", "HEVC"), ("av1", "AV1")]), .text("h264")),
+    .init(.audioQuality, .playback, "画质与编码", "首选音质", "只选择当前视频实际提供的音轨；播放时也可以单独切换。", options([("auto", "自动"), ("hires", "Hi-Res 优先"), ("flac", "FLAC 优先"), ("dolby", "杜比优先"), ("aac", "AAC")]), .text("auto")),
     .init(.videoSmoothMotion, .playback, "画面", "画面平滑", "适合外接 60 Hz 屏幕播放 24 / 25 帧视频；按屏幕节奏重采样音频并混合相邻帧，可能略软，直播或音画不同步时请关闭。", .toggle, .bool(false)),
     .init(.fullscreenSurround, .playback, "画面", "全屏时画面四周", "只影响全屏，窗口内仍显示氛围色。", options([("black", "纯黑"), ("ambient", "氛围色")]), .text("black")),
     .init(.temporarySpeed, .playback, "进度与倍速", "长按倍速", "在画面上按住时临时加速，松开后恢复原速。", .number(1.1...4, step: 0.1), .number(3)),
@@ -237,6 +241,7 @@ public enum MacSettingsCatalog {
     .init(.danmakuSpeed, .danmaku, "外观", "速度", "数值越大，弹幕越快划过画面。", .number(0.5...2, step: 0.1), .number(1)),
     .init(.danmakuFrameRate, .danmaku, "外观", "弹幕帧率", "「60 帧」更省电。省电时的上限见 设置 › 播放 › 省电。", options([(DanmakuFrameRate.display, "跟随屏幕"), (DanmakuFrameRate.sixty, "60 帧")]), .text(DanmakuFrameRate.display)),
     .init(.danmakuEnabled, .danmaku, "默认显示", "打开视频时显示弹幕", "播放时随时可以用 ⇧⌘D 切换。", .toggle, .bool(true)),
+    .init(.liveDanmakuAggregation, .danmaku, "直播", "合并重复弹幕", "一秒内相同的普通滚动弹幕合并为「干杯 ×11」；聊天栏仍保留原文。", .toggle, .bool(true)),
     // 直播
     .init(
       .livePureMode, .live, "纯享", "纯享模式", "一键关闭下面所有特效和横幅，只看直播画面和弹幕。聊天栏照常显示文字。", .toggle,
@@ -269,13 +274,13 @@ public enum MacSettingsCatalog {
     .init(.smartCache, .network, "缓冲", "智能缓冲", "按码率和最近的卡顿自动调整预读时长与缓存大小。", .toggle, .bool(true)),
     .init(.adaptiveQuality, .network, "缓冲", "网络较差时降低画质", "多次卡顿且带宽低于当前码率时，自动降低一档画质。", .toggle, .bool(true)),
     // 下载与截图
-    .init(.downloadDirectory, .download, "下载", "下载位置", "", .directory, .text("")),
-    .init(.downloadDanmaku, .download, "下载", "同时下载弹幕", "随视频保存一份 XML 弹幕文件。", .toggle, .bool(false)),
-    .init(.filterAISubtitle, .download, "下载", "隐藏 AI 字幕", "下载和选择字幕时不列出 AI 生成的字幕。", .toggle, .bool(true)),
-    .init(.openDownloadFolder, .download, "下载", "下载完成后在 Finder 中显示", "", .toggle, .bool(true)),
-    .init(.externalBBDown, .download, "BBDown", "使用 BBDown 下载", "下载时生成 BBDown 命令由你自行运行，满屏不会执行它。", .toggle, .bool(false)),
-    .init(.copyDownloadCommand, .download, "BBDown", "只拷贝下载命令", "点按「下载」时把命令拷贝到剪贴板，不开始下载。", .toggle, .bool(false)),
-    .init(.bbdownPath, .download, "BBDown", "BBDown 位置", "生成命令时使用的程序，选择文件不会运行它。", .executable, .text("BBDown")),
+    .init(.downloadDirectory, .download, "留影", "下载位置", "使用内置的留影引擎下载视频、音频、弹幕和字幕。", .directory, .text("")),
+    .init(.downloadDanmaku, .download, "留影", "同时下载弹幕", "随视频保存一份 XML 弹幕文件。", .toggle, .bool(false)),
+    .init(.filterAISubtitle, .download, "留影", "隐藏 AI 字幕", "下载和选择字幕时不列出 AI 生成的字幕。", .toggle, .bool(true)),
+    .init(.openDownloadFolder, .download, "留影", "下载完成后在 Finder 中显示", "", .toggle, .bool(true)),
+    .init(.externalBBDown, .download, "BBDown", "使用 BBDown 下载", "", .toggle, .bool(false), hidden: true),
+    .init(.copyDownloadCommand, .download, "BBDown", "只拷贝下载命令", "", .toggle, .bool(false), hidden: true),
+    .init(.bbdownPath, .download, "BBDown", "BBDown 位置", "", .executable, .text("BBDown"), hidden: true),
     .init(.screenshotDirectory, .download, "截图", "截图位置", "", .directory, .text("")),
     .init(.screenshotFormat, .download, "截图", "格式", "每次截取都生成新文件，不覆盖已有图片。", options([("png", "PNG"), ("jpg", "JPEG")]), .text("png")),
     .init(.screenshotAction, .download, "截图", "截取后", "", options([("save", "仅保存"), ("open", "打开图片"), ("copy", "拷贝图片")]), .text("open")),
@@ -313,7 +318,7 @@ public enum MacSettingsCatalog {
   /// A group's sections in catalog order, each with its descriptors.
   public static func sections(of group: MacSettingGroup) -> [(title: String, descriptors: [MacSettingDescriptor])] {
     var result: [(title: String, descriptors: [MacSettingDescriptor])] = []
-    for descriptor in descriptors where descriptor.group == group {
+    for descriptor in descriptors where descriptor.group == group && !descriptor.hidden {
       if let index = result.firstIndex(where: { $0.title == descriptor.section }) { result[index].descriptors.append(descriptor) }
       else { result.append((descriptor.section, [descriptor])) }
     }

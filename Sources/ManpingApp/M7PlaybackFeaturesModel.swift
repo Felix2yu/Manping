@@ -1,6 +1,65 @@
-import ManpingCore
+import AppKit
 import Combine
+import Darwin
 import Foundation
+import ManpingCore
+import UniformTypeIdentifiers
+
+// Swift hides Darwin's variadic open; this binds its non-creating two-argument C ABI.
+@_silgen_name("open") private func systemOpen(_ path: UnsafePointer<CChar>?, _ flags: Int32)
+  -> Int32
+
+struct LocalSubtitleTrack: Identifiable, Equatable {
+  let id = "local"
+  let title: String
+}
+
+enum LocalSubtitleFile {
+  enum Failure: LocalizedError {
+    case unsupportedType, notRegularFile, tooLarge, unreadable
+    var errorDescription: String? {
+      switch self {
+      case .unsupportedType: "请选择 SRT 或 ASS 字幕文件。"
+      case .notRegularFile: "请选择普通的字幕文件，不能是文件夹或符号链接。"
+      case .tooLarge: "字幕文件不能超过 20 MB。"
+      case .unreadable: "无法读取这个字幕文件。"
+      }
+    }
+  }
+  static func stage(_ source: URL, maximumBytes: Int = 20 * 1024 * 1024) throws -> URL {
+    let format = source.pathExtension.lowercased()
+    guard ["srt", "ass"].contains(format) else { throw Failure.unsupportedType }
+    let scoped = source.startAccessingSecurityScopedResource()
+    defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+    let descriptor = source.withUnsafeFileSystemRepresentation {
+      systemOpen($0, O_RDONLY | O_NOFOLLOW)
+    }
+    guard descriptor >= 0 else { throw Failure.unreadable }
+    defer { close(descriptor) }
+    var info = stat()
+    guard fstat(descriptor, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+      throw Failure.notRegularFile
+    }
+    guard info.st_size > 0, info.st_size <= maximumBytes else {
+      throw info.st_size > maximumBytes ? Failure.tooLarge : Failure.notRegularFile
+    }
+    let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+    let data = try handle.read(upToCount: maximumBytes + 1) ?? Data()
+    guard !data.isEmpty, data.count <= maximumBytes else { throw Failure.tooLarge }
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "Manping-Subtitle-" + UUID().uuidString, isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(
+        at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+      let destination = directory.appendingPathComponent("subtitle." + format)
+      try data.write(to: destination, options: .atomic)
+      return destination
+    } catch {
+      try? FileManager.default.removeItem(at: directory)
+      throw error
+    }
+  }
+}
 
 /// Subtitles and danmaku sending for the media that plays now. `AppModel` points it at each
 /// new video, part or episode (`follow`), wherever the picture is (main window, mini window,
@@ -16,6 +75,7 @@ import Foundation
   /// Chapters (`view_points`) from the same player-metadata answer the tracks come from; AI shares it.
   @Published private(set) var viewPoints: [AIViewPoint] = []
   @Published private(set) var selectedTrackID: String?
+  @Published private(set) var localSubtitle: LocalSubtitleTrack?
   @Published private(set) var subtitleLoading = false
   /// The track list for the current media is being read.
   @Published private(set) var tracksLoading = false
@@ -33,7 +93,8 @@ import Foundation
   private var subtitleDirectory: URL?
   private var subtitlePlayer: PlayerModel?
   init(service: BiliService, fixtures: Bool) {
-    self.service = service; self.fixtures = fixtures
+    self.service = service
+    self.fixtures = fixtures
     identityTask = Task { [weak self, service] in
       for await event in await service.identityEvents() {
         guard !Task.isCancelled else { return }
@@ -41,50 +102,118 @@ import Foundation
       }
     }
   }
-  deinit { metadataTask?.cancel(); sendTask?.cancel(); subtitleTask?.cancel(); identityTask?.cancel() }
+  deinit {
+    metadataTask?.cancel()
+    sendTask?.cancel()
+    subtitleTask?.cancel()
+    identityTask?.cancel()
+  }
 
   /// The media now playing (nil when none, or not yet known). The same media keeps its state.
   func follow(aid: Int64?, cid: Int64?) {
-    guard aid != self.aid || cid != self.cid || (identity == nil && metadataTask == nil) else { return }
+    guard aid != self.aid || cid != self.cid || (identity == nil && metadataTask == nil) else {
+      return
+    }
     reset(clearInput: aid != self.aid || cid != self.cid)
-    self.aid = aid; self.cid = cid
+    self.aid = aid
+    self.cid = cid
     load(reselecting: nil, on: nil)
   }
 
   func send(seconds: Double, requestLogin: @escaping () -> Void) {
     guard !sending else { return }
-    guard let aid, let cid, aid > 0, cid > 0 else { message = "视频信息还没有加载完成，暂时不能发送弹幕。"; return }
-    guard let identity else { message = "正在读取登录状态，请稍后再发送。"; return }
-    if identity.state != .appAuthorized && !fixtures { requestLogin(); return }
+    guard let aid, let cid, aid > 0, cid > 0 else {
+      message = "视频信息还没有加载完成，暂时不能发送弹幕。"
+      return
+    }
+    guard let identity else {
+      message = "正在读取登录状态，请稍后再发送。"
+      return
+    }
+    if identity.state != .appAuthorized && !fixtures {
+      requestLogin()
+      return
+    }
     let draft: VideoDanmakuDraft
-    do { draft = try VideoDanmakuDraft(aid: aid, cid: cid, text: input, seconds: seconds,
-      color: color, standardSize: standardSize, mode: mode) }
-    catch { message = error.localizedDescription; return }
-    sending = true; message = nil
+    do {
+      draft = try VideoDanmakuDraft(
+        aid: aid, cid: cid, text: input, seconds: seconds,
+        color: color, standardSize: standardSize, mode: mode)
+    } catch {
+      message = error.localizedDescription
+      return
+    }
+    sending = true
+    message = nil
     let current = generation
     let usesFixtures = fixtures
     sendTask = Task { [weak self, service] in
       do {
-        if !usesFixtures { try await service.sendVideoDanmaku(draft, expectedIdentity: identity) }
-        else { try await Task.sleep(for: .milliseconds(80)) }
+        if !usesFixtures {
+          try await service.sendVideoDanmaku(draft, expectedIdentity: identity)
+        } else {
+          try await Task.sleep(for: .milliseconds(80))
+        }
         guard let self, !Task.isCancelled, current == self.generation else { return }
-        self.input = ""; self.sending = false
+        self.input = ""
+        self.sending = false
         self.message = self.fixtures ? "本地样本：已验证发送动作，未向真实账号发送。" : "弹幕已发送"
       } catch is CancellationError {} catch {
         guard let self, current == self.generation, !Task.isCancelled else { return }
-        self.sending = false; self.message = "没能发送弹幕：\(error.localizedDescription)"
+        self.sending = false
+        self.message = "没能发送弹幕：\(error.localizedDescription)"
       }
+    }
+  }
+  func importLocalSubtitle(player: PlayerModel) async {
+    let panel = NSOpenPanel()
+    panel.title = "导入本地字幕"
+    panel.message = "选择 SRT 或 ASS 字幕文件（最大 20 MB）"
+    panel.allowedContentTypes = ["srt", "ass"].compactMap { UTType(filenameExtension: $0) }
+    panel.allowsMultipleSelection = false
+    panel.canChooseDirectories = false
+    panel.resolvesAliases = true
+    NSApp.activate(ignoringOtherApps: true)
+    let response = await withCheckedContinuation { continuation in
+      panel.begin { continuation.resume(returning: $0) }
+    }
+    guard response == .OK, let source = panel.url else { return }
+    let current = generation
+    do {
+      let destination = try LocalSubtitleFile.stage(source)
+      guard !Task.isCancelled, current == generation else {
+        try? FileManager.default.removeItem(at: destination.deletingLastPathComponent())
+        return
+      }
+      selectSubtitle(nil, player: player)
+      subtitleDirectory = destination.deletingLastPathComponent()
+      subtitlePlayer = player
+      localSubtitle = LocalSubtitleTrack(title: source.lastPathComponent)
+      selectedTrackID = localSubtitle?.id
+      if !fixtures { player.loadSubtitle(url: destination, title: source.lastPathComponent) }
+    } catch is CancellationError {
+    } catch {
+      guard !Task.isCancelled, current == generation else { return }
+      message = "没能导入字幕：\(error.localizedDescription)"
     }
   }
   func selectSubtitle(_ track: DownloadSubtitleTrack?, player: PlayerModel) {
     // Clicking the track that is already loading must not restart (and cancel) the download.
     if let track, subtitleLoading, selectedTrackID == track.id { return }
-    subtitleTask?.cancel(); subtitleTask = nil
+    subtitleTask?.cancel()
+    subtitleTask = nil
+    localSubtitle = nil
     // The chosen track is shown as selected right away; it is cleared again only on failure.
-    player.clearSubtitle(); clearSubtitleFile(); selectedTrackID = nil; subtitleLoading = false
+    player.clearSubtitle()
+    clearSubtitleFile()
+    selectedTrackID = nil
+    subtitleLoading = false
     subtitlePlayer = player
     guard let track else { return }
-    guard let identity else { message = "字幕信息还在加载，请稍后再选。"; return }
+    guard let identity else {
+      message = "字幕信息还在加载，请稍后再选。"
+      return
+    }
     selectedTrackID = track.id
     let current = generation
     subtitleLoading = true
@@ -93,17 +222,24 @@ import Foundation
         let cues = try await service.downloadSubtitleCues(track: track, expectedIdentity: identity)
         try Task.checkCancellation()
         guard let self, current == self.generation else { return }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Manping-Subtitle-" + UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+          "Manping-Subtitle-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+          at: directory, withIntermediateDirectories: true,
           attributes: [.posixPermissions: 0o700])
         let destination = directory.appendingPathComponent("subtitle.srt")
-        do { try DownloadExport.subtitleSRT(cues).write(to: destination, options: .atomic) }
-        catch { try? FileManager.default.removeItem(at: directory); throw error }
-        self.subtitleDirectory = directory; self.selectedTrackID = track.id; self.subtitleLoading = false
+        do { try DownloadExport.subtitleSRT(cues).write(to: destination, options: .atomic) } catch {
+          try? FileManager.default.removeItem(at: directory)
+          throw error
+        }
+        self.subtitleDirectory = directory
+        self.selectedTrackID = track.id
+        self.subtitleLoading = false
         if !self.fixtures { player.loadSubtitle(url: destination, title: track.title) }
       } catch is CancellationError {} catch {
         guard let self, current == self.generation, !Task.isCancelled else { return }
-        self.subtitleLoading = false; self.selectedTrackID = nil
+        self.subtitleLoading = false
+        self.selectedTrackID = nil
         self.message = "没能加载字幕：\(error.localizedDescription)"
       }
     }
@@ -111,7 +247,8 @@ import Foundation
   /// No media: clears the tracks, the shown subtitle and any draft.
   func shutdown() {
     reset(clearInput: true)
-    aid = nil; cid = nil
+    aid = nil
+    cid = nil
   }
 
   // MARK: Loading
@@ -125,16 +262,21 @@ import Foundation
       let snapshot = await service.authSnapshot()
       guard let self, !Task.isCancelled, current == self.generation else { return }
       self.identity = snapshot
-      guard let aid = self.aid, let cid = self.cid, aid > 0, cid > 0 else { self.tracksLoading = false; return }
+      guard let aid = self.aid, let cid = self.cid, aid > 0, cid > 0 else {
+        self.tracksLoading = false
+        return
+      }
       do {
         // One shared request per media and identity: subtitles here, chapters for AI.
-        let metadata = try await service.playerMetadata(aid: aid, cid: cid, expectedIdentity: snapshot)
+        let metadata = try await service.playerMetadata(
+          aid: aid, cid: cid, expectedIdentity: snapshot)
         guard !Task.isCancelled, current == self.generation else { return }
         self.viewPoints = metadata.viewPoints
         guard let result = metadata.subtitles else {
           throw BiliError.invalidResponse(metadata.subtitleError ?? "字幕索引格式无效")
         }
-        self.tracks = result; self.tracksLoading = false
+        self.tracks = result
+        self.tracksLoading = false
         if let trackID, let player, let track = result.first(where: { $0.id == trackID }) {
           self.selectSubtitle(track, player: player)
         }
@@ -148,12 +290,20 @@ import Foundation
     }
   }
 
-  /// Sign-in, sign-out or an account switch: requests made for the old identity are dropped
+  /// Sign-in or sign-out: requests made for the old identity are dropped
   /// and the same media loads again for the new one.
   private func identityChanged(_ event: AuthIdentityEvent) {
-    if let identity, identity.epoch == event.epoch, identity.identityRevision == event.identityRevision { return }
-    guard aid != nil || cid != nil else { identity = nil; return }
-    let reselect = selectedTrackID, player = subtitlePlayer
+    if let identity, identity.epoch == event.epoch,
+      identity.identityRevision == event.identityRevision
+    {
+      return
+    }
+    guard aid != nil || cid != nil else {
+      identity = nil
+      return
+    }
+    let reselect = selectedTrackID
+    let player = subtitlePlayer
     reset(clearInput: false)
     load(reselecting: reselect, on: player)
   }
@@ -161,12 +311,26 @@ import Foundation
   /// Cancels every request and clears what belongs to the previous media or identity; the
   /// followed media itself is kept.
   private func reset(clearInput: Bool) {
-    generation &+= 1; metadataTask?.cancel(); sendTask?.cancel(); subtitleTask?.cancel()
-    metadataTask = nil; sendTask = nil; subtitleTask = nil
-    subtitlePlayer?.clearSubtitle(); subtitlePlayer = nil; clearSubtitleFile()
-    identity = nil; tracks = []; viewPoints = []; message = nil
+    generation &+= 1
+    metadataTask?.cancel()
+    sendTask?.cancel()
+    subtitleTask?.cancel()
+    metadataTask = nil
+    sendTask = nil
+    subtitleTask = nil
+    subtitlePlayer?.clearSubtitle()
+    subtitlePlayer = nil
+    clearSubtitleFile()
+    identity = nil
+    tracks = []
+    viewPoints = []
+    message = nil
+    localSubtitle = nil
     if clearInput { input = "" }
-    sending = false; subtitleLoading = false; tracksLoading = false; selectedTrackID = nil
+    sending = false
+    subtitleLoading = false
+    tracksLoading = false
+    selectedTrackID = nil
   }
   private func clearSubtitleFile() {
     if let directory = subtitleDirectory { try? FileManager.default.removeItem(at: directory) }

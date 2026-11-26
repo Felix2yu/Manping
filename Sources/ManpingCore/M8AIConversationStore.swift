@@ -53,12 +53,11 @@ public struct AIStoredAnswer: Codable, Sendable, Equatable {
   public let createdAt: Date
 }
 
-/// Application-wide AI storage (`Application Support/im.yufei.manping/ai.sqlite`): threads, answers and
-/// segment summaries, every row owned by an account (`mid:<n>`) or `anonymous`.
-///
+/// Application-wide AI storage for the single local user (`Application Support/im.yufei.manping/ai.sqlite`).
+/// The persisted owner keeps existing rows readable across launches; login and logout never change it.
 /// Reads and writes carry a `Ticket` (owner + generation) and are checked under the same lock as
-/// the statement, so after an account change or a clear no stale task can read or write. A clear
-/// first bumps the generation, then empties the three tables in one transaction.
+/// the statement, so after a clear no stale task can read or write. A clear first bumps the
+/// generation, then empties the three tables in one transaction.
 public final class AIConversationStore: @unchecked Sendable {
   public struct Ticket: Sendable, Equatable {
     public let owner: String
@@ -70,7 +69,6 @@ public final class AIConversationStore: @unchecked Sendable {
     public let bytes: Int
   }
   public static let anonymous = "anonymous"
-  public static func owner(mid: Int64?) -> String { mid.map { $0 > 0 ? "mid:\($0)" : anonymous } ?? anonymous }
   public static var defaultURL: URL {
     AppIdentity.applicationSupportDirectory.appendingPathComponent("ai.sqlite")
   }
@@ -102,7 +100,7 @@ public final class AIConversationStore: @unchecked Sendable {
       "CREATE TABLE IF NOT EXISTS answers (key TEXT NOT NULL, owner TEXT NOT NULL, created_at REAL NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (owner, key))",
       "CREATE TABLE IF NOT EXISTS segments (key TEXT NOT NULL, owner TEXT NOT NULL, created_at REAL NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (owner, key))",
     ] { try execute(sql) }
-    // The last owner is remembered so an account change while the app was closed is noticed.
+    // Preserve the last owner used by earlier builds; this app no longer switches owners.
     owner = try metaValue("owner") ?? Self.anonymous
   }
   deinit { sqlite3_close(db) }
@@ -111,21 +109,6 @@ public final class AIConversationStore: @unchecked Sendable {
   public func ticket() -> Ticket { lock.withLock { Ticket(owner: owner, generation: generation) } }
   public func isCurrent(_ ticket: Ticket) -> Bool { lock.withLock { ticket.owner == owner && ticket.generation == generation } }
 
-  /// Makes `newOwner` the readable owner. With `purgeOthers`, rows of every other owner are deleted
-  /// (account switch); without, they only become unreadable (signed-out window before restore).
-  public func switchOwner(to newOwner: String, purgeOthers: Bool) throws {
-    try lock.withLock {
-      guard newOwner != owner || purgeOthers else { return }
-      generation &+= 1
-      owner = newOwner
-      try setMeta("owner", newOwner)
-      if purgeOthers {
-        try transaction {
-          for table in ["threads", "answers", "segments"] { try run("DELETE FROM \(table) WHERE owner <> ?", [.text(newOwner)]) }
-        }
-      }
-    }
-  }
   /// Invalidates in-flight work, then removes every row of every owner.
   public func clearAll() throws {
     try lock.withLock {
@@ -269,43 +252,5 @@ public final class AIConversationStore: @unchecked Sendable {
   }
   private func setMeta(_ key: String, _ value: String) throws {
     try run("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", [.text(key), .text(value)])
-  }
-}
-
-/// Keeps the store's owner in step with the signed-in account. Only an account change moves
-/// data: a new login or restore that only bumps epoch/revision changes nothing; switching to a
-/// different account deletes the previous account's rows; signing out after an account was
-/// active in this process deletes everything; the signed-out moment at launch (before the saved
-/// login is restored) only makes rows unreadable.
-public actor AIIdentityCoordinator {
-  private let store: AIConversationStore
-  private var accountSeen = false
-  public init(store: AIConversationStore) { self.store = store }
-  public func apply(mid: Int64?, state: AuthorizationState) throws {
-    let next = AIConversationStore.owner(mid: mid)
-    let current = store.currentOwner
-    if next == current { if mid != nil { accountSeen = true }; return }
-    if mid == nil {
-      if accountSeen && state == .needsLogin {
-        try store.clearAll()
-        try store.switchOwner(to: next, purgeOthers: false)
-      } else {
-        try store.switchOwner(to: next, purgeOthers: false)
-      }
-      return
-    }
-    accountSeen = true
-    try store.switchOwner(to: next, purgeOthers: true)
-  }
-  /// Follows the service's identity events for the life of the returned task.
-  public nonisolated func follow(_ service: BiliService) -> Task<Void, Never> {
-    Task { [weak service] in
-      guard let events = await service?.identityEvents() else { return }
-      for await event in events {
-        guard !Task.isCancelled, let service else { return }
-        let mid = await service.accountMid()
-        try? await self.apply(mid: mid, state: event.state)
-      }
-    }
   }
 }

@@ -4,19 +4,206 @@ public struct DanmakuComment: Equatable, Sendable {
   public let time: Double
   public let mode: Int
   public let color: UInt32
+  /// Exact source text. Filtering, density and AI material always use this, never `displayText`.
   public let text: String
+  /// Presentation-only text (for example `干杯 ×11`). Nil means the source text is displayed.
+  public let displayText: String?
   /// Server smart-shield weight (0–11) when the source provides it.
   public let weight: Int?
   /// The sender's hashed id (list.so `p[6]`), used by account user shields.
   public let userHash: String?
   public init(time: Double, mode: Int = 1, color: UInt32 = 0xffffff, text: String, weight: Int? = nil,
-    userHash: String? = nil) {
+    userHash: String? = nil, displayText: String? = nil) {
     self.time = time
     self.mode = mode
     self.color = color
     self.text = text
+    self.displayText = displayText
     self.weight = weight
     self.userHash = userHash
+  }
+  /// Text used only for lane measurement and glyph rasterization.
+  public var displayedText: String { displayText ?? text }
+}
+
+/// Batches live, plain scrolling comments for presentation only. The source chat and downloaded
+/// XML are never changed. Windows use the media clock supplied by the caller, not wall time: a
+/// paused player may flush every 100 ms without closing a window.
+///
+/// A group covers the half-open interval `[first media time, first + 1 second)`. Its key is the
+/// exact text, color and mode; sender identity is deliberately absent. Non-scrolling, rich and
+/// unknown comments pass through. At the group limit a new key passes through unchanged; at the
+/// count limit a group is sealed and later comments start another group, so neither limit silently
+/// discards a line. Published comments are values and are never rewritten by a later ingest.
+public struct DanmakuBatchAggregator: Sendable {
+  public struct Configuration: Sendable, Equatable {
+    public static let enabledKey = "Manping.liveDanmakuAggregation"
+    public static let maximumGroupsKey = "Manping.liveDanmakuAggregationMaxGroups"
+    public static let maximumCountKey = "Manping.liveDanmakuAggregationMaxCount"
+    public static let defaultMaximumGroups = 64
+    public static let defaultMaximumCount = 100
+    public static let maximumAllowedGroups = 256
+    public static let maximumAllowedCount = 1_000
+
+    public var enabled: Bool
+    public var maximumGroups: Int
+    public var maximumCount: Int
+
+    public init(enabled: Bool = true, maximumGroups: Int = Self.defaultMaximumGroups,
+      maximumCount: Int = Self.defaultMaximumCount) {
+      self.enabled = enabled
+      self.maximumGroups = min(Self.maximumAllowedGroups, max(1, maximumGroups))
+      self.maximumCount = min(Self.maximumAllowedCount, max(2, maximumCount))
+    }
+
+    /// Reads the live-only aggregation controls without affecting archived danmaku. Missing keys
+    /// use the defaults; malformed or out-of-range stored limits are clamped.
+    public static func load(from defaults: any PreferencesStore) -> Configuration {
+      let enabled = defaults.object(forKey: enabledKey) == nil ? true : defaults.bool(forKey: enabledKey)
+      return Configuration(enabled: enabled,
+        maximumGroups: defaults.object(forKey: maximumGroupsKey) == nil ? defaultMaximumGroups
+          : defaults.integer(forKey: maximumGroupsKey),
+        maximumCount: defaults.object(forKey: maximumCountKey) == nil ? defaultMaximumCount
+          : defaults.integer(forKey: maximumCountKey))
+    }
+  }
+
+  private struct Key: Hashable, Sendable {
+    let text: String
+    let color: UInt32
+    let mode: Int
+  }
+  private struct Group {
+    let key: Key
+    let comment: DanmakuComment
+    let startedAt: Double
+    let sequence: UInt64
+    var count: Int
+  }
+  private struct Output {
+    let comment: DanmakuComment
+    let mediaTime: Double
+    let sequence: UInt64
+  }
+
+  public static let window: TimeInterval = 1
+  public let configuration: Configuration
+  private var groups: [Key: Group] = [:]
+  private var order: [Key] = []
+  private var ready: [Output] = []
+  private var direct: [Output] = []
+  private var lastMediaTime = -Double.infinity
+  private var nextSequence: UInt64 = 0
+  /// Active aggregation groups; sealed and passthrough outputs await the next explicit flush.
+  public var pendingCount: Int { groups.count }
+
+  public init(configuration: Configuration = Configuration()) {
+    self.configuration = configuration
+  }
+
+  /// Adds one presentation comment. Returns false for invalid or stale media timestamps; callers
+  /// must `reset()` when a reload or seek restarts the media clock.
+  @discardableResult public mutating func ingest(
+    _ comment: DanmakuComment, at mediaTime: Double, aggregate: Bool = true
+  ) -> Bool {
+    guard mediaTime.isFinite, mediaTime >= 0, mediaTime >= lastMediaTime else { return false }
+    lastMediaTime = mediaTime
+    expire(at: mediaTime)
+    guard comment.mode == 1, aggregate, configuration.enabled, !comment.text.isEmpty else {
+      appendDirect(comment, at: mediaTime)
+      return true
+    }
+    let key = Key(text: comment.text, color: comment.color, mode: comment.mode)
+    if var group = groups[key] {
+      guard group.count < configuration.maximumCount else {
+        // The ingest that reached the cap already sealed this group.
+        appendDirect(comment, at: mediaTime)
+        return true
+      }
+      group.count += 1
+      groups[key] = group
+      if group.count == configuration.maximumCount { seal(key) }
+    } else if order.count < configuration.maximumGroups {
+      let sequence = advanceSequence()
+      groups[key] = Group(key: key, comment: comment, startedAt: mediaTime, sequence: sequence, count: 1)
+      order.append(key)
+    } else {
+      // Keep the active group dictionary bounded without dropping the new overlay line.
+      appendDirect(comment, at: mediaTime)
+    }
+    return true
+  }
+
+  /// Live chat conversion keeps rich messages and every non-scrolling mode out of vote groups.
+  @discardableResult public mutating func ingest(_ message: LiveDanmaku, at mediaTime: Double) -> Bool {
+    let comment = DanmakuComment(time: mediaTime, mode: Int(message.mode), color: message.color, text: message.text)
+    return ingest(comment, at: mediaTime, aggregate: Self.isPlainScrollingText(message))
+  }
+
+  /// Emits all sealed and passthrough comments, then closes windows elapsed at this media time.
+  /// Every returned timestamp is the current media time, so output is nondecreasing and a batch
+  /// delayed by a busy main thread enters at the renderer's now rather than halfway across screen.
+  public mutating func flush(at mediaTime: Double) -> [DanmakuComment] {
+    guard mediaTime.isFinite, mediaTime >= 0, mediaTime >= lastMediaTime else { return [] }
+    lastMediaTime = mediaTime
+    expire(at: mediaTime)
+    var output = ready
+    output.append(contentsOf: direct)
+    ready.removeAll(keepingCapacity: true)
+    direct.removeAll(keepingCapacity: true)
+    output.sort { $0.mediaTime != $1.mediaTime ? $0.mediaTime < $1.mediaTime : $0.sequence < $1.sequence }
+    return output.map { DanmakuComment(time: mediaTime, mode: $0.comment.mode, color: $0.comment.color,
+      text: $0.comment.text, weight: $0.comment.weight, userHash: $0.comment.userHash,
+      displayText: $0.comment.displayText) }
+  }
+
+  /// Forgets pending groups and the media-clock checkpoint on reload/reconnect.
+  public mutating func reset() {
+    groups.removeAll(keepingCapacity: true)
+    order.removeAll(keepingCapacity: true)
+    ready.removeAll(keepingCapacity: true)
+    direct.removeAll(keepingCapacity: true)
+    lastMediaTime = -Double.infinity
+    nextSequence = 0
+  }
+
+  private mutating func expire(at mediaTime: Double) {
+    let expired = order.filter { groups[$0].map { mediaTime >= $0.startedAt + Self.window } ?? false }
+    for key in expired { seal(key) }
+  }
+
+  private mutating func seal(_ key: Key) {
+    guard let group = groups.removeValue(forKey: key) else { return }
+    order.removeAll { $0 == key }
+    let displayText = group.count > 1 ? group.comment.text + " ×\(group.count)" : nil
+    ready.append(Output(comment: DanmakuComment(time: group.comment.time, mode: group.comment.mode,
+      color: group.comment.color, text: group.comment.text, weight: group.comment.weight,
+      userHash: group.comment.userHash, displayText: displayText), mediaTime: group.startedAt,
+      sequence: group.sequence))
+  }
+
+  private mutating func appendDirect(_ comment: DanmakuComment, at mediaTime: Double) {
+    direct.append(Output(comment: comment, mediaTime: mediaTime, sequence: advanceSequence()))
+  }
+
+  private mutating func advanceSequence() -> UInt64 {
+    nextSequence &+= 1
+    return nextSequence
+  }
+
+  private static func isPlainScrollingText(_ message: LiveDanmaku) -> Bool {
+    message.mode == 1 && message.dmType == 0 && !message.text.isEmpty
+      && isEmpty(message.emotes) && isEmpty(message.roomEmote) && isEmpty(message.reply)
+      && (message.emoticonUnique?.isEmpty ?? true)
+  }
+
+  private static func isEmpty(_ value: LiveJSON) -> Bool {
+    switch value {
+    case .null: true
+    case .object(let values): values.isEmpty
+    case .array(let values): values.isEmpty
+    default: false
+    }
   }
 }
 public final class DanmakuParser: NSObject, XMLParserDelegate {
@@ -259,7 +446,7 @@ public struct DanmakuTimeline: Sendable {
       lane = lanes.firstIndex { $0.fixedUntil <= time && $0.start + crossing <= time }
       if let lane { lanes[lane].fixedUntil = time + fixedDuration }
     default:
-      let length = Self.estimatedLength(comment.text)
+      let length = Self.estimatedLength(comment.displayedText)
       let width = Self.assumedWidth
       lane = lanes.firstIndex { previous in
         guard previous.fixedUntil <= time else { return false }

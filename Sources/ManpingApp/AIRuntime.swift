@@ -10,9 +10,8 @@ struct AITimelineMarks: Equatable {
 }
 
 /// The app's AI pieces, created once at launch: presets and settings, the conversation service
-/// on `ai.sqlite` (memory-only fixtures in screenshot builds), the account follower that moves or
-/// clears saved answers, the retention purge, and one panel model per recently shown source so
-/// an answer keeps streaming while another tab is shown.
+/// on `ai.sqlite` (memory-only fixtures in screenshot builds), the retention purge, and one panel
+/// model per recently shown source so an answer keeps streaming while another tab is shown.
 @MainActor final class AIRuntime: ObservableObject {
   let presets: AIPresetStore
   let conversations: AIConversationService?
@@ -26,14 +25,11 @@ struct AITimelineMarks: Equatable {
   let storeError: String?
   /// The first-use note at the top of the panel has been read.
   @Published private(set) var introShown: Bool
-  /// Bumped after 清除全部 or an account change; panels reload their threads.
+  /// Bumped after 清除全部; panels reload their threads.
   @Published private(set) var generation = 0
   /// The model picked last in any panel; new panels start with it.
   var lastModel: (provider: AIProvider, modelID: String)?
   private weak var app: AppModel?
-  private let coordinator: AIIdentityCoordinator?
-  private var identityFollow: Task<Void, Never>?
-  private var identityTask: Task<Void, Never>?
   private var configurationTask: Task<Void, Never>?
   private var purgeTask: Task<Void, Never>?
   private var retentionObservation: AnyCancellable?
@@ -45,9 +41,9 @@ struct AITimelineMarks: Equatable {
 
   init(app: AppModel) {
     self.app = app
-    service = app.service
     configuration = app.aiConfiguration
     prompts = app.aiPrompts
+    service = app.service
     fixtures = app.usesUIFixtures
     presets = AIPresetStore(fixtures: fixtures)
     #if DEBUG
@@ -60,7 +56,7 @@ struct AITimelineMarks: Equatable {
     #endif
     introShown = fixtures ? scene != "intro" && scene != nil : PerformanceEnvironment.defaults.bool(forKey: Self.introKey)
     if fixtures {
-      conversations = try? AIConversationService.fixture(); coordinator = nil; storeError = nil
+      conversations = try? AIConversationService.fixture(); storeError = nil
     } else {
       do {
         let store = try AIConversationStore(url: AIConversationStore.defaultURL)
@@ -72,29 +68,17 @@ struct AITimelineMarks: Equatable {
             guard let app, app.hasArchiveServer else { return [] }
             return (try? await app.clientHistory.recent(limit: 20)) ?? []
           })
-        coordinator = AIIdentityCoordinator(store: store); storeError = nil
+        storeError = nil
       } catch {
-        conversations = nil; coordinator = nil; storeError = "没能打开 AI 对话数据库，回答不会保存。"
+        conversations = nil; storeError = "没能打开 AI 对话数据库，回答不会保存。"
       }
     }
   }
 
-  /// Called at launch: follows the account and starts the retention purge.
+  /// Called at launch: starts configuration updates and the retention purge.
   func start() {
     guard !started else { return }
     started = true
-    if let coordinator {
-      identityFollow = coordinator.follow(service)
-      // Panels reload after the owner switch; applying here too keeps the order (apply is idempotent).
-      identityTask = Task { [weak self, service, coordinator] in
-        for await event in await service.identityEvents() {
-          guard !Task.isCancelled else { return }
-          let mid = await service.accountMid()
-          try? await coordinator.apply(mid: mid, state: event.state)
-          self?.identityChanged()
-        }
-      }
-    }
     configurationTask = Task { [weak self, configuration] in
       var first = true
       for await _ in await configuration.changes() {
@@ -117,17 +101,13 @@ struct AITimelineMarks: Equatable {
     }
   }
   func shutdown() {
-    identityFollow?.cancel(); identityTask?.cancel(); configurationTask?.cancel(); purgeTask?.cancel()
+    configurationTask?.cancel(); purgeTask?.cancel()
     for panel in panels.values { panel.shutdown() }
     Task { [conversations] in await conversations?.cancelAll() }
   }
   private func purge() {
     let days = presets.retentionDays
     Task { [conversations] in try? await conversations?.purgeExpired(retentionDays: days) }
-  }
-  private func identityChanged() {
-    generation &+= 1
-    for panel in panels.values { panel.identityChanged() }
   }
   private func configurationChanged() {
     for panel in panels.values { panel.configurationChanged() }
@@ -243,8 +223,7 @@ extension AppModel {
 }
 
 extension AppModel {
-  /// Launch: the conversation service and account follower start now so a sign-out clears
-  /// saved answers even before the AI panel is opened.
+  /// Launch: conversation storage and retention start even before the AI panel is opened.
   func configureAI() {
     clipPlayback.configure(currentMedia: { [weak self] in self?.aiMediaKey },
       activePlayer: { [weak self] in self.map { $0.pgcPlayback?.player ?? $0.player } },

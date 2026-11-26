@@ -9,8 +9,11 @@ public struct PlaybackBrowsingState: Equatable, Sendable {
     public let epoch: UInt64
     public let revision: UInt64
     public init(player: UUID, media: String, generation: UUID, epoch: UInt64, revision: UInt64) {
-      self.player = player; self.media = media; self.generation = generation
-      self.epoch = epoch; self.revision = revision
+      self.player = player
+      self.media = media
+      self.generation = generation
+      self.epoch = epoch
+      self.revision = revision
     }
   }
   public struct Suspension: Equatable, Sendable {
@@ -22,9 +25,12 @@ public struct PlaybackBrowsingState: Equatable, Sendable {
   public private(set) var isBrowsing = false
   public init() {}
   public var allowsAutomaticAdvance: Bool { !isBrowsing }
-  public enum PresentationChange: Sendable { case externalWindow, nativeFullScreen, playbackFullScreen }
+  public enum PresentationChange: Sendable {
+    case externalWindow, nativeFullScreen, playbackFullScreen
+  }
   /// Native full-screen transitions keep the current page; explicit picture placement ends browsing.
-  public mutating func presentationChanged(_ change: PresentationChange, binding: Binding) -> Bool? {
+  public mutating func presentationChanged(_ change: PresentationChange, binding: Binding) -> Bool?
+  {
     switch change {
     case .nativeFullScreen: return nil
     case .externalWindow, .playbackFullScreen: return finishForPlacement(binding: binding)
@@ -35,17 +41,22 @@ public struct PlaybackBrowsingState: Equatable, Sendable {
     public let pause: Bool
   }
   /// A nested page never overwrites the original playback intention or return depth.
-  @discardableResult public mutating func enter(binding: Binding, depth: Int, playing: Bool) -> EntryEffects {
+  @discardableResult public mutating func enter(binding: Binding, depth: Int, playing: Bool)
+    -> EntryEffects
+  {
     if !isBrowsing {
       isBrowsing = true
       suspension = Suspension(binding: binding, depth: depth, wasPlaying: playing)
     }
     return EntryEffects(cancelNextPlayback: true, pause: true)
   }
-  /// nil means a nested return; false means return without permission to resume.
-  public mutating func returnToPlayback(binding: Binding, depth: Int, playbackVisible: Bool) -> Bool? {
-    guard isBrowsing, playbackVisible else { return nil }
-    let resume = suspension.map { $0.binding == binding && $0.depth == depth && $0.wasPlaying } ?? false
+  /// nil keeps browsing parked (nested navigation or revoked suspension); false returns without permission to resume.
+  public mutating func returnToPlayback(binding: Binding, depth: Int, playbackVisible: Bool)
+    -> Bool?
+  {
+    guard isBrowsing, suspension != nil, playbackVisible else { return nil }
+    let resume =
+      suspension.map { $0.binding == binding && $0.depth == depth && $0.wasPlaying } ?? false
     reset()
     return resume
   }
@@ -58,5 +69,8 @@ public struct PlaybackBrowsingState: Equatable, Sendable {
   }
   /// Identity or queue invalidation revokes auto-resume while leaving the overlay visible.
   public mutating func invalidate() { suspension = nil }
-  public mutating func reset() { suspension = nil; isBrowsing = false }
+  public mutating func reset() {
+    suspension = nil
+    isBrowsing = false
+  }
 }

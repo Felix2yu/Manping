@@ -4,11 +4,10 @@ import Foundation
 import GRPCCore
 import SwiftProtobuf
 
-// Exact upstream GrpcConfig profile; injectable outer buvid is derived from this app's local ID.
-// The upstream profile buvid intentionally differs from its outer installation buvid.
+// Upstream GrpcConfig field profile with one consistent installation-derived buvid. The upstream
+// constant intentionally disagreed with its outer buvid; Manping does not mix those identities.
 struct BiliRPCMetadata: Sendable {
   let installationID: String
-  static let profileBuvid = "XZFD48CFF1E68E637D0DF11A562468A8DC314"
   static func outerBuvid(_ id: String) -> String {
     let hash = Array(WBI.md5(id.replacingOccurrences(of: ":", with: "")))
     return "XY\(hash[2])\(hash[12])\(hash[22])" + String(hash)
@@ -20,14 +19,15 @@ struct BiliRPCMetadata: Sendable {
     let token = snapshot.state == .appAuthorized ? snapshot.token : nil
     for (key, value) in snapshot.tokenHeaders { headers.addString(value, forKey: key) }
     headers.addString(
-      "bili-universal/80200100 os/ios model/iPhone 14 Pro mobi_app/iphone_i osVer/16.6 network/2 grpc-objc/1.47.0 grpc-c/25.0.0 (ios; cronet_http)",
+      "bili-universal/80200100 os/ios model/iPhone 14 Pro mobi_app/iphone_i osVer/16.6 network/2 Manping/1.0 (iPhone; iOS 16.6) grpc-swift-2/2.4.3",
       forKey: "user-agent")
+    let buvid = Self.outerBuvid(installationID)
     var device = Bilibili_Metadata_Device_Device()
     device.appID = 1
     device.mobiApp = "iphone"
     device.build = 6_070_600
     device.channel = "bilibili140"
-    device.buvid = Self.profileBuvid
+    device.buvid = buvid
     device.platform = "iphone"
     device.brand = "Apple"
     device.model = "iPhone 14 Pro"
@@ -37,7 +37,7 @@ struct BiliRPCMetadata: Sendable {
     metadata.mobiApp = "iphone"
     metadata.build = 6_070_600
     metadata.channel = "bilibili140"
-    metadata.buvid = Self.profileBuvid
+    metadata.buvid = buvid
     metadata.platform = "iphone"
     var fawkes = Bilibili_Metadata_Fawkes_FawkesReq()
     fawkes.appkey = "iphone"
@@ -76,7 +76,7 @@ struct BiliRPCMetadata: Sendable {
       + [24, 16, 8].map { String(format: "%02x", (timestamp >> $0) & 255) }.joined()
       + String(random.suffix(2))
     headers.addString("\(trace):\(trace.suffix(16)):0:0", forKey: "x-bili-trace-id")
-    headers.addString(Self.outerBuvid(installationID), forKey: "buvid")
+    headers.addString(buvid, forKey: "buvid")
     // Framing, TE, timeout and compression negotiation are owned by the native gRPC transport.
     return headers
   }

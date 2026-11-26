@@ -428,7 +428,9 @@ struct VideoDetailPage: View {
   /// 画质 and 字幕 come from this page; the rest of the bar is shared (设置 › 控制条).
   private var barPage: PlayerBarPage {
     PlayerBarPage(slots: [
-      .quality: .quality(streams: playableStreams, selected: model.selectedStream) { model.changeQuality($0) },
+      .quality: .quality(streams: playableStreams, selected: model.selectedStream,
+        choose: { model.changeQuality($0) }, audioStreams: model.manifest?.audio ?? [],
+        selectedAudio: model.selectedAudio, chooseAudio: { model.changeAudio($0) }),
       .subtitle: .subtitle(features: features, player: player, filterAI: model.appSettings.bool(.filterAISubtitle)),
     ], downloadEnabled: model.manifest != nil,
       bookmarkTime: { fixturePlayback ? fixtureTime : player.time },
