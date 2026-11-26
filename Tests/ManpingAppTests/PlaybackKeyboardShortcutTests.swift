@@ -13,6 +13,7 @@ import XCTest
     let cases: [(String, NSEvent.ModifierFlags, PlaybackShortcut)] = [
       ("a", [], .home), ("b", [], .player), ("g", [], .zoom), ("s", [], .compact),
       ("x", [], .info), ("c", [], .comments), ("v", [], .share), ("d", [], .toggleDanmaku),
+      ("p", [], .detached),
       ("m", [], .mute), ("f", [], .fullScreen), ("\u{1b}", [], .exitFullScreen),
       ("\t", .control, .cycleWindows),
     ]

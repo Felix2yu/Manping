@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
     unsetenv("MANPING_CAPTURE_PATH");
     char error[2048] = {0};
     fixture f = {.width=atoi(argv[4]), .height=atoi(argv[5]), .capture=argv[3]};
-    f.mpv = bili_mpv_create(argv[1], error, sizeof(error));
+    f.mpv = bili_mpv_create(argv[1], 0, error, sizeof(error));
     if (!f.mpv) { fprintf(stderr, "%s\n", error); return 1; }
     bili_mpv_log_level(f.mpv, "trace");
     const char *options[][2] = {{"hwdec","no"},{"mute","yes"},

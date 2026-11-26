@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import ManpingCore
+import SwiftUI
 import XCTest
 
 @testable import ManpingApp
@@ -15,6 +16,18 @@ private final class NoCredentials: AuthCredentialStore, @unchecked Sendable {
 
 private struct Offline: AuthTransport {
   func send(_ request: URLRequest) async throws -> AuthHTTPResponse { throw URLError(.notConnectedToInternet) }
+}
+
+private struct SearchToolbarHarness: View {
+  @ObservedObject var app: AppModel
+  @ObservedObject var suggestions: SearchSuggestionModel
+
+  var body: some View {
+    M3SearchBox(suggestions: suggestions, text: $app.search, suggestionsEnabled: false,
+      currentScopeName: nil, active: app.browsingPageActive,
+      focusRequest: app.searchFocusRequest, hotRequest: app.hotSearchRequest) { _, _ in }
+      .frame(width: 360)
+  }
 }
 
 /// Navigation and playback placement without online transports or native playback windows.
@@ -41,6 +54,48 @@ private struct Offline: AuthTransport {
   private func returnExternalPicture(_ app: AppModel, mode: MacOpenMode) {
     if mode == .compact { app.closeMiniPlayer(activateMain: false) }
     else { app.togglePlaybackWindow() }
+  }
+
+  private func settleFocus(_ view: NSView) async throws {
+    for _ in 0..<20 {
+      view.layoutSubtreeIfNeeded()
+      try await Task.sleep(for: .milliseconds(10))
+    }
+  }
+
+  func testPlaybackReleasesToolbarSearchFocusWithoutDisablingLaterSearch() async throws {
+    let app = model()
+    defer { app.shutdown() }
+    let suggestions = SearchSuggestionModel(model: app)
+    let host = NSHostingView(rootView: SearchToolbarHarness(app: app, suggestions: suggestions))
+    host.frame = CGRect(x: 0, y: 0, width: 600, height: 120)
+    let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = host
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+    defer { window.close() }
+
+    try await settleFocus(host)
+    app.searchFocusRequest += 1
+    try await settleFocus(host)
+    XCTAssertTrue(PlaybackKeyboardInput.blocksShortcut(window.firstResponder), "fixture must start with the search editor focused")
+
+    await openVideo(app)
+    try await settleFocus(host)
+    XCTAssertFalse(app.browsingPageActive)
+    XCTAssertFalse(PlaybackKeyboardInput.blocksShortcut(window.firstResponder), "playback must not inherit the toolbar search editor")
+
+    app.searchFocusRequest += 1
+    try await settleFocus(host)
+    XCTAssertFalse(PlaybackKeyboardInput.blocksShortcut(window.firstResponder), "a stale request must not refocus search during playback")
+
+    app.goBack()
+    try await settleFocus(host)
+    XCTAssertTrue(app.browsingPageActive)
+    app.searchFocusRequest += 1
+    try await settleFocus(host)
+    XCTAssertTrue(PlaybackKeyboardInput.blocksShortcut(window.firstResponder), "explicit search must still focus after returning")
   }
 
   func testBackAndForwardWalkTheOverlayStack() {
@@ -88,6 +143,8 @@ private struct Offline: AuthTransport {
     let source = app.browsingPage
     let refresh = app.refreshToken
     await openVideo(app)
+    let player = app.player
+    player.set("pause", "yes")
     XCTAssertEqual(app.browsingPage, source)
     XCTAssertFalse(app.browsingPageActive)
     app.goBack()
@@ -97,8 +154,19 @@ private struct Offline: AuthTransport {
     XCTAssertTrue(app.browsingPageActive)
     XCTAssertEqual(app.refreshToken, refresh)
     XCTAssertEqual(app.regionalSearchRequest?.revision, request)
-    XCTAssertFalse(app.hasPlayback)
-    XCTAssertFalse(app.canGoForward, "players must never be retained in forward history")
+    XCTAssertTrue(app.hasPlayback)
+    XCTAssertTrue(app.pausedBrowsing.isBrowsing)
+    XCTAssertTrue(app.player === player)
+    XCTAssertTrue(app.canGoForward)
+    app.goForward()
+    await settle()
+    XCTAssertEqual(app.currentOverlay, .video(video.id))
+    XCTAssertTrue(app.mainShowsPlayer)
+    XCTAssertFalse(app.pausedBrowsing.isBrowsing)
+    XCTAssertTrue(app.player === player)
+    XCTAssertTrue(app.player.paused)
+    XCTAssertFalse(app.canGoForward)
+    XCTAssertEqual(app.refreshToken, refresh)
   }
 
   func testEveryBrowsingDestinationRetainsItsIdentityAcrossVideoBack() async {
@@ -137,24 +205,31 @@ private struct Offline: AuthTransport {
         await settle()
         if mode == .compact { app.toggleCompactPlayer() }
         else if mode == .detached { app.togglePlaybackWindow() }
-        XCTAssertEqual(app.currentOverlay, route)
-        XCTAssertEqual(app.browsingPage, source)
-        XCTAssertFalse(app.browsingPageActive)
+        if mode == .detached {
+          XCTAssertEqual(app.currentOverlay, .search("播放来源"))
+          XCTAssertTrue(app.browsingPageActive)
+        } else {
+          XCTAssertEqual(app.currentOverlay, route)
+          XCTAssertEqual(app.browsingPage, source)
+          XCTAssertFalse(app.browsingPageActive)
+        }
         app.goBack()
         await settle()
-        XCTAssertEqual(app.currentOverlay, .search("播放来源"))
-        XCTAssertEqual(app.browsingPage, source)
+        let backedSource = app.browsingPage
+        XCTAssertEqual(app.currentOverlay, mode == .detached ? nil : .search("播放来源"))
+        XCTAssertEqual(app.browsingPage, backedSource)
         XCTAssertTrue(app.browsingPageActive)
-        XCTAssertEqual(app.refreshToken, refresh)
+        let backRefresh = app.refreshToken
+        XCTAssertEqual(backRefresh, refresh + (mode == .detached ? 1 : 0))
         if mode != .mainWindow {
           returnExternalPicture(app, mode: mode)
           XCTAssertEqual(app.currentOverlay, route)
-          XCTAssertEqual(app.browsingPage, source)
+          XCTAssertEqual(app.browsingPage, backedSource)
           XCTAssertFalse(app.browsingPageActive)
           app.goBack()
           await settle()
           XCTAssertTrue(app.browsingPageActive)
-          XCTAssertEqual(app.refreshToken, refresh)
+          XCTAssertEqual(app.refreshToken, backRefresh)
         }
         XCTAssertFalse(app.hasPlayback)
       }
@@ -169,24 +244,29 @@ private struct Offline: AuthTransport {
       let source = app.browsingPage
       let refresh = app.refreshToken
       await openVideo(app, mode: mode)
-      XCTAssertTrue(app.mainShowsPlayer && app.playbackElsewhere, "the placeholder covers the source")
-      XCTAssertFalse(app.browsingPageActive)
+      XCTAssertEqual(app.mainShowsPlayer && app.playbackElsewhere, mode == .compact)
+      XCTAssertEqual(app.browsingPageActive, mode == .detached, "detached playback leaves the source interactive")
       XCTAssertEqual(app.browsingPage, source)
       app.goBack()
       await settle()
       XCTAssertTrue(app.browsingBesidePlayback && app.hasPlayback)
       XCTAssertTrue(app.browsingPageActive)
-      XCTAssertEqual(app.currentOverlay, .userSpace(42))
-      XCTAssertEqual(app.refreshToken, refresh)
+      XCTAssertEqual(app.currentOverlay, mode == .compact ? .userSpace(42) : nil)
+      let backRefresh = app.refreshToken
+      XCTAssertEqual(backRefresh, refresh + (mode == .detached ? 1 : 0))
+      let backedSource = app.browsingPage
       returnExternalPicture(app, mode: mode)
       XCTAssertTrue(app.mainShowsPlayer && !app.playbackElsewhere)
-      XCTAssertEqual(app.browsingPage, source)
+      XCTAssertEqual(app.browsingPage, backedSource)
       XCTAssertFalse(app.browsingPageActive)
       app.goBack()
       await settle()
-      XCTAssertFalse(app.hasPlayback)
-      XCTAssertEqual(app.currentOverlay, .userSpace(42))
-      XCTAssertEqual(app.refreshToken, refresh)
+      XCTAssertTrue(app.hasPlayback)
+      XCTAssertTrue(app.pausedBrowsing.isBrowsing)
+      XCTAssertTrue(app.canGoForward)
+      XCTAssertEqual(app.currentOverlay, mode == .compact ? .userSpace(42) : nil)
+      XCTAssertEqual(app.browsingPage, backedSource)
+      XCTAssertEqual(app.refreshToken, backRefresh)
     }
   }
 
@@ -204,7 +284,8 @@ private struct Offline: AuthTransport {
         await settle()
         XCTAssertEqual(app.browsingPage, source)
         XCTAssertTrue(app.browsingPageActive)
-        XCTAssertFalse(app.hasPlayback)
+        XCTAssertEqual(app.hasPlayback, !stop)
+        XCTAssertEqual(app.canGoForward, !stop)
         XCTAssertEqual(app.refreshToken, refresh)
       }
     }
@@ -229,7 +310,9 @@ private struct Offline: AuthTransport {
     XCTAssertEqual(app.currentOverlay, .userSpace(42))
     XCTAssertEqual(app.browsingPage, source)
     XCTAssertEqual(app.refreshToken, refresh)
-    XCTAssertFalse(app.hasPlayback)
+    XCTAssertTrue(app.hasPlayback)
+    XCTAssertTrue(app.pausedBrowsing.isBrowsing)
+    XCTAssertTrue(app.canGoForward)
   }
 
   func testPausedBrowsingBackForwardAndReplacementDoNotRetainAPlayerAsTheSource() async {

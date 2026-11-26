@@ -24,6 +24,55 @@ final class M7SettingsTests: XCTestCase {
       XCTAssertEqual(error, expected, file: file, line: line)
     }
   }
+  func testPlayerBarSettingsDefaultsChoicesAndRanges() {
+    var settings = MacSettings()
+    XCTAssertEqual(PlayerControlBarPosition(settings: settings), .floating)
+    XCTAssertEqual(PlayerArrowAction(settings: settings), .seek)
+    XCTAssertEqual(settings.number(.playerControlBarIdleDelay), 2.5)
+    XCTAssertTrue(settings.bool(.playerControlBarChapters))
+    XCTAssertTrue(settings.bool(.bottomProgress))
+    let capabilities: Set<MacSettingKey> = MacSettingsCatalog.playerBarKeys
+    for position in PlayerControlBarPosition.allCases {
+      XCTAssertTrue(settings.set(.playerControlBarPosition, .text(position.rawValue), capabilities: capabilities))
+      XCTAssertEqual(PlayerControlBarPosition(settings: settings), position)
+    }
+    for action in PlayerArrowAction.allCases {
+      XCTAssertTrue(settings.set(.playerArrowAction, .text(action.rawValue), capabilities: capabilities))
+      XCTAssertEqual(PlayerArrowAction(settings: settings), action)
+    }
+    XCTAssertFalse(settings.set(.playerControlBarPosition, .text("corner"), capabilities: capabilities))
+    XCTAssertFalse(settings.set(.playerArrowAction, .text("volume"), capabilities: capabilities))
+    XCTAssertTrue(settings.set(.playerControlBarIdleDelay, .number(99), capabilities: capabilities))
+    XCTAssertEqual(settings.number(.playerControlBarIdleDelay), 10)
+    XCTAssertFalse(settings.set(.playerControlBarIdleDelay, .number(.nan), capabilities: capabilities))
+    XCTAssertEqual(PlayerArrowAction.adjustedSpeed(current: 1, up: true), 1.25)
+    XCTAssertEqual(PlayerArrowAction.adjustedSpeed(current: 1, up: false), 0.75)
+    XCTAssertEqual(PlayerArrowAction.adjustedSpeed(current: 2, up: true), 2.25)
+    XCTAssertEqual(PlayerArrowAction.adjustedSpeed(current: 0.5, up: false), 0.25)
+    XCTAssertEqual(PlayerArrowAction.adjustedSpeed(current: 4, up: true), 4)
+    XCTAssertEqual(PlayerArrowAction.adjustedSpeed(current: 0.25, up: false), 0.25)
+  }
+  func testPlayerBarBackupRoundTripAndInvalidStoredValuesFallBack() throws {
+    try withDefaults { defaults in
+      defaults.set("corner", forKey: MacSettingKey.playerControlBarPosition.rawValue)
+      defaults.set("volume", forKey: MacSettingKey.playerArrowAction.rawValue)
+      defaults.set(-1, forKey: MacSettingKey.playerControlBarIdleDelay.rawValue)
+      var settings = MacSettings.load(from: defaults)
+      XCTAssertEqual(PlayerControlBarPosition(settings: settings), .floating)
+      XCTAssertEqual(PlayerArrowAction(settings: settings), .seek)
+      XCTAssertEqual(settings.number(.playerControlBarIdleDelay), 0.5)
+      let edits: [(MacSettingKey, MacSettingValue)] = [
+        (.playerControlBarPosition, .text("top")), (.playerControlBarIdleDelay, .number(4.5)),
+        (.playerControlBarChapters, .bool(false)), (.playerArrowAction, .text("speed")),
+      ]
+      for (key, value) in edits {
+        XCTAssertTrue(settings.set(key, value, capabilities: MacSettingsCatalog.playerBarKeys))
+        settings.save(key, to: defaults)
+      }
+      let decoded = try MacSettingsBackup.decode(data: MacSettingsBackup(settings: settings).encodedData())
+      for (key, value) in edits { XCTAssertEqual(decoded.values[key.rawValue], value) }
+    }
+  }
   func testTVPlaybackDefaultsAreConservativeAndRoundTrip() throws {
     withDefaults { defaults in
       let initial = MacSettings.load(from: defaults)
@@ -221,7 +270,11 @@ final class M7SettingsTests: XCTestCase {
       if !descriptor.detail.isEmpty { XCTAssertTrue(descriptor.detail.hasSuffix("。"), descriptor.title) }
       XCTAssertFalse(descriptor.detail.contains("PGC"), descriptor.title)
     }
-    XCTAssertEqual(MacSettingsCatalog.sections(of: .general).map(\.title), ["外观", "侧边栏项目", "搜索建议", "滚动加速"])
+    XCTAssertEqual(MacSettingsCatalog.sections(of: .general).map(\.title), ["打开方式"])
+    XCTAssertEqual(MacSettingsCatalog.sections(of: .interface).map(\.title),
+      ["外观", "侧边栏项目", "搜索建议", "滚动加速", "播放控制条"])
+    XCTAssertEqual(Set(MacSettingsCatalog.playerBarKeys),
+      Set(MacSettingsCatalog.sections(of: .interface).first { $0.title == "播放控制条" }?.descriptors.map(\.key) ?? []))
   }
   func testOpenModeReadsAndWritesTheTwoOriginalKeys() {
     var settings = MacSettings()

@@ -136,6 +136,10 @@ def main():
     assert any('tone or black-point adaptation' in p for p in result['policyMessages'])
     assert 'target-contrast is not applied' in (OUT / 'known-black-mismatch.log').read_text()
 
+    _, result = capture('lower-target-peak', video=BARS, options=[*opts, 'target-peak=100'])
+    assert any('requested source/target require tone adaptation' in p for p in result['policyMessages'])
+    assert not any('metadata SDR BT.1886' in p for p in result['passes'])
+
     _, paused_baseline = capture('paused-baseline', video=BARS, options=[*opts, 'fixture-pause-at=0.7'], seconds=4)
     pixels, result = capture('paused-dynamic-20', video=BARS, options=[*opts, 'target-peak=203',
                                 'fixture-peak-sequence=20', 'fixture-pause-at=0.7'], seconds=4)

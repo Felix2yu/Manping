@@ -346,6 +346,23 @@ final class M2CoreTests: XCTestCase, @unchecked Sendable {
     model.shutdown()
   }
 
+  @MainActor func testLikeReportsSuccessWithoutAnAlertMessage() async throws {
+    let transport = M2Transport([.init(#"{"code":0}"#), .init(#"{"code":0}"#)])
+    let service = try await m2Service(transport)
+    let model = VideoInteractionModel(service: service, stateLoader: { _, _ in
+      VideoOperationState(liked: false, following: false, favorited: false)
+    })
+    model.reset(aid: 789)
+    await m2WaitUntil { model.liked == false }
+    let liked = await model.like(aid: 789)
+    XCTAssertTrue(liked); XCTAssertEqual(model.liked, true); XCTAssertNil(model.message)
+    let unliked = await model.like(aid: 789)
+    XCTAssertTrue(unliked); XCTAssertEqual(model.liked, false); XCTAssertNil(model.message)
+    let requests = await transport.requests
+    XCTAssertEqual(requests.map { $0.url!.path }, ["/x/v2/view/like", "/x/v2/view/like"])
+    model.shutdown()
+  }
+
   @MainActor func testUIUnknownStateCannotToggleAndCancelledLoadHasNoAlert() async throws {
     let transport = M2Transport([])
     let service = try await m2Service(transport)
@@ -354,7 +371,9 @@ final class M2CoreTests: XCTestCase, @unchecked Sendable {
       return VideoOperationState(liked: false, following: false, favorited: false)
     })
     model.reset(aid: 789)
-    await model.like(aid: 789); await model.follow(mid: 2, aid: 789)
+    let liked = await model.like(aid: 789)
+    await model.follow(mid: 2, aid: 789)
+    XCTAssertFalse(liked)
     let requests = await transport.requests
     XCTAssertTrue(requests.isEmpty)
     XCTAssertNil(model.liked); XCTAssertNil(model.following)
@@ -389,7 +408,8 @@ final class M2CoreTests: XCTestCase, @unchecked Sendable {
       XCTAssertTrue(model.folders.isEmpty); XCTAssertTrue(model.selectedFolderIDs.isEmpty)
       XCTAssertFalse(model.busy); XCTAssertNil(model.message)
       await transport.release()
-      await pending.value
+      let succeeded = await pending.value
+      XCTAssertFalse(succeeded)
       XCTAssertNil(model.liked); XCTAssertNil(model.message)
       let saved = await model.saveFolders(aid: 789)
       XCTAssertFalse(saved)

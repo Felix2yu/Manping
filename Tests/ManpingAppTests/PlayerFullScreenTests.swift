@@ -21,7 +21,7 @@ final class PlayerFullScreenTests: XCTestCase {
     let coordinator = M7PlaybackWindowCoordinator(savesFrame: false)
     let content = NSView(frame: CGRect(origin: .zero, size: M7PlaybackWindowCoordinator.defaultSize))
     var closeCalls = 0
-    coordinator.present(content: content, mainWindow: nil, hideMain: false, displayMode: nil) {
+    coordinator.present(content: content, mainWindow: nil, displayMode: nil) {
       closeCalls += 1
     }
     let window = try XCTUnwrap(coordinator.window)
@@ -43,10 +43,24 @@ final class PlayerFullScreenTests: XCTestCase {
     XCTAssertEqual(closeCalls, 1, "closing restores the main player exactly once")
   }
 
+  @MainActor func testDetachedWindowLeavesTheMainWindowVisible() throws {
+    _ = NSApplication.shared
+    let mainWindow = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 800, height: 600),
+      styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    mainWindow.isReleasedWhenClosed = false
+    mainWindow.orderFront(nil)
+    defer { mainWindow.close() }
+    let coordinator = M7PlaybackWindowCoordinator(savesFrame: false)
+    coordinator.present(content: NSView(), mainWindow: mainWindow, displayMode: nil) {}
+    XCTAssertTrue(mainWindow.isVisible)
+    coordinator.close(showMain: false)
+    XCTAssertTrue(mainWindow.isVisible)
+  }
+
   @MainActor func testDetachedWindowDisplayModesKeepTheirExistingPlacementBehavior() throws {
     _ = NSApplication.shared
     let coordinator = M7PlaybackWindowCoordinator(savesFrame: false)
-    coordinator.present(content: NSView(), mainWindow: nil, hideMain: false, displayMode: nil) {}
+    coordinator.present(content: NSView(), mainWindow: nil, displayMode: nil) {}
     let window = try XCTUnwrap(coordinator.window)
 
     coordinator.applyDisplayMode("compact")

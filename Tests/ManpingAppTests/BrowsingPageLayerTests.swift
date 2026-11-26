@@ -382,6 +382,17 @@ private struct BrowsingLayerHarness: View {
     XCTAssertEqual(probe.requests, 2, "returning cannot prefetch an exhausted list")
   }
 
+  func testScrollPrefetchCanWaitForScrollInsteadOfLoadingWhenEnabled() async throws {
+    let state = BrowsingLayerState(), loads = BrowseLoadProbe()
+    loads.enabled = false; loads.height = 100; loads.loadOnEnable = false
+    let host = host(BrowsePrefetchHarness(state: state, loads: loads))
+    try await settle(host)
+    XCTAssertEqual(loads.count, 0)
+    loads.enabled = true
+    try await settle(host)
+    XCTAssertEqual(loads.count, 0, "finishing a batch must not immediately consume another batch at a stale near-end position")
+  }
+
   func testScrollPrefetchReturnStillRequiresEnabledAndNearEnd() async throws {
     for (enabled, height) in [(false, CGFloat(100)), (true, CGFloat(4000))] {
       let state = BrowsingLayerState(), loads = BrowseLoadProbe()
@@ -486,6 +497,7 @@ private struct BrowsingGridHarness: View {
 @MainActor private final class BrowseLoadProbe: ObservableObject {
   @Published var enabled = false
   @Published var height: CGFloat = 100
+  var loadOnEnable = true
   var count = 0
 }
 
@@ -498,7 +510,7 @@ private struct BrowsePrefetchHarness: View {
         Color.clear.frame(height: loads.height)
         // Prefetch-driven pages use a manual footer, so there is only one automatic trigger.
         LoadMoreFooter(isLoading: false, autoLoad: false) { loads.count += 1 }
-      }.prefetchOnScroll(enabled: loads.enabled) { loads.count += 1 }
+      }.prefetchOnScroll(enabled: loads.enabled, loadOnEnable: loads.loadOnEnable) { loads.count += 1 }
     }
   }
 }
