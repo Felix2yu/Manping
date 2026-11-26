@@ -760,7 +760,7 @@ import SwiftUI
     playback.addItem(.separator())
     item("截取画面", #selector(saveVideoScreenshot), "s", [.command, .shift], in: playback)
     item("小窗", #selector(toggleCompact), "p", [.command, .shift], in: playback)
-    item("在独立窗口播放", #selector(toggleDetachedPlayback), "p", [.command, .option], in: playback)
+    item("在独立窗口播放（P / ⌥⌘P）", #selector(toggleDetachedPlayback), "p", [.command, .option], in: playback)
     playback.addItem(.separator())
     item("点赞 / 取消点赞（Q）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .like)!
     item("投币（W）", #selector(runShortcut(_:)), "", none, in: playback).tag = PlaybackShortcut.allCases.firstIndex(of: .coin)!
@@ -882,6 +882,10 @@ import SwiftUI
     case #selector(saveVideoScreenshot): return model.canTakeScreenshot
     case #selector(goBack): return model.canGoBack
     case #selector(goForward): return model.canGoForward
+    case #selector(seekBackward):
+      item.title = PlayerArrowAction(settings: model.appSettings) == .speed ? "减速" : "快退"
+    case #selector(seekForward):
+      item.title = PlayerArrowAction(settings: model.appSettings) == .speed ? "加速" : "快进"
     case #selector(toggleDanmaku):
       item.state = activePlayer.commentsEnabled ? .on : .off
     default: break
@@ -892,8 +896,8 @@ import SwiftUI
       #selector(chooseSubtitle(_:)), #selector(chooseQuality(_:))]
     if controls.contains(action) {
       guard model.selected != nil || model.pgcPlayback?.episode != nil || model.livePlayback != nil else { return false }
-      // A live stream has no timeline to step through.
-      if model.livePlayback != nil, [#selector(seekBackward), #selector(seekForward)].contains(action) { return false }
+      if PlayerArrowAction(settings: model.appSettings) == .seek,
+        model.livePlayback != nil, [#selector(seekBackward), #selector(seekForward)].contains(action) { return false }
       let editor = NSApp.keyWindow?.firstResponder as? NSTextView
       if editor?.isEditable == true || editor?.hasMarkedText() == true,
         item.keyEquivalentModifierMask.isEmpty, !item.keyEquivalent.isEmpty { return false }
@@ -951,7 +955,7 @@ import SwiftUI
     case .player: return model.hasPlayback
     case .cycleWindows: return window != nil
     case .zoom: return eventWindow != nil
-    case .compact, .fullScreen, .share, .copyShareLink, .playPause, .toggleDanmaku, .mute: return model.hasPlayback
+    case .compact, .detached, .fullScreen, .share, .copyShareLink, .playPause, .toggleDanmaku, .mute: return model.hasPlayback
     case .info, .comments, .like, .coin, .favorite, .triple, .composeDanmaku:
       guard model.hasPlayback, !model.compactPlayer else { return false }
       switch action {
@@ -964,8 +968,12 @@ import SwiftUI
       case .composeDanmaku: return model.playbackPageShortcuts?.composeDanmaku != nil
       default: return false
       }
-    case .seekBackward: return model.hasPlayback && model.livePlayback == nil && player.duration > 0
-    case .seekForward: return model.hasPlayback && model.livePlayback == nil && player.duration > 0
+    case .seekBackward:
+      return model.hasPlayback && (PlayerArrowAction(settings: model.appSettings) == .speed
+        || (model.livePlayback == nil && player.duration > 0))
+    case .seekForward:
+      return model.hasPlayback && (PlayerArrowAction(settings: model.appSettings) == .speed
+        || (model.livePlayback == nil && player.duration > 0))
     case .volumeUp, .volumeDown: return model.hasPlayback
     case .speedUp, .speedDown, .normalSpeed, .doubleSpeed: return model.hasPlayback && model.livePlayback == nil
     case .previousAdjacent: return model.canPlayAdjacentPart(true)
@@ -973,6 +981,7 @@ import SwiftUI
     case .previousHistory, .nextHistory: return false
     case .exitFullScreen:
       return (player.surface?.window ?? eventWindow)?.styleMask.contains(.fullScreen) == true
+        || model.playbackDetached || model.canGoBack
     }
   }
 
@@ -986,6 +995,7 @@ import SwiftUI
     case .cycleWindows: model.cyclePlaybackWindows(from: NSApp.keyWindow)
     case .zoom: NSApp.keyWindow?.performZoom(nil)
     case .compact: model.toggleCompactPlayer()
+    case .detached: model.togglePlaybackWindow()
     case .info: model.playbackPageShortcuts?.toggleInfo?()
     case .comments: model.playbackPageShortcuts?.toggleComments?()
     case .like: model.playbackPageShortcuts?.like?()
@@ -994,8 +1004,8 @@ import SwiftUI
     case .triple: model.playbackPageShortcuts?.triple?()
     case .composeDanmaku: model.playbackPageShortcuts?.composeDanmaku?()
     case .playPause: player.togglePause()
-    case .seekBackward: player.seek(max(0, player.time - 5))
-    case .seekForward: player.seek(min(player.duration, player.time + 5))
+    case .seekBackward: stepPlayback(up: false)
+    case .seekForward: stepPlayback(up: true)
     case .volumeUp: player.setVolume(min(model.appSettings.number(.maxVolume), player.volume + 10))
     case .volumeDown: player.setVolume(max(0, player.volume - 10))
     case .speedUp: adjustPlaybackSpeed(up: true)
@@ -1006,8 +1016,14 @@ import SwiftUI
     case .nextAdjacent: model.playAdjacentPart(false)
     case .fullScreen: model.togglePlayerFullScreen()
     case .exitFullScreen:
-      if model.hasPlayback, player.surface?.window?.styleMask.contains(.fullScreen) == true { model.togglePlayerFullScreen() }
-      else { NSApp.keyWindow?.toggleFullScreen(nil) }
+      if (player.surface?.window ?? NSApp.keyWindow)?.styleMask.contains(.fullScreen) == true {
+        if model.hasPlayback { model.togglePlayerFullScreen() }
+        else { NSApp.keyWindow?.toggleFullScreen(nil) }
+      } else if model.playbackDetached {
+        model.togglePlaybackWindow()
+      } else {
+        model.goBack()
+      }
     case .mute: player.toggleMuted()
     case .toggleDanmaku: player.commentsEnabled.toggle()
     case .share: presentShareSheet()
@@ -1020,15 +1036,22 @@ import SwiftUI
   }
 
   func beginShortcutSeekHold() {
-    guard model.hasPlayback, model.livePlayback == nil, activePlayer.duration > 0 else { return }
+    guard PlayerArrowAction(settings: model.appSettings) == .seek,
+      model.hasPlayback, model.livePlayback == nil, activePlayer.duration > 0 else { return }
     activePlayer.beginTemporarySpeed()
   }
   func endShortcutSeekHold() { activePlayer.endTemporarySpeed() }
+  private func stepPlayback(up: Bool) {
+    if PlayerArrowAction(settings: model.appSettings) == .speed {
+      adjustPlaybackSpeed(up: up)
+      return
+    }
+    let step = model.appSettings.number(up ? .stepForward : .stepBackward)
+    if up { activePlayer.seek(min(activePlayer.duration, activePlayer.time + step)) }
+    else { activePlayer.seek(max(0, activePlayer.time - step)) }
+  }
   private func adjustPlaybackSpeed(up: Bool) {
-    let choices: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
-    let current = activePlayer.speed
-    let target = up ? choices.first { $0 > current + 0.01 } : choices.last { $0 < current - 0.01 }
-    activePlayer.setSpeed(target ?? (up ? 2 : 0.5))
+    activePlayer.setSpeed(PlayerArrowAction.adjustedSpeed(current: activePlayer.speed, up: up))
   }
   private func presentShareSheet() {
     guard let url = model.shareURLForPlayback, let view = NSApp.keyWindow?.contentView else { return }
@@ -1042,8 +1065,8 @@ import SwiftUI
     performShortcut(choices[sender.tag])
   }
   @objc private func togglePlayback() { activePlayer.togglePause() }
-  @objc private func seekBackward() { activePlayer.seek(max(0, activePlayer.time - model.appSettings.number(.stepBackward))) }
-  @objc private func seekForward() { activePlayer.seek(min(activePlayer.duration, activePlayer.time + model.appSettings.number(.stepForward))) }
+  @objc private func seekBackward() { stepPlayback(up: false) }
+  @objc private func seekForward() { stepPlayback(up: true) }
   @objc private func previousEpisode() { model.playPrevious() }
   @objc private func nextEpisode() { model.playNext() }
   @objc private func toggleDanmaku() { activePlayer.commentsEnabled.toggle() }

@@ -111,7 +111,7 @@ actor DebugUITransport: AuthTransport {
       if let data = M6ArticleFixture.response(path: url.path, parameters: fields) { return response(url, body: data) }
     }
     if request.httpMethod == "POST", let url = request.url,
-      ["/x/v2/history/toview/del", "/x/v2/history/toview/clear", "/x/v2/history/toview/add", "/x/v3/fav/resource/batch-del", "/pgc/app/follow/del", "/x/relation/modify", "/x/v2/reply/action", "/x/v2/reply/add"].contains(url.path) {
+      ["/x/v2/history/toview/del", "/x/v2/history/toview/clear", "/x/v2/history/toview/add", "/x/v3/fav/resource/batch-del", "/pgc/app/follow/del", "/x/relation/modify", "/x/v2/reply/action", "/x/v2/reply/add", "/x/v2/view/like"].contains(url.path) {
       return response(url, body: Data(#"{"code":0,"data":{}}"#.utf8))
     }
     guard request.httpMethod == nil || request.httpMethod == "GET", let url = request.url else {

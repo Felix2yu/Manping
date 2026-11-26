@@ -71,7 +71,7 @@ The interface is in Simplified Chinese. Requires macOS 27 on Apple silicon; down
 - 浮在所有桌面空间和全屏应用之上，不占用程序坞和 ⌘Tab；锁定视频比例，宽度可在 320 到 960 之间调整，记住上次的位置。
 - 按住画面任意处拖动；松手吸附到最近的屏幕角，按住 ⌥ 则停在原处。单击暂停或继续，双击回到主窗口。
 - 小窗里的弹幕按窗口高度缩小，只显示在上半部分，不挡住画面主体。
-- 也可以从视频卡片的右键菜单选「小窗播放」，或选「在独立窗口播放」（⌥⌘P）用一个普通大小的独立窗口播放。
+- 也可以从视频卡片的右键菜单选「小窗播放」，或选「在独立窗口播放」（P / ⌥⌘P）用一个普通大小的独立窗口播放。
 
 ## 直播
 
@@ -148,7 +148,7 @@ The interface is in Simplified Chinese. Requires macOS 27 on Apple silicon; down
 | 多 P 上一 P / 下一 P | [ / ] 或 < / > | 小窗 / 窗口最大化 | S / G |
 | 显示播放器 / 切换窗口 | B / Ctrl+Tab | 从其他窗口回主界面 | A |
 | 上一个 / 下一个（队列、合集等） | ⇧⌘[ / ⇧⌘] | 显示弹幕（菜单） | ⇧⌘D |
-| 小窗（菜单） | ⇧⌘P | 在独立窗口播放 | ⌥⌘P |
+| 小窗（菜单） | ⇧⌘P | 在独立窗口播放 | P / ⌥⌘P |
 | 截取画面 | ⇧⌘S | 进入全屏幕（菜单） | ⌃⌘F |
 | 返回 / 前进 | ⌘[ / ⌘] | 刷新 | ⌘R |
 | 首页 … 专栏 | ⌘1 – ⌘6 | 动态 … 消息 | ⌥⌘1 – ⌥⌘6 |
@@ -161,7 +161,7 @@ The interface is in Simplified Chinese. Requires macOS 27 on Apple silicon; down
 ## 安装
 
 1. 从 [Releases](https://github.com/Felix2yu/Manping/releases) 下载 `满屏.app` 的压缩包并解压，拖到「应用程序」文件夹；或者按下文从源码构建。
-2. 本机覆盖安装已构建的版本时，先退出满屏，再运行 `python3 scripts/install_local_app.py --replace`。脚本会校验 Bundle ID 与签名，保留旧应用备份后再替换；不会迁移原应用的数据。
+2. 本机从源码覆盖安装时运行 `python3 scripts/install_local_app.py --build --replace --restart`。脚本会先完成 Release 编译、签名和暂存校验，再退出旧应用、保留备份并替换启动；编译失败不会中断当前应用。安装已有产物时可省略 `--build`，但仍需先退出满屏，或显式加 `--restart`。
 3. 发布包按固定证书顺序签名，没有经过 Apple 公证；未配置证书时会回退到临时签名。第一次打开时 macOS 可能提示无法验证开发者，请在 系统设置 › 隐私与安全性 中点「仍要打开」。
 4. 用哔哩哔哩手机 App 扫码登录。登录凭据、代理密码和 AI 密钥都加密保存在本机；新应用使用独立身份和数据目录，不读取原应用的设置或凭据。
 
@@ -256,7 +256,7 @@ README 中的截图和动图都用内置的离线样本录制，不登录账号�
 
 ### 播放与渲染
 
-- **[mpv](https://mpv.io)** · mpv contributors · GPL-2.0-or-later / LGPL — 播放核心（本项目打补丁构建的 libmpv 0.41.0）。
+- **[mpv](https://mpv.io)** · mpv contributors · GPL-2.0-or-later / LGPL — 播放核心（本项目打补丁构建的 libmpv 0.42.0）。
 - **[FFmpeg](https://ffmpeg.org)** · FFmpeg developers · GPL-3.0-or-later 构建 — 解码、封装与下载合并。
 - **[libplacebo](https://code.videolan.org/videolan/libplacebo)** · VideoLAN · LGPL-2.1-or-later — GPU 渲染与色彩管理。
 - **[随附动态库](ThirdPartyNotices/Libraries)**：dav1d、x264、x265、libass、HarfBuzz、FreeType、FriBidi、Little CMS、libvpx、Opus、LAME、mpg123、LuaJIT、uchardet、zimg、Rubber Band、libbluray、OpenSSL、shaderc、Vulkan Loader 等 34 个，各自的许可全文见链接。

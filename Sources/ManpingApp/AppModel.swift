@@ -153,7 +153,7 @@ import WebKit
   /// the standalone window. The player's route is then off the stack; returning the picture to
   /// the main window puts it back on top.
   @Published private(set) var browsingBesidePlayback = false
-  /// The main window shows the playback page (or, while playback is elsewhere, its placeholder).
+  /// The main window shows the playback page or, during mini playback, its placeholder.
   var mainShowsPlayer: Bool { hasPlayback && !browsingBesidePlayback && !pausedBrowsing.isBrowsing }
   @Published private(set) var pausedBrowsing = PlaybackBrowsingState()
   private var browsingBinding: PlaybackBrowsingState.Binding {
@@ -246,7 +246,7 @@ import WebKit
       if !steppingForward, overlays.count > oldValue.count { forwardRoutes = [] }
     }
   }
-  /// Routes left with 返回, newest last; 前进 (⌘]) reopens them. Players are never kept here.
+  /// Routes left with 返回, newest last; 前进 (⌘]) reopens them, including a parked UGC player.
   @Published private(set) var forwardRoutes: [OverlayRoute] = []
   private var steppingForward = false
   @Published var search = ""
@@ -536,8 +536,7 @@ import WebKit
       return live.room?.webURL ?? URL(string: "https://live.bilibili.com/\(live.roomID)")
     }
     guard let selected else { return nil }
-    if let aid = videoDetails?.video.aid ?? selected.aid { return URL(string: "https://www.bilibili.com/video/av\(aid)") }
-    return selected.bvid.isEmpty ? nil : URL(string: "https://www.bilibili.com/video/\(selected.bvid)")
+    return CardActions.webURL(selected)
   }
   func canPlayAdjacentPart(_ previous: Bool) -> Bool {
     if let playback = pgcPlayback {
@@ -990,6 +989,16 @@ import WebKit
       account = "满屏体验官"
       accountAvatar = URL(string: "https://fixture.invalid/avatar/1"); accountLevel = 6
       accountMID = M3Fixture.owner
+      #if DEBUG
+      let fixtureHistory = WatchHistoryStore(cacheURL: nil, outboxURL: nil)
+      fixtureHistory.debugSeed(Dictionary(uniqueKeysWithValues: (0..<24).map { index in
+        let bvid = "BV1sample\(String(format: "%03d", index))"
+        let finished = index % 8 == 4
+        return (bvid, WatchRecord(bvid: bvid, watched: true, progress: finished ? 180 : 72,
+          duration: 180, finished: finished, viewAt: 1_760_000_000))
+      }))
+      watchHistoryStorage = fixtureHistory
+      #endif
       configureNotifications()
       unreadMessageCount = 3
       fixtureReady = true
@@ -1125,6 +1134,11 @@ import WebKit
     noteNavigation()
     guard let route = overlays.last else { return }
     switch route {
+    case .video where !playbackElsewhere && selected != nil:
+      forwardRoutes.append(route)
+      beginPausedBrowsing()
+      overlays.removeLast()
+      return
     case .video, .pgc, .live:
       if playbackElsewhere { leavePlaybackPage() } else { closePlayer() }
       // The source page is still mounted, with its loaded rows and scroll position intact.
@@ -1141,6 +1155,20 @@ import WebKit
     noteNavigation()
     pgcFavoriteIntent = nil
     cancelCuratedPlaylist()
+    if Self.isPlayerRoute(route) {
+      guard route == playbackRoute else { return }
+      if playbackElsewhere {
+        if compactPlayer { closeMiniPlayer(activateMain: false) }
+        else { playbackWindow.close(showMain: true) }
+        return
+      }
+      steppingForward = true
+      overlays.removeAll(where: Self.isPlayerRoute)
+      overlays.append(route)
+      steppingForward = false
+      resumeVisiblePlayback()
+      return
+    }
     leavePlaybackPage()
     steppingForward = true
     overlays.append(route)
@@ -1206,11 +1234,13 @@ import WebKit
     case "favorites": overlays = [.favorites]
     case "later": overlays = [.viewLater]
     case "history": overlays = [.history]
-    case "settings", "settings:general", "settings:appearance", "settings:navigation", "settings:cache":
+    case "settings", "settings:general":
       launchSettingsGroup = .general
+    case "settings:ui", "settings:interface", "settings:appearance", "settings:navigation", "settings:cache":
+      launchSettingsGroup = .interface
     case "settings:playback", "settings:behavior": launchSettingsGroup = .playback
     case "settings:playerbar":
-      launchSettingsGroup = .playback; launchSettingsPlayerBar = true
+      launchSettingsGroup = .interface; launchSettingsPlayerBar = true
     case "settings:danmaku": launchSettingsGroup = .danmaku
     case "settings:network", "settings:proxy": launchSettingsGroup = .network
     case "settings:download", "settings:screenshot": launchSettingsGroup = .download
@@ -2151,6 +2181,8 @@ import WebKit
     finishBrowsingForPlacement()
     closeMiniPlayer(activateMain: false)
     playbackDetached = true
+    browsingBesidePlayback = true
+    overlays.removeAll(where: Self.isPlayerRoute)
     // Remove the primary SwiftUI surface before creating its single new owner.
     DispatchQueue.main.async { [weak self] in
       guard let self, self.playbackDetached, self.hasPlayback else { return }
@@ -2175,7 +2207,7 @@ import WebKit
     playbackWindow.onUserPlaced = { [weak self] in self?.userPlacedPicture() }
     playbackWindow.onFullScreen = { [weak self] in self?.setWindowFullScreen($0, detached: true) }
     playbackWindow.present(content: host, mainWindow: (NSApp.delegate as? AppDelegate)?.window,
-      hideMain: appSettings.bool(.hideMainOnPlay), displayMode: displayMode) { [weak self] in
+      displayMode: displayMode) { [weak self] in
         // Closing the standalone window (its close button included) puts the picture back in
         // the main window; a load still pending must not move it again.
         self?.returnFromPlaybackWindow()
@@ -2236,13 +2268,20 @@ import WebKit
   private func miniPlayerKey(_ key: MiniPlayerCoordinator.Key) {
     switch key {
     case .togglePause: player.togglePause()
-    case .back:
-      guard livePlayback == nil else { return }
-      player.seek(max(0, player.time - appSettings.number(.stepBackward)))
-    case .forward:
-      guard livePlayback == nil else { return }
-      player.seek(min(player.duration, player.time + appSettings.number(.stepForward)))
+    case .back: miniPlayerStep(up: false)
+    case .forward: miniPlayerStep(up: true)
     }
+  }
+
+  private func miniPlayerStep(up: Bool) {
+    guard livePlayback == nil else { return }
+    if PlayerArrowAction(settings: appSettings) == .speed {
+      player.setSpeed(PlayerArrowAction.adjustedSpeed(current: player.speed, up: up))
+      return
+    }
+    let step = appSettings.number(up ? .stepForward : .stepBackward)
+    if up { player.seek(min(player.duration, player.time + step)) }
+    else { player.seek(max(0, player.time - step)) }
   }
   /// The main window is in full screen, or entering it (set before the transition moves the
   /// frame, so the layout switches first). Leaving keeps it until the frame is back at its

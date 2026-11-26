@@ -9,7 +9,6 @@ import AppKit
   private let savesFrame: Bool
   private(set) var window: NSWindow?
   private weak var mainWindow: NSWindow?
-  private var restoreMain = false
   private var onClose: (@MainActor () -> Void)?
   /// The window's own full-screen button moved the picture; a pending open placement must yield.
   var onUserPlaced: (@MainActor () -> Void)?
@@ -27,7 +26,7 @@ import AppKit
 
   /// Shows `content` in the window. `displayMode` (default, fullscreen or compact) is applied
   /// when the caller opens something there; nil keeps the window's current state.
-  func present(content: NSView, mainWindow: NSWindow?, hideMain: Bool, displayMode: String?,
+  func present(content: NSView, mainWindow: NSWindow?, displayMode: String?,
     onClose: @escaping @MainActor () -> Void) {
     self.mainWindow = mainWindow
     self.onClose = onClose
@@ -54,10 +53,6 @@ import AppKit
     publishWindowID(window)
     #endif
     window.makeKeyAndOrderFront(nil)
-    if hideMain, mainWindow?.isVisible == true {
-      restoreMain = true
-      mainWindow?.orderOut(nil)
-    }
     if let displayMode { applyDisplayMode(displayMode) }
   }
   func applyDisplayMode(_ displayMode: String) {
@@ -87,8 +82,7 @@ import AppKit
     if let file = playbackWindowIDFile { try? FileManager.default.removeItem(at: file) }
     #endif
     fullScreen.reset()
-    if showMain || restoreMain { mainWindow?.makeKeyAndOrderFront(nil) }
-    restoreMain = false
+    if showMain { mainWindow?.makeKeyAndOrderFront(nil) }
     closing = false
     callback?()
   }

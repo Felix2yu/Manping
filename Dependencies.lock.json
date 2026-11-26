@@ -1,8 +1,8 @@
 {
   "platform": "macOS 27 arm64",
   "upstream": "896a06290ba440cb17776d292dff119bbd3383d6",
-  "mpv": "0.41.0+renderer-compatibility-v1",
-  "ffmpeg": "9.0.2_1",
+  "mpv": "0.42.0+renderer-compatibility-v1",
+  "ffmpeg": "9.1",
   "libraries": [
     {
       "formula": "svt-av1",
@@ -20,38 +20,38 @@
     },
     {
       "formula": "ffmpeg",
-      "version": "9.0.2_1",
-      "source": "/opt/homebrew/Cellar/ffmpeg/9.0.2_1/lib/libavcodec.63.1.102.dylib",
-      "library": "libavcodec.63.1.102.dylib",
-      "sha256": "887a9775777c2fdb45228fb7776c3f040e4cf56a0cce2b773ae1b978e26dce5a"
+      "version": "9.1",
+      "source": "/opt/homebrew/Cellar/ffmpeg/9.1/lib/libavcodec.63.24.100.dylib",
+      "library": "libavcodec.63.24.100.dylib",
+      "sha256": "a6fbfcca02827342f7690b384eca90eb8f99d9ab78c763761ff770ccf03576ce"
     },
     {
       "formula": "ffmpeg",
-      "version": "9.0.2_1",
-      "source": "/opt/homebrew/Cellar/ffmpeg/9.0.2_1/lib/libavdevice.63.1.102.dylib",
-      "library": "libavdevice.63.1.102.dylib",
-      "sha256": "99a6af906ee84af0dd5f59cab9e121c7a61a25c2b60bf5c3d1c86de5b11eef7b"
+      "version": "9.1",
+      "source": "/opt/homebrew/Cellar/ffmpeg/9.1/lib/libavdevice.63.5.100.dylib",
+      "library": "libavdevice.63.5.100.dylib",
+      "sha256": "955794a3543b07b00ac8831a53ee2714cf91d3cc9308611abcbabc835e6345b1"
     },
     {
       "formula": "ffmpeg",
-      "version": "9.0.2_1",
-      "source": "/opt/homebrew/Cellar/ffmpeg/9.0.2_1/lib/libavfilter.12.1.102.dylib",
-      "library": "libavfilter.12.1.102.dylib",
-      "sha256": "abe7d1e33964d21e427907accd0671cf79b30725bb73e418c304efacc42cae0a"
+      "version": "9.1",
+      "source": "/opt/homebrew/Cellar/ffmpeg/9.1/lib/libavfilter.12.8.100.dylib",
+      "library": "libavfilter.12.8.100.dylib",
+      "sha256": "753450769550eb97480513a169e81332d4824b2164438d396adc87f9dedcc8ae"
     },
     {
       "formula": "ffmpeg",
-      "version": "9.0.2_1",
-      "source": "/opt/homebrew/Cellar/ffmpeg/9.0.2_1/lib/libavformat.63.1.102.dylib",
-      "library": "libavformat.63.1.102.dylib",
-      "sha256": "29cf1a49a39f4e8e99c7bfa6f7aef3df2e7d91c8282cd7e1ef1fb206aec75779"
+      "version": "9.1",
+      "source": "/opt/homebrew/Cellar/ffmpeg/9.1/lib/libavformat.63.16.100.dylib",
+      "library": "libavformat.63.16.100.dylib",
+      "sha256": "0b14031276ebb106835d71384b880120b0e460b8aac92481a2d2d330a4775203"
     },
     {
       "formula": "ffmpeg",
-      "version": "9.0.2_1",
-      "source": "/opt/homebrew/Cellar/ffmpeg/9.0.2_1/lib/libavutil.61.1.102.dylib",
-      "library": "libavutil.61.1.102.dylib",
-      "sha256": "0377aea088208e69d29c03caeb960ca395fdbcd646335dc0a87748bfe81f8525"
+      "version": "9.1",
+      "source": "/opt/homebrew/Cellar/ffmpeg/9.1/lib/libavutil.61.19.100.dylib",
+      "library": "libavutil.61.19.100.dylib",
+      "sha256": "c7cf525e623073097840e22fa09ab57d33afde771058118490f03198fad23ebc"
     },
     {
       "library": "libbluray.4.dylib",
@@ -182,7 +182,7 @@
     {
       "source": ".build/mpv-build/libmpv.2.dylib",
       "library": "libmpv.2.dylib",
-      "sha256": "9821c72aa61a5a5c6d69969a07519a17869a4d521939bd26b0d6c791d7c03436"
+      "sha256": "5d760d6a5779c6fea4833a4fbf152792ef05abc8da700083f836de67425effe4"
     },
     {
       "formula": "mujs",
@@ -249,17 +249,17 @@
     },
     {
       "formula": "ffmpeg",
-      "version": "9.0.2_1",
-      "source": "/opt/homebrew/Cellar/ffmpeg/9.0.2_1/lib/libswresample.7.1.102.dylib",
-      "library": "libswresample.7.1.102.dylib",
-      "sha256": "8d35eb7639343a837ac4e97cfe1742a293b9bc514a790e5db822927628122d2f"
+      "version": "9.1",
+      "source": "/opt/homebrew/Cellar/ffmpeg/9.1/lib/libswresample.7.6.100.dylib",
+      "library": "libswresample.7.6.100.dylib",
+      "sha256": "a0ccb9feb240e6582a7be364215e87e779c3c321e0d791a6497f3b68d342d154"
     },
     {
       "formula": "ffmpeg",
-      "version": "9.0.2_1",
-      "source": "/opt/homebrew/Cellar/ffmpeg/9.0.2_1/lib/libswscale.10.1.102.dylib",
-      "library": "libswscale.10.1.102.dylib",
-      "sha256": "518909dce64a42971a838278cf43ba2bd77bd172ba0eccb3c6ba273e25be7cda"
+      "version": "9.1",
+      "source": "/opt/homebrew/Cellar/ffmpeg/9.1/lib/libswscale.10.5.100.dylib",
+      "library": "libswscale.10.5.100.dylib",
+      "sha256": "0aaf219d8b2df67ca8d083e98dc2df4efc74cc4ca8159fd573a26bf9218fc960"
     },
     {
       "library": "libuchardet.0.0.8.dylib",
@@ -326,14 +326,13 @@
     }
   ],
   "mpvPatchedBuild": {
-    "version": "0.41.0",
-    "sourceSHA256": "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209",
+    "version": "0.42.0",
+    "sourceSHA256": "bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a2afb874ed4df5070dd",
     "deduplicatedTextureCoordinates": true,
     "patches": {
-      "mpv-coreaudio-device-change.patch": "769b218df220738cc1cf9f81cf696c16518c5dfe56a5ef028e33b22536e0e924",
-      "mpv-0.41.0-deduplicate-quad-coordinates.patch": "106dd6766887aead29b8cb5e10cec44702d29cf841d5d371c1b82618be9e16c6",
-      "mpv-0.41.0-renderer-compatibility.patch": "15f1c7022e15099c22b228e99b95588d21201a32343f3d0cf641baa538ee7d19",
-      "mpv-0.41.0-coreaudio-channel-layout.patch": "1c2716062b210322a5af4ac8e0824d58b1250c2331ce8da07d53515fe1bd2bb5"
+      "mpv-0.42.0-deduplicate-quad-coordinates.patch": "106dd6766887aead29b8cb5e10cec44702d29cf841d5d371c1b82618be9e16c6",
+      "mpv-0.42.0-renderer-compatibility.patch": "328208843576f88888678e65ccaa440542d9a4b47adf0c682636098dbbb2d472",
+      "mpv-0.42.0-swift-cametal-layer.patch": "2fc1d9004a3e1533f181e4918a2470eb114d72074eac9016d2920d9ca8d349c2"
     },
     "meson": "1.10.1",
     "options": [
@@ -348,7 +347,7 @@
       "-Dvulkan=disabled",
       "-Dswift-flags="
     ],
-    "librarySHA256": "9821c72aa61a5a5c6d69969a07519a17869a4d521939bd26b0d6c791d7c03436"
+    "librarySHA256": "5d760d6a5779c6fea4833a4fbf152792ef05abc8da700083f836de67425effe4"
   },
   "biliKernelNuget": {
     "version": "0.0.2-preview2",
@@ -403,8 +402,8 @@
     }
   },
   "ffmpegExecutable": {
-    "source": "/opt/homebrew/Cellar/ffmpeg/9.0.2_1/bin/ffmpeg",
-    "sha256": "7f6028378534aa10a2dfa07d807ddcc0d18c869bf5c2f64c89efcc18ee88c4ee"
+    "source": "/opt/homebrew/Cellar/ffmpeg/9.1/bin/ffmpeg",
+    "sha256": "7283bdb248f1665e216d483667405b916a0eb67e798198d3b8b9c3920f364f24"
   },
   "swiftRPC": {
     "packageLock": "Package.resolved",

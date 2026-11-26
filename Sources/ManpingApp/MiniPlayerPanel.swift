@@ -302,7 +302,7 @@ private struct MiniPlayerStage: View {
     if let episode = model.pgcPlayback?.episode { return Double(episode.duration) }
     return Double(model.videoDetails?.video.duration ?? 0)
   }
-  private var shown: Bool { chrome.visible || MiniPlayerCoordinator.debugHover }
+  private var shown: Bool { chrome.visible || chrome.pinned || MiniPlayerCoordinator.debugHover }
 
   var body: some View {
     ZStack {
@@ -317,8 +317,8 @@ private struct MiniPlayerStage: View {
         AudioOnlyBackdrop(cover: cover, title: "")
       }
       MiniPlayerMouseArea(
-        hover: { inside in inside ? chrome.activity() : chrome.pointerLeft() },
-        moved: { chrome.activity() },
+        hover: { inside in inside ? chrome.pointerActivity() : chrome.pointerLeft() },
+        moved: { chrome.pointerActivity() },
         click: { chrome.activity(); player.togglePause() },
         doubleClick: { leave { model.toggleCompactPlayer() } })
       controls.playerChromeFade(shown)
@@ -333,9 +333,18 @@ private struct MiniPlayerStage: View {
       }
     }
     .animation(.snappy(duration: 0.25), value: model.nextPlaybackDeadline == nil)
-    .onAppear { chrome.activity() }
-    .onChange(of: player.paused) { _, _ in chrome.activity() }
+    .onAppear {
+      chrome.playing = !player.paused
+      chrome.pinned = player.paused
+      chrome.activity()
+    }
+    .onChange(of: player.paused) { _, paused in
+      chrome.playing = !paused
+      chrome.pinned = paused
+      chrome.activity()
+    }
     .onChange(of: player.commentsEnabled) { _, _ in chrome.activity() }
+    .onDisappear { chrome.stop() }
     #if DEBUG
     .modifier(DemoMiniHooks(chrome: chrome))
     #endif
@@ -380,6 +389,8 @@ private struct MiniPlayerStage: View {
           }
         }
       }.padding(10)
+        .contentShape(Rectangle())
+        .onHover { chrome.setOverControls($0) }
     }
   }
 

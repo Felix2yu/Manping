@@ -113,6 +113,7 @@ struct M3SearchBox: View {
   @Binding var text: String
   var suggestionsEnabled = true
   var currentScopeName: String? = nil
+  var active: Bool
   var focusRequest: Int = 0
   /// 热搜 (⌘K from the 编辑 menu) opens the trending list.
   var hotRequest: Int = 0
@@ -142,7 +143,7 @@ struct M3SearchBox: View {
           if direction == .down { suggestions.moveSelection(1) }
           if direction == .up { suggestions.moveSelection(-1) }
         }
-        .onExitCommand { showingSuggestions = false; suggestions.cancel() }
+        .onExitCommand { releaseFocus() }
         .popover(isPresented: $showingSuggestions, arrowEdge: .bottom) { suggestionList }
       Button { showingHot.toggle(); if showingHot { suggestions.loadTrending() } } label: {
         Image(systemName: "flame").font(.system(size: 13))
@@ -155,7 +156,9 @@ struct M3SearchBox: View {
       .glassEffect(.regular.interactive(), in: Capsule())
       .overlay(Capsule().strokeBorder(focused ? Theme.accent.opacity(0.8) : .clear, lineWidth: 1))
       .animation(Theme.hoverAnimation, value: focused)
-      .onChange(of: focusRequest) { _, _ in focused = true }
+      .onChange(of: active, initial: true) { _, value in if !value { releaseFocus() } }
+      .onDisappear { releaseFocus() }
+      .onChange(of: focusRequest) { _, _ in if active { focused = true } }
       .onChange(of: hotRequest) { _, _ in showingSuggestions = false; showingHot = true; suggestions.loadTrending() }
   }
   private var suggestionList: some View {
@@ -202,6 +205,13 @@ struct M3SearchBox: View {
       }.padding(6).foregroundStyle(Theme.text(scheme))
     }.frame(width: 300).frame(maxHeight: 480)
   }
+  private func releaseFocus() {
+    focused = false
+    showingSuggestions = false
+    showingHot = false
+    suggestions.cancel()
+  }
+
   private func invoke(_ keyword: String, _ scope: M3SearchScope) {
     guard !keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     text = keyword; showingSuggestions = false; showingHot = false; focused = false

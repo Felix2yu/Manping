@@ -118,10 +118,10 @@ import Foundation
     }
   }
 
-  public func like(aid: Int64, requiresLogin: @escaping () -> Void = {}) async {
-    guard let liked else { refreshState(); return }
+  @discardableResult public func like(aid: Int64, requiresLogin: @escaping () -> Void = {}) async -> Bool {
+    guard let liked else { refreshState(); return false }
     let target = !liked
-    _ = await perform(aid: aid, requiresLogin: requiresLogin) { [service] snapshot in
+    return await perform(aid: aid, requiresLogin: requiresLogin) { [service] snapshot in
       try await service.setVideoLiked(aid: aid, liked: target, expectedIdentity: snapshot)
     } success: { self.liked = target }
   }

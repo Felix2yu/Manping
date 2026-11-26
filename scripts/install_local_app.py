@@ -6,6 +6,7 @@ import pathlib
 import plistlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -34,17 +35,35 @@ def verify_app(app: pathlib.Path) -> None:
     subprocess.check_call(["codesign", "--verify", "--deep", "--strict", str(app)])
 
 
-def is_running(app: pathlib.Path) -> bool:
+def running_pids(app: pathlib.Path) -> list[int]:
     pattern = re.escape(str(app / "Contents/MacOS"))
     result = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
     if result.returncode == 0:
-        return True
+        return [int(value) for value in result.stdout.split()]
     if result.returncode == 1:
-        return False
+        return []
     raise RuntimeError(result.stderr.strip() or "Could not check whether the app is running")
 
 
-def install(source: pathlib.Path, destination: pathlib.Path, replace: bool, dry_run: bool, skip_register: bool) -> None:
+def quit_running(app: pathlib.Path) -> None:
+    pids = running_pids(app)
+    if not pids:
+        return
+    print(f"Build verified; quitting {app.name} (PID {', '.join(map(str, pids))})", flush=True)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + 15
+    while running_pids(app):
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"{app.name} did not quit; it was left running and the installation was not replaced")
+        time.sleep(0.1)
+
+
+def install(source: pathlib.Path, destination: pathlib.Path, replace: bool, dry_run: bool,
+            skip_register: bool, restart: bool) -> None:
     source = source.resolve()
     destination = destination.expanduser().absolute()
     verify_app(source)
@@ -56,11 +75,11 @@ def install(source: pathlib.Path, destination: pathlib.Path, replace: bool, dry_
         raise RuntimeError(f"Destination directory does not exist: {destination.parent}")
     if destination.exists() and not replace:
         raise RuntimeError("Destination exists; pass --replace to keep a backup and replace it")
-    if is_running(destination):
-        raise RuntimeError(f"Quit {destination.name} before installing")
     if dry_run:
         print(f"Verified {source}")
         print(f"Would install to {destination}")
+        if restart:
+            print(f"Would quit any running {destination.name} and launch the installed app")
         return
 
     staging_root = pathlib.Path(tempfile.mkdtemp(prefix=f".{destination.stem}.install-", dir=destination.parent))
@@ -69,6 +88,10 @@ def install(source: pathlib.Path, destination: pathlib.Path, replace: bool, dry_
     try:
         shutil.copytree(source, staged, symlinks=True)
         verify_app(staged)
+        if restart:
+            quit_running(destination)
+        elif running_pids(destination):
+            raise RuntimeError(f"Quit {destination.name} before installing, or pass --restart to quit it after verification")
         if destination.exists() or destination.is_symlink():
             stamp = time.strftime("%Y%m%d-%H%M%S")
             backup = destination.parent / f".{destination.stem}.backup-{stamp}-{uuid.uuid4().hex[:8]}"
@@ -85,9 +108,14 @@ def install(source: pathlib.Path, destination: pathlib.Path, replace: bool, dry_
                 subprocess.check_call([LSREGISTER, "-f", str(destination)])
             except (OSError, subprocess.CalledProcessError) as error:
                 print(f"Installed, but LaunchServices registration failed: {error}", file=sys.stderr)
-        print(f"Installed {destination}")
+        print(f"Installed {destination}", flush=True)
         if backup is not None:
-            print(f"Backup {backup}")
+            print(f"Backup {backup}", flush=True)
+        if restart:
+            try:
+                subprocess.check_call(["open", "-n", str(destination)])
+            except (OSError, subprocess.CalledProcessError) as error:
+                raise RuntimeError(f"Installed to {destination}, but launch failed: {error}") from error
     finally:
         shutil.rmtree(staging_root, ignore_errors=True)
 
@@ -99,12 +127,34 @@ def main() -> int:
     parser.add_argument("--replace", action="store_true", help="Replace an existing app and retain a backup")
     parser.add_argument("--dry-run", action="store_true", help="Verify without changing the destination")
     parser.add_argument("--skip-register", action="store_true", help="Do not update LaunchServices")
+    parser.add_argument("--build", action="store_true", help="Build and sign a fresh Release before installing")
+    parser.add_argument("--ffmpeg", help="Explicit FFmpeg input matching Dependencies.lock.json")
+    parser.add_argument("--restart", action="store_true", help="Quit the old app only after verification, then launch the installed app")
     args = parser.parse_args()
+    build = None
     try:
-        install(args.source, args.destination, args.replace, args.dry_run, args.skip_register)
+        if args.build and args.dry_run:
+            raise RuntimeError("--build cannot be combined with --dry-run")
+        if args.ffmpeg and not args.build:
+            raise RuntimeError("--ffmpeg requires --build")
+        source = args.source
+        if args.build:
+            build_root = ROOT / ".build"
+            build_root.mkdir(exist_ok=True)
+            build = tempfile.TemporaryDirectory(prefix="local-install-", dir=build_root)
+            source = pathlib.Path(build.name) / APP_NAME
+            command = [sys.executable, str(ROOT / "scripts/bundle.py"), "--output", str(source)]
+            if args.ffmpeg:
+                command += ["--ffmpeg", args.ffmpeg]
+            print(f"Building and signing {source}; the running app will not be interrupted", flush=True)
+            subprocess.check_call(command)
+        install(source, args.destination, args.replace, args.dry_run, args.skip_register, args.restart)
     except (OSError, RuntimeError, plistlib.InvalidFileException, subprocess.CalledProcessError) as error:
         print(f"Install failed: {error}", file=sys.stderr)
         return 1
+    finally:
+        if build is not None:
+            build.cleanup()
     return 0
 
 

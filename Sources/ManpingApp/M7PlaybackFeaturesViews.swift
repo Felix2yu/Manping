@@ -213,7 +213,7 @@ struct PlaybackTimeline: View {
   #else
   static let debugHover: Double? = nil
   #endif
-  static let curveHeight: CGFloat = 14
+  static let curveHeight: CGFloat = 8
   static let trackHeight: CGFloat = 4
   static let hitHeight: CGFloat = 16
   static let chapterGap: CGFloat = 3
@@ -430,6 +430,7 @@ struct PlayerChapterButton: View {
   var override: Double? = nil
   @Binding var shown: Bool
   let seek: (Double) -> Void
+  @Environment(\.playerControlBarPosition) private var position
   var body: some View {
     let title = (PlaybackChapter.current(chapters, at: override ?? clock.time) ?? chapters.first)?.title ?? ""
     Button { shown.toggle() } label: {
@@ -442,7 +443,7 @@ struct PlayerChapterButton: View {
     }
     .buttonStyle(PlayerControlButtonStyle(size: 28, horizontalPadding: 10))
     .help("章节").accessibilityLabel("章节：" + title).demoAnchor("chapters")
-    .popover(isPresented: $shown, arrowEdge: .top) {
+    .popover(isPresented: $shown, arrowEdge: position == .top ? .bottom : .top) {
       ScrollView {
         PlaybackChapterAndBookmarkList(model: model, clock: clock, chapters: chapters, override: override) { position in
           seek(position); shown = false

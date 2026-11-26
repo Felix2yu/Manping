@@ -2,13 +2,14 @@ import AppKit
 import ManpingCore
 import SwiftUI
 
-// The settings window (⌘,): a glass sidebar with ten categories and a grouped `Form` per
+// The settings window (⌘,): a glass sidebar with native categories and a grouped `Form` per
 // category, built from `MacSettingsCatalog`. It replaces the old settings page in the main window.
 
 extension MacSettingGroup {
   var symbol: String {
     switch self {
     case .general: "gearshape"
+    case .interface: "paintpalette"
     case .playback: "play.rectangle"
     case .danmaku: "text.bubble"
     case .live: "dot.radiowaves.left.and.right"
@@ -24,7 +25,7 @@ extension MacSettingGroup {
 
 /// Sidebar pages that are not settings groups.
 enum SettingsPage: Equatable {
-  /// 控制条, after 播放: the player's control bar editor.
+  /// 播放控制条, after 用户界面: position, behavior and toolbar editing.
   case playerBar
   /// 首页推荐的一级/二级分区与 UP 主过滤规则。
   case recommendationFilters
@@ -35,7 +36,7 @@ enum SettingsPage: Equatable {
 
   var parentGroup: MacSettingGroup? {
     switch self {
-    case .playerBar: .playback
+    case .playerBar: .interface
     case .recommendationFilters: .general
     case .settingsBackup: .advanced
     case .acknowledgements: nil
@@ -131,59 +132,63 @@ private struct SettingsLayout: View {
   @Environment(\.colorScheme) private var scheme
   var body: some View {
     HStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 2) {
-        Color.clear.frame(height: 40)
-        ForEach(MacSettingGroup.allCases, id: \.self) { group in
-          Button { selection.group = group } label: {
+      ScrollView(.vertical) {
+        VStack(alignment: .leading, spacing: 1) {
+          Color.clear.frame(height: 36)
+          ForEach(MacSettingGroup.allCases, id: \.self) { group in
+            Button { selection.group = group } label: {
+              HStack(spacing: 10) {
+                Image(systemName: group.symbol).font(.system(size: 13)).frame(width: 20)
+                Text(group.rawValue).font(Theme.Font.body)
+                Spacer(minLength: 0)
+              }.padding(.horizontal, 10).frame(height: 30).contentShape(Rectangle())
+            }.buttonStyle(SidebarRowStyle(selected: selection.page == nil && selection.group == group))
+              .demoAnchor("settings.\(group.rawValue)")
+            if group == .interface {
+              Button { selection.select(.playerBar) } label: {
+                HStack(spacing: 10) {
+                  Image(systemName: "rectangle.bottomthird.inset.filled").font(.system(size: 13)).frame(width: 20)
+                  Text("播放控制条").font(Theme.Font.body)
+                  Spacer(minLength: 0)
+                }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 30).contentShape(Rectangle())
+              }.buttonStyle(SidebarRowStyle(selected: selection.page == .playerBar))
+            }
+            if group == .general {
+              Button { selection.select(.recommendationFilters) } label: {
+                HStack(spacing: 10) {
+                  Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 13)).frame(width: 20)
+                  Text("推荐过滤").font(Theme.Font.body)
+                  Spacer(minLength: 0)
+                }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 30).contentShape(Rectangle())
+              }.buttonStyle(SidebarRowStyle(selected: selection.page == .recommendationFilters))
+            }
+            if group == .advanced {
+              Button { selection.select(.settingsBackup) } label: {
+                HStack(spacing: 10) {
+                  Image(systemName: "arrow.up.arrow.down.circle").font(.system(size: 13)).frame(width: 20)
+                  Text("设置备份").font(Theme.Font.body)
+                  Spacer(minLength: 0)
+                }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 30).contentShape(Rectangle())
+              }.buttonStyle(SidebarRowStyle(selected: selection.page == .settingsBackup))
+            }
+          }
+          Spacer(minLength: 0)
+          Divider().padding(.horizontal, 6)
+          Button { selection.select(.acknowledgements) } label: {
             HStack(spacing: 10) {
-              Image(systemName: group.symbol).font(.system(size: 13)).frame(width: 20)
-              Text(group.rawValue).font(Theme.Font.body)
+              Image(systemName: "heart").font(.system(size: 13)).frame(width: 20)
+              Text("致谢").font(Theme.Font.body)
               Spacer(minLength: 0)
-            }.padding(.horizontal, 10).frame(height: 32).contentShape(Rectangle())
-          }.buttonStyle(SidebarRowStyle(selected: selection.page == nil && selection.group == group))
-            .demoAnchor("settings.\(group.rawValue)")
-          if group == .playback {
-            Button { selection.select(.playerBar) } label: {
-              HStack(spacing: 10) {
-                Image(systemName: "rectangle.bottomthird.inset.filled").font(.system(size: 13)).frame(width: 20)
-                Text("控制条").font(Theme.Font.body)
-                Spacer(minLength: 0)
-              }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 32).contentShape(Rectangle())
-            }.buttonStyle(SidebarRowStyle(selected: selection.page == .playerBar))
-          }
-          if group == .general {
-            Button { selection.select(.recommendationFilters) } label: {
-              HStack(spacing: 10) {
-                Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 13)).frame(width: 20)
-                Text("推荐过滤").font(Theme.Font.body)
-                Spacer(minLength: 0)
-              }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 32).contentShape(Rectangle())
-            }.buttonStyle(SidebarRowStyle(selected: selection.page == .recommendationFilters))
-          }
-          if group == .advanced {
-            Button { selection.select(.settingsBackup) } label: {
-              HStack(spacing: 10) {
-                Image(systemName: "arrow.up.arrow.down.circle").font(.system(size: 13)).frame(width: 20)
-                Text("设置备份").font(Theme.Font.body)
-                Spacer(minLength: 0)
-              }.padding(.horizontal, 10).padding(.leading, 22).frame(height: 32).contentShape(Rectangle())
-            }.buttonStyle(SidebarRowStyle(selected: selection.page == .settingsBackup))
-          }
+            }.padding(.horizontal, 10).frame(height: 30).contentShape(Rectangle())
+          }.buttonStyle(SidebarRowStyle(selected: selection.page == .acknowledgements)).demoAnchor("settings.致谢")
+            .padding(.bottom, 8)
         }
-        Spacer(minLength: 0)
-        Divider().padding(.horizontal, 6)
-        Button { selection.select(.acknowledgements) } label: {
-          HStack(spacing: 10) {
-            Image(systemName: "heart").font(.system(size: 13)).frame(width: 20)
-            Text("致谢").font(Theme.Font.body)
-            Spacer(minLength: 0)
-          }.padding(.horizontal, 10).frame(height: 32).contentShape(Rectangle())
-        }.buttonStyle(SidebarRowStyle(selected: selection.page == .acknowledgements)).demoAnchor("settings.致谢")
-          .padding(.bottom, 8)
+        .padding(.horizontal, 8)
+        .foregroundStyle(Theme.text(scheme))
       }
-      .padding(.horizontal, 8)
-      .foregroundStyle(Theme.text(scheme))
       .frame(width: 192)
+      .frame(maxHeight: .infinity)
+      .scrollIndicators(.hidden)
       .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous))
       .padding([.leading, .top, .bottom], Theme.panelInset)
       VStack(alignment: .leading, spacing: 0) {
@@ -194,7 +199,7 @@ private struct SettingsLayout: View {
         case .acknowledgements:
           AcknowledgementsPage()
         case .playerBar:
-          PlayerBarCustomizer()
+          PlayerBarCustomizer(settings: settings)
         case .recommendationFilters:
           RecommendationFilterSettingsView(model: model)
         case .settingsBackup:
@@ -211,7 +216,7 @@ private struct SettingsLayout: View {
   private var title: String {
     switch selection.page {
     case .acknowledgements: "致谢"
-    case .playerBar: "控制条"
+    case .playerBar: "播放控制条"
     case .recommendationFilters: "推荐过滤"
     case .settingsBackup: "设置备份"
     case nil: selection.group.rawValue
@@ -266,10 +271,15 @@ private struct SettingsCategoryView: View {
         }
       } else {
         Form {
-          ForEach(MacSettingsCatalog.sections(of: group), id: \.title) { section in
+          ForEach(MacSettingsCatalog.sections(of: group).filter {
+            !$0.descriptors.allSatisfy { MacSettingsCatalog.playerBarKeys.contains($0.key) }
+          }, id: \.title) { section in
             Section {
               leadingRows(section.title)
-              ForEach(section.descriptors.filter { !MacSettingsCatalog.openModeKeys.contains($0.key) }) { descriptor in
+              ForEach(section.descriptors.filter {
+                !MacSettingsCatalog.openModeKeys.contains($0.key)
+                  && !MacSettingsCatalog.playerBarKeys.contains($0.key)
+              }) { descriptor in
                 if descriptor.key == .livePaidConfirmThreshold {
                   LabeledContent {
                     HStack {
@@ -343,7 +353,7 @@ private struct SettingsCategoryView: View {
 
   @ViewBuilder private func footer(_ section: String) -> some View {
     switch (group, section) {
-    case (.general, "侧边栏项目"): Text("隐藏的项目仍可从菜单栏的「前往」打开。")
+    case (.interface, "侧边栏项目"): Text("隐藏的项目仍可从菜单栏的「前往」打开。")
     case (.download, "BBDown"): Text("生成的命令不含 Cookie、令牌等登录信息；拷贝后请自行检查再运行。")
     case (.playback, "省电"): PowerStatusLine()
     default: EmptyView()
@@ -351,7 +361,7 @@ private struct SettingsCategoryView: View {
   }
 
   @ViewBuilder private func sections(after section: String) -> some View {
-    if group == .general, section == "滚动加速" {
+    if group == .interface, section == "滚动加速" {
       Section("图片缓存") {
         LabeledContent {
           Button(settings.clearing ? "正在清除…" : "清除图片缓存") { confirmClear = true }.disabled(!settings.canClearImages)
@@ -428,6 +438,7 @@ private struct NumberUnit {
     switch key {
     case .speed, .temporarySpeed, .danmakuSpeed: symbol = "×"; fractionDigits = 1...2
     case .stepForward, .stepBackward, .cacheSeconds: symbol = "秒"; fractionDigits = 0...0
+    case .playerControlBarIdleDelay: symbol = "秒"; fractionDigits = 0...2
     case .volume, .maxVolume: symbol = "%"; fractionDigits = 0...0
     case .danmakuOpacity: symbol = "%"; scale = 100; fractionDigits = 0...0
     case .cacheMB, .backCacheMB: symbol = "MB"; fractionDigits = 0...0
@@ -436,7 +447,7 @@ private struct NumberUnit {
   }
 }
 
-private struct SettingRow: View {
+struct SettingRow: View {
   @ObservedObject var settings: M7SettingsModel
   let descriptor: MacSettingDescriptor
   private var key: MacSettingKey { descriptor.key }

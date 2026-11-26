@@ -1,6 +1,6 @@
 # CGL renderer 受限兼容策略
 
-本轮只修改 vendored mpv v0.41.0 的 `video/out/gpu/video.c`，作为第三份独立 patch 应用。Swift production、CMpv callback/线程 ownership、窗口嵌入、原始和派生 shader 权重均未修改。候选包为 `dist/renderer/Manping.app`；`dist/integration`、`dist/diagnostics` 保持封存。
+当前构建修改 vendored mpv v0.42.0 的 `video/out/gpu/video.c`，作为三项独立 patch 之一应用。Swift production、CMpv callback/线程 ownership、窗口嵌入、原始和派生 shader 权重均未修改。v0.41.0 的候选包 `dist/renderer/Manping.app`；`dist/integration`、`dist/diagnostics` 保持封存。
 
 ## 语义与范围
 
@@ -8,7 +8,7 @@
 
 颜色策略只处理 display-referred SDR BT.1886 到同 primaries 的 sRGB，或 BT.709 到 BT.709/BT.2020 linear。排除 LUT、alpha、interpolation、显式 gamut/inverse tone 配置，以及需要 tone mapping、black-point adaptation 或 gamut compression 的 metadata 形状。策略按值读取当前实际显示 frame 的 `params.color.hdr`，其余格式使用 renderer 已配置参数；没有全局改写旧 HDR metadata 路径。无 current frame 时安全 fallback。
 
-源/目标黑白点直接调用已链接的 libplacebo 7.360.1 `pl_color_space_infer_map` 和 `pl_color_space_nominal_luma_ex`。BT.1886 的有限对比度 EOTF 为 `a * pow(max(V, 0) + b, 2.4)`，其中 `a = (Lw^(1/2.4) - Lb^(1/2.4))^2.4`，`b = Lb^(1/2.4)/(Lw^(1/2.4) - Lb^(1/2.4))`，L 使用 libplacebo 的 nits/203 归一单位。
+源/目标黑白点直接调用已链接的 libplacebo 7.387.0 `pl_color_space_infer_map` 和 `pl_color_space_nominal_luma_ex`；EOTF 公式的固定参考来源仍为 v7.360.1。BT.1886 的有限对比度 EOTF 为 `a * pow(max(V, 0) + b, 2.4)`，其中 `a = (Lw^(1/2.4) - Lb^(1/2.4))^2.4`，`b = Lb^(1/2.4)/(Lw^(1/2.4) - Lb^(1/2.4))`，L 使用 libplacebo 的 nits/203 归一单位。
 
 - sRGB：按目标黑白点归一，再应用 piecewise sRGB 编码，最后在 renderer shader 内限制到 `[0,1]`。原超白输入并未在 capture 后校正；初版未限制输出的实验也单独保留。
 - production linear：输出相对于 203 nits SDR white 的 linear 值；不除以 target peak、不 clamp 到 1。BT.709→BT.2020 仅使用原色矩阵，不新增 gamut/tone 算法。
@@ -19,9 +19,11 @@
 
 复用 mpv 已注册的 option，没有新增 public option。只在以上受支持形状执行：`auto` 保留真实目标 min metadata 并交给 libplacebo 推断；`inf` 使用 gpu-next 同一 `1e-7` nits 黑位约定；正数将目标黑位设为 nominal target max/contrast。未知源 min=0 与明确源 min（例如 .1 nits）通过实际 frame metadata 区分。
 
-不支持的 source/target 形状沿用 legacy renderer。verbose log 给出 fallback reason；显式 `target-contrast` 未执行时给出 warning，getter 接受值不代表所有 TRC 都支持。例如已知 source min=.1、target peak406/contrast1000 需要 black-point adaptation，明确 fallback。PQ/HLG 不套用 SDR 黑位策略。
+不支持的 source/target 形状沿用 legacy renderer。verbose log 给出 fallback reason；显式 `target-contrast` 未执行时给出 warning，getter 接受值不代表所有 TRC 都支持。例如已知 source min=.1、target peak406/contrast1000 需要 black-point adaptation，明确 fallback；目标 peak 低于源 peak 时在 `pl_color_space_infer_map` 改写 metadata 前拒绝自定义黑位策略，避免把目标峰值误当成已执行 tone mapping。PQ/HLG 不套用 SDR 黑位策略。
 
 ## 验证与证据
+
+以下 `renderer-golden-final.json`、`renderer-linear-final.json`、`renderer-regressions.json`、`renderer-production.json` 与 `renderer-shader-runtime.json` 均为 v0.41.0 历史证据，未覆盖当前 v0.42.0 库。
 
 `renderer-golden-final.json` 是实际 production VideoSurface/CGL 的诊断 sRGB 固定 1280×720 输出，对比 stock gpu-next 原 shader；同一软件解码静态 input、完整原始像素，无 ROI、resample 或 capture 后修正。它不代表日常 production LINEAR 输出，`pixelEquivalent=false` 保留数值差异供验收。
 
@@ -35,7 +37,7 @@
 
 ## 构建与边界
 
-`renderer-source-recipe.json` 固定 archive/三份 patch SHA，验证污染源码重新 clean extraction，79 份原始/派生 shader SHA 未变。`RendererCompatibility.json` 保存参考 source SHA 与许可。`Dependencies.lock.json`、app 的 `MpvBuild.json` 和 app 外 `BundleManifest.json` 记录实际输入及最终 signed Mach-O；闭包保持 44 dylib + 2 executable。
+`renderer-source-recipe.json` 固定 v0.41.0 历史 baseline 的 archive/三份 patch SHA，并验证污染源码重新 clean extraction，79 份原始/派生 shader SHA 未变；当前 v0.42.0 构建改用三份 patch，其中两份属于 renderer 兼容层，一份修复非 Vulkan 构建的 Swift 窗口视图。`RendererCompatibility.json` 保存当前参考 source SHA 与许可。`Dependencies.lock.json`、app 的 `MpvBuild.json` 和 app 外 `BundleManifest.json` 记录实际输入及最终 signed Mach-O；闭包数量以这两份 manifest 为准。
 
 本轮没有验证物理 HDR 屏幕亮度、跨外屏切换、所有 ICC/gamut/tone 配置、所有用户 shader 或全部视频 metadata 组合。上述 fallback 表示保留旧行为，不表示完整移植 gpu-next。没有使用真实凭据、账号或联网视频执行这些 renderer probes。
 

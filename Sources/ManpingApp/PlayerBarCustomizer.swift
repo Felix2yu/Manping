@@ -8,6 +8,7 @@ import SwiftUI
 // the same `PlayerBarLayout.fit` the player uses.
 
 struct PlayerBarCustomizer: View {
+  @ObservedObject var settings: M7SettingsModel
   @ObservedObject private var store = PlayerBarStore.shared
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -58,14 +59,16 @@ struct PlayerBarCustomizer: View {
   private var pictureWidth: CGFloat {
     min(Self.maximumWidth, max(Self.minimumWidth, simulatedWidth ?? cardWidth))
   }
+  private var position: PlayerControlBarPosition { PlayerControlBarPosition(settings: settings.values) }
+  private var panelWidth: CGFloat { PlayerPanelLayout(stageWidth: pictureWidth, position: position).width + Self.barPadding * 2 }
   /// The bar shrinks to fit the card when the simulated picture is wider than the card.
-  private var barScale: CGFloat { min(1, max(0.2, (cardWidth - 32) / (pictureWidth - PlayerPanelLayout.inset * 2))) }
+  private var barScale: CGFloat { min(1, max(0.2, (cardWidth - 32) / panelWidth)) }
   /// The preview bar as drawn, in `space`.
   private var barFrame: CGRect {
     let scale = barScale
-    return CGRect(x: barBox.minX, y: barBox.maxY - 52 * scale, width: (pictureWidth - PlayerPanelLayout.inset * 2) * scale, height: 52 * scale)
+    return CGRect(x: barBox.minX, y: barBox.maxY - 52 * scale, width: panelWidth * scale, height: 52 * scale)
   }
-  private var rowWidth: CGFloat { pictureWidth - PlayerPanelLayout.inset * 2 - Self.barPadding * 2 }
+  private var rowWidth: CGFloat { panelWidth - Self.barPadding * 2 }
   private var fit: PlayerBarFit {
     PlayerBarLayout.fit(store.items, rowWidth: Double(rowWidth), leadingWidth: Double(Self.leadingWidth), hasInput: true, metrics: metrics)
   }
@@ -109,6 +112,7 @@ struct PlayerBarCustomizer: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 16) {
+        behaviorSettings
         header
         previewCard
         widthRow
@@ -124,6 +128,66 @@ struct PlayerBarCustomizer: View {
       guard Self.debugDrag != nil else { return }
       try? await Task.sleep(for: .seconds(1))
       applyDebugDrag()
+    }
+  }
+
+  private var behaviorSettings: some View {
+    Form {
+      Section("样式") {
+        HStack(spacing: 12) {
+          ForEach(PlayerControlBarPosition.allCases, id: \.self) { option in
+            Button { settings.set(.playerControlBarPosition, .text(option.rawValue)) } label: {
+              VStack(spacing: 6) {
+                PositionPreview(position: option)
+                Text(option.title).font(Theme.Font.caption.weight(option == position ? .semibold : .regular))
+              }
+              .frame(maxWidth: .infinity)
+              .padding(8)
+              .background(option == position ? Theme.accent.opacity(0.12) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+              .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(option == position ? Theme.accent : Color.primary.opacity(0.12), lineWidth: option == position ? 1.5 : 0.5))
+              .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+          }
+        }
+        .padding(.vertical, 4)
+      }
+      Section {
+        SettingRow(settings: settings, descriptor: MacSettingsCatalog.descriptor(.playerControlBarIdleDelay))
+        SettingRow(settings: settings, descriptor: MacSettingsCatalog.descriptor(.playerControlBarChapters))
+        SettingRow(settings: settings, descriptor: MacSettingsCatalog.descriptor(.playerArrowAction))
+        if PlayerArrowAction(settings: settings.values) == .seek {
+          SettingRow(settings: settings, descriptor: MacSettingsCatalog.descriptor(.stepForward))
+          SettingRow(settings: settings, descriptor: MacSettingsCatalog.descriptor(.stepBackward))
+        }
+        SettingRow(settings: settings, descriptor: MacSettingsCatalog.descriptor(.bottomProgress))
+      } header: {
+        Text("行为")
+      } footer: {
+        Text("顶部和底部都会在鼠标空闲后自动隐藏，只改变控制条的位置。")
+      }
+    }
+    .formStyle(.grouped)
+  }
+
+  private struct PositionPreview: View {
+    let position: PlayerControlBarPosition
+    var body: some View {
+      GeometryReader { geometry in
+        ZStack {
+          RoundedRectangle(cornerRadius: 5).fill(.black.opacity(0.82))
+          Rectangle().fill(.white.opacity(0.1)).frame(width: geometry.size.width * 0.68, height: geometry.size.height * 0.48)
+          let panel = RoundedRectangle(cornerRadius: position == .floating ? 4 : 1)
+          VStack {
+            if position == .top { panel.fill(.white.opacity(0.8)).frame(height: 6) }
+            Spacer(minLength: 0)
+            if position != .top { panel.fill(.white.opacity(0.8)).frame(height: 6) }
+          }
+          .padding(position == .floating ? 6 : 0)
+        }
+      }
+      .frame(height: 58)
+      .clipShape(RoundedRectangle(cornerRadius: 5))
     }
   }
 
@@ -146,7 +210,8 @@ struct PlayerBarCustomizer: View {
       Text("模拟窗口宽度 \(Int(pictureWidth)) pt · 收起 \(fit.hidden.count) 项")
         .font(Theme.Font.caption2).monospacedDigit().foregroundStyle(.white.opacity(0.8))
         .padding(.horizontal, 10).frame(height: 24).background(.black.opacity(0.45), in: Capsule())
-        .frame(maxWidth: .infinity, alignment: .trailing).padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity,
+          alignment: position == .top ? .bottomTrailing : .topTrailing).padding(14)
         .contentTransition(.numericText())
       if drag?.target == .remove {
         Text("松手即从控制条移除").font(Theme.Font.caption.weight(.bold)).foregroundStyle(Theme.danger(.dark))
@@ -156,14 +221,18 @@ struct PlayerBarCustomizer: View {
           .frame(maxWidth: .infinity).padding(.top, 104)
           .transition(.opacity)
       }
-      VStack {
+      if position == .top {
+        previewBar(fit).frame(width: panelWidth)
+          .scaleEffect(barScale, anchor: .topLeading)
+          .frame(width: max(0, cardWidth - 32), height: 52, alignment: .topLeading)
+          .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { frame in barBox = frame }
+          .padding(.leading, 16).padding(.top, 16)
+      } else {
         Spacer(minLength: 0)
-        previewBar(fit).frame(width: pictureWidth - PlayerPanelLayout.inset * 2)
+        previewBar(fit).frame(width: panelWidth)
           .scaleEffect(barScale, anchor: .bottomLeading)
           .frame(width: max(0, cardWidth - 32), height: 52, alignment: .bottomLeading)
-          .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { frame in
-            barBox = frame
-          }
+          .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { frame in barBox = frame }
           .padding(.leading, 16).padding(.bottom, 16)
       }
     }

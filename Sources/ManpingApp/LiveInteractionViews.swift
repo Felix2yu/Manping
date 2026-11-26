@@ -236,12 +236,13 @@ struct LivePanelPopover: ViewModifier {
   /// Needed by the gift panel only; other panels may pass nil.
   let model: AppModel?
   @ObservedObject var interaction: LiveInteractionModel
+  @Environment(\.playerControlBarPosition) private var position
   func body(content: Content) -> some View {
     content.popover(
       isPresented: Binding(
         get: { interaction.panel == panel && interaction.panelAnchor == anchor },
         set: { if !$0, interaction.panel == panel, interaction.panelAnchor == anchor { interaction.panel = nil } }
-      ), arrowEdge: .top
+      ), arrowEdge: position == .top ? .bottom : .top
     ) { LivePanelContent(panel: panel, model: model, interaction: interaction) }
   }
 }

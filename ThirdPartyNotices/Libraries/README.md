@@ -5,7 +5,7 @@
 | 库 | 来源 | 许可（SPDX） | 许可全文 |
 |---|---|---|---|
 | libdav1d.7.dylib | dav1d 1.5.4 | BSD-2-Clause | `dav1d-1.5.4/COPYING` |
-| ffmpeg (executable), libavcodec.63.1.102.dylib, libavdevice.63.1.102.dylib, libavfilter.12.1.102.dylib, libavformat.63.1.102.dylib, libavutil.61.1.102.dylib, libswresample.7.1.102.dylib, libswscale.10.1.102.dylib | ffmpeg 9.0.2 | GPL-3.0-or-later | `ffmpeg-9.0.2/COPYING.GPLv2`, `ffmpeg-9.0.2/COPYING.GPLv3`, `ffmpeg-9.0.2/COPYING.LGPLv2.1`, `ffmpeg-9.0.2/COPYING.LGPLv3`, `ffmpeg-9.0.2/LICENSE.md` |
+| ffmpeg (executable), libavcodec.63.24.100.dylib, libavdevice.63.5.100.dylib, libavfilter.12.8.100.dylib, libavformat.63.16.100.dylib, libavutil.61.19.100.dylib, libswresample.7.6.100.dylib, libswscale.10.5.100.dylib | ffmpeg 9.1 | GPL-3.0-or-later | `ffmpeg-9.1/COPYING.GPLv2`, `ffmpeg-9.1/COPYING.GPLv3`, `ffmpeg-9.1/COPYING.LGPLv2.1`, `ffmpeg-9.1/COPYING.LGPLv3`, `ffmpeg-9.1/LICENSE.md` |
 | libfontconfig.1.dylib | fontconfig 2.18.3 | HPND-sell-variant AND Unicode-3.0 AND MIT-Modern-Variant AND MIT AND LicenseRef-Homebrew-public-domain | `fontconfig-2.18.3/COPYING` |
 | libfreetype.6.dylib | freetype 2.14.3 | GPL-3.0（双许可之一） | `freetype-2.14.3/LICENSE.TXT`, `freetype-2.14.3/COPYING.GPL-3.0`, `freetype-2.14.3/CHOICE.txt` |
 | libfribidi.0.dylib | fribidi 1.0.17 | GPL-2.0-or-later AND LGPL-2.1-or-later | `fribidi-1.0.17/COPYING` |
@@ -40,4 +40,4 @@
 | libx265.217.dylib | x265 4.3 | GPL-2.0-or-later | `x265-4.3/COPYING` |
 | liblzma.5.dylib | xz 5.8.4 | 0BSD AND GPL-2.0-or-later | `xz-5.8.4/COPYING`, `xz-5.8.4/COPYING.0BSD`, `xz-5.8.4/COPYING.GPLv2`, `xz-5.8.4/COPYING.GPLv3`, `xz-5.8.4/COPYING.LGPLv2.1` |
 | libzimg.2.dylib | zimg 3.0.6 | WTFPL | `zimg-3.0.6/COPYING` |
-| libmpv.2.dylib | mpv 0.41.0（本项目构建） | GPL-2.0-or-later | `../mpv-LICENSE.GPL`, `../mpv-LICENSE.LGPL`, `../mpv-Copyright` |
+| libmpv.2.dylib | mpv 0.42.0（本项目构建） | GPL-2.0-or-later | `../mpv-LICENSE.GPL`, `../mpv-LICENSE.LGPL`, `../mpv-Copyright` |

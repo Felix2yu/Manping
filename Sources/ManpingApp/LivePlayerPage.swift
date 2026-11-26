@@ -130,7 +130,7 @@ struct LivePlayerPage: View {
 
   /// Paused or a popover open: the controls stay up.
   private var controlsPinned: Bool {
-    model.usesUIFixtures || player.paused || volumeShown || danmakuSettingsShown
+    model.usesUIFixtures || live.ended || player.paused || volumeShown || danmakuSettingsShown
       || interaction.pinned
   }
   private func updateComposerVisibility() {
@@ -138,6 +138,9 @@ struct LivePlayerPage: View {
   }
   private var barInputVisible: Bool {
     !model.compactPlayer && (immersive || sidebarHidden || tab == .info)
+  }
+  private var controlBarPosition: PlayerControlBarPosition {
+    PlayerControlBarPosition(settings: model.appSettings)
   }
   private var controlsShown: Bool { chrome.visible || controlsPinned }
 
@@ -155,20 +158,21 @@ struct LivePlayerPage: View {
           Label(message, systemImage: "arrow.triangle.2.circlepath").font(Theme.Font.caption)
             .foregroundStyle(.white).padding(.horizontal, 12).frame(height: 30)
             .environment(\.colorScheme, .dark).floatingGlassPanel(radius: Theme.Radius.lg, readingTint: .black.opacity(0.35))
-            .padding(16).transition(.opacity)
+            .padding(controlBarPosition == .top ? 84 : 16).transition(.opacity)
         }
       }
       .overlay { if !model.compactPlayer { LiveInteractionOverlay(interaction: interaction) } }
       .overlay(alignment: .bottomTrailing) {
         if barInputVisible {
           LiveGiftResultCards(interaction: interaction).frame(width: min(360, stageWidth - 24))
-            .padding(.bottom, 96).padding(.trailing, 12)
+            .padding(.bottom, controlBarPosition == .top ? 12 : 96).padding(.trailing, 12)
         }
       }
-      .overlay(alignment: .bottom) { controls.playerChromeFade(controlsShown) }
       .animation(.easeOut(duration: 0.2), value: live.reconnecting)
+      .playerStageControls(shown: controlsShown, position: controlBarPosition) { controls }
       .reportsStageWidth($stageWidth)
-      .tracksPlayerChrome(chrome, pinned: controlsPinned)
+      .tracksPlayerChrome(chrome, pinned: controlsPinned, playing: !player.paused && !live.ended,
+        idleDelay: model.appSettings.number(.playerControlBarIdleDelay))
       .onChange(of: player.volume) { _, _ in chrome.activity() }
       .onChange(of: player.commentsEnabled) { _, _ in chrome.activity() }
       .playerStageShape(immersive: immersive)
@@ -202,8 +206,8 @@ struct LivePlayerPage: View {
   }
 
   private var controls: some View {
-    let layout = PlayerPanelLayout(stageWidth: stageWidth)
-    return PlayerControlPanel(chrome: chrome) {
+    let layout = PlayerPanelLayout(stageWidth: stageWidth, position: controlBarPosition)
+    return PlayerControlPanel(chrome: chrome, position: controlBarPosition) {
       PlayerBarRow(model: model, player: player, layout: layout, page: barPage,
         danmakuShown: $danmakuSettingsShown, networkShown: .constant(false), volumeShown: $volumeShown,
         composeShown: $interaction.composeShown,

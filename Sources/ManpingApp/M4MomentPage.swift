@@ -10,6 +10,8 @@ struct M4MomentPage: View {
   @State private var commentsPresented = false
   @State private var commentItem: RPCDynamic?
   @State private var commentTask: Task<Void, Never>?
+  @State private var loadMoreTask: Task<Void, Never>?
+  @State private var viewportReady = false
   @State private var position = ScrollPosition(edge: .top)
   @State private var scrollMemory = MomentScrollMemory()
   @Environment(\.browsingPageActive) private var browsingPageActive
@@ -50,14 +52,13 @@ struct M4MomentPage: View {
         }
       }
       .animation(.snappy(duration: 0.28), value: commentsPresented)
-      .task(id: model.refreshToken) {
-        await feed.start(section: fixtureLaunchTarget == nil ? nil : .comprehensive)
-        if PerformanceOptions.scrollPage == "moment" {
-          PerformanceRun.log("PERF moment feed items=\(feed.items.count) error=\(feed.error ?? "none")")
-        }
-        if fixtureLaunchTarget == "moment:comments", let first = feed.items.first {
-          openComments(first)
-        }
+      .task(id: viewportReady) {
+        guard viewportReady else { return }
+        await startFeed()
+      }
+      .onChange(of: model.refreshToken) { _, _ in
+        guard viewportReady else { return }
+        Task { await startFeed() }
       }
       .onChange(of: browsingPageActive) { _, active in
         if active { Task { await feed.activate() } }
@@ -67,6 +68,15 @@ struct M4MomentPage: View {
       .onDisappear { feed.cancel(); closeComments() }
       .onExitCommand(perform: browsingPageActive ? { if commentsPresented { closeComments() } } : nil)
       .performanceScrollProbe(page: PerformanceOptions.scrollPage ?? "")
+  }
+  private func startFeed() async {
+    await feed.start(section: fixtureLaunchTarget == nil ? nil : .comprehensive)
+    if PerformanceOptions.scrollPage == "moment" {
+      PerformanceRun.log("PERF moment feed items=\(feed.items.count) error=\(feed.error ?? "none")")
+    }
+    if fixtureLaunchTarget == "moment:comments", let first = feed.items.first {
+      openComments(first)
+    }
   }
   private var sectionTabs: some View {
     SegmentedTabs(options: MomentFeedSection.allCases.map { ($0, $0.rawValue) }, selection: Binding(
@@ -99,6 +109,15 @@ struct M4MomentPage: View {
     }
   }
   private var results: some View {
+    GeometryReader { _ in
+      resultsContent
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+          feed.updateViewport(size)
+          if !viewportReady { viewportReady = true }
+        }
+    }
+  }
+  private var resultsContent: some View {
     Group {
       if feed.items.isEmpty && feed.loading {
         PageStateView(.loading, title: "正在加载动态…")
@@ -111,7 +130,7 @@ struct M4MomentPage: View {
       } else {
         ScrollView {
           if feed.section == .video {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: Theme.gridSpacing)], spacing: Theme.gridSpacing) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: MomentVideoGridMetrics.minimumWidth), spacing: Theme.gridSpacing)], spacing: Theme.gridSpacing) {
               ForEach(feed.items, id: \.id) { item in
                 MomentVideoCard(item: item, feed: feed, model: model) { openComments(item) }
               }
@@ -127,9 +146,11 @@ struct M4MomentPage: View {
           if let error = feed.error {
             PageStateView(.error, title: "没能加载更多动态", message: error, actionTitle: "重试") { Task { await feed.loadNext() } }
           } else if feed.loading || feed.hasMore {
-            LoadMoreFooter(isLoading: feed.loading, hasMore: feed.hasMore) { Task { await feed.loadNext() } }
+            LoadMoreFooter(isLoading: feed.loading, autoLoad: false, hasMore: feed.hasMore, load: loadMore)
           }
         }.scrollPosition($position)
+          .prefetchOnScroll(enabled: feed.hasMore && feed.error == nil && loadMoreTask == nil,
+            loadOnEnable: false, load: loadMore)
           .defaultScrollAnchor(.top)
           .onScrollGeometryChange(for: CGPoint.self) { geometry in
             geometry.contentOffset
@@ -144,6 +165,13 @@ struct M4MomentPage: View {
           }
       }
     }.frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+  private func loadMore() {
+    guard loadMoreTask == nil else { return }
+    loadMoreTask = Task {
+      await feed.loadNext()
+      loadMoreTask = nil
+    }
   }
   private func openComments(_ item: RPCDynamic) {
     guard let target = M4CommentTarget(dynamic: item) else { return }

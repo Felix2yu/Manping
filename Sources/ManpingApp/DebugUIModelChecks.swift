@@ -320,6 +320,8 @@ private actor ModelCheckTransport: AuthTransport {
     await latch.waitFor(await model.service.authSnapshot())
     try require(model.pausedBrowsing.suspension == nil, "identity change revokes captured resume")
     model.goBack()
+    try require(!model.mainShowsPlayer && model.player.paused, "back still parks playback after account change")
+    model.goForward()
     try require(model.mainShowsPlayer && model.player.paused, "account change cannot resume old playback")
     print("PASS AppModel paused browsing: paused/loading/nested/back/forward/refresh/replacement/media-key/identity/countdown/mini/detached/fullscreen")
   }

@@ -249,14 +249,14 @@ struct WatchedBadge: View {
     if let record = store.record(bvid), record.watched {
       Group {
         if compact {
-          Image(systemName: "checkmark.circle.fill").font(.system(size: 11, weight: .semibold))
-            .padding(4).background(.black.opacity(0.58), in: Circle()).padding(6)
+          Image(systemName: "checkmark.circle.fill").font(.system(size: 16, weight: .semibold))
+            .padding(5).background(.black.opacity(0.62), in: Circle()).padding(7)
         } else {
           HStack(spacing: 3) {
-            Image(systemName: "checkmark.circle.fill").font(.system(size: 9, weight: .semibold))
-            Text("已看").font(.system(size: 10, weight: .medium))
-          }.padding(.horizontal, 6).padding(.vertical, 3)
-            .background(.black.opacity(0.58), in: Capsule()).padding(8)
+            Image(systemName: "checkmark.circle.fill").font(.system(size: 11, weight: .semibold))
+            Text("已看").font(.system(size: 11, weight: .medium))
+          }.padding(.horizontal, 8).padding(.vertical, 4)
+            .background(.black.opacity(0.62), in: Capsule()).padding(8)
         }
       }.foregroundStyle(.white).accessibilityLabel("已看")
     }

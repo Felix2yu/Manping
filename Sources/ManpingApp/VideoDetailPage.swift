@@ -37,6 +37,13 @@ struct VideoDetailPage: View {
   @State private var shortcutRegistration = UUID()
   @State private var chaptersShown = false
   @State private var videoShot: VideoShot?
+  @State private var likeFeedback: LikeFeedback?
+
+  private enum LikeFeedback: Equatable {
+    case liked, unliked
+    var text: String { self == .liked ? "点赞成功" : "已取消点赞" }
+    var symbol: String { self == .liked ? "hand.thumbsup.fill" : "hand.thumbsup" }
+  }
 
   init(model: AppModel, player: PlayerModel, video: Video) {
     self.model = model
@@ -44,7 +51,7 @@ struct VideoDetailPage: View {
     self.video = video
     if model.usesUIFixtures {
       _interactions = StateObject(wrappedValue: VideoInteractionModel(service: model.service,
-        stateLoader: { _, _ in VideoOperationState(liked: true, following: true, favorited: true) }))
+        stateLoader: { _, _ in VideoOperationState(liked: false, following: true, favorited: true) }))
     } else {
       _interactions = StateObject(wrappedValue: VideoInteractionModel(service: model.service))
     }
@@ -105,6 +112,7 @@ struct VideoDetailPage: View {
       // Keyed by bvid: `Video.id` switches from BV to av when details arrive.
       .task(id: video.bvid.isEmpty ? video.id : video.bvid) {
         model.refreshPlaybackBookmarks()
+        likeFeedback = nil
         detailLoadError = nil
         userPickedSection = false
         section = model.launchVideoTab.flatMap(Section.init(launchTab:)) ??
@@ -200,10 +208,17 @@ struct VideoDetailPage: View {
     userPickedSection = true
     chrome.activity()
   }
-  private func shortcutLike() {
+  private func toggleLike() {
     guard let aid = details?.video.aid, aid > 0 else { return }
-    Task { await interactions.like(aid: aid) { model.showingLogin = true } }
+    let wasLiked = interactions.liked == true
+    Task {
+      let succeeded = await interactions.like(aid: aid) { model.showingLogin = true }
+      guard succeeded else { return }
+      likeFeedback = wasLiked ? .unliked : .liked
+      chrome.activity()
+    }
   }
+  private func shortcutLike() { toggleLike() }
   private func shortcutCoin() {
     guard let aid = details?.video.aid, aid > 0 else { return }
     coinCount = 1; coinAlsoLike = true; showingCoin = true
@@ -213,11 +228,25 @@ struct VideoDetailPage: View {
     Task { if await interactions.loadFolders(aid: aid, requiresLogin: { model.showingLogin = true }) { showingFavorites = true } }
   }
 
-  private var shareURL: URL? {
-    if let aid = details?.video.aid ?? video.aid { return URL(string: "https://www.bilibili.com/video/av\(aid)") }
-    if !video.bvid.isEmpty { return URL(string: "https://www.bilibili.com/video/\(video.bvid)") }
-    return nil
+  private struct LikeFeedbackBanner: View {
+    let feedback: LikeFeedback
+    @State private var appeared = false
+    var body: some View {
+      Label(feedback.text, systemImage: feedback.symbol)
+        .font(.system(size: 15, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .glassEffect(.regular.tint(Theme.accent.opacity(0.72)), in: Capsule())
+        .shadow(color: .black.opacity(0.24), radius: 12, y: 4)
+        .scaleEffect(appeared ? 1 : 0.82)
+        .opacity(appeared ? 1 : 0)
+        .onAppear {
+          withAnimation(.spring(response: 0.32, dampingFraction: 0.68)) { appeared = true }
+        }
+    }
   }
+
+  private var shareURL: URL? { CardActions.webURL(video) }
   private var currentPart: VideoPart? { details?.parts.first { $0.cid == model.selected?.cid } }
   /// "Video · Part" only for multi-part videos whose part title adds something.
   private var pageTitle: String {
@@ -249,6 +278,9 @@ struct VideoDetailPage: View {
   /// The picture's shape, from the stream being played (16:9 until it is known).
   private var pictureAspect: CGFloat? { playerAspect(width: model.selectedStream?.width, height: model.selectedStream?.height) }
   private var stageCover: URL? { details?.video.cover ?? model.selected?.cover }
+  private var controlBarPosition: PlayerControlBarPosition {
+    PlayerControlBarPosition(settings: model.appSettings)
+  }
   private var playerPanel: some View {
     // Controls float over the stage so showing them never resizes the GL layer. They fade
     // instead of being removed, so menus and popovers anchored to them stay open.
@@ -283,6 +315,17 @@ struct VideoDetailPage: View {
           }
         }
       }
+      .overlay(alignment: .center) {
+        if let likeFeedback {
+          LikeFeedbackBanner(feedback: likeFeedback)
+            .padding(.bottom, 80)
+            .allowsHitTesting(false)
+            .task(id: likeFeedback) {
+              try? await Task.sleep(for: .seconds(1.4))
+              self.likeFeedback = nil
+            }
+        }
+      }
       .overlay(alignment: .topLeading) {
         if fixtureMedia {
           Text("本地预览 · 未加载媒体").font(Theme.Font.caption2).foregroundStyle(.white.opacity(0.65)).padding(14)
@@ -295,22 +338,22 @@ struct VideoDetailPage: View {
         }
       }
       .overlay(alignment: .bottom) {
-        ZStack(alignment: .bottom) {
-          if model.appSettings.bool(.bottomProgress) {
-            PlaybackProgressBar(clock: player.clock, duration: displayDuration, override: fixturePlayback ? fixtureTime : nil)
-              .opacity(controlsShown ? 0 : 1).animation(.easeOut(duration: 0.2), value: controlsShown)
-          }
-          playerControls.playerChromeFade(controlsShown)
+        if model.appSettings.bool(.bottomProgress) {
+          PlaybackProgressBar(clock: player.clock, duration: displayDuration, override: fixturePlayback ? fixtureTime : nil)
+            .opacity(controlsShown ? 0 : 1).animation(.easeOut(duration: 0.2), value: controlsShown)
         }
       }
       .overlay(alignment: .topTrailing) {
         if let deadline = model.nextPlaybackDeadline {
           NextPlaybackOverlay(deadline: deadline, onPlay: model.playNext, onCancel: model.cancelNextPlayback)
+            .padding(.top, controlBarPosition == .top ? 84 : 0)
         }
       }
       .animation(.snappy(duration: 0.3), value: model.nextPlaybackDeadline == nil)
+      .playerStageControls(shown: controlsShown, position: controlBarPosition) { playerControls }
       .reportsStageWidth($stageWidth)
-      .tracksPlayerChrome(chrome, pinned: controlsPinned)
+      .tracksPlayerChrome(chrome, pinned: controlsPinned, playing: !displayPaused,
+        idleDelay: model.appSettings.number(.playerControlBarIdleDelay))
       // Playback shortcuts (menu bar, media keys) bring the controls in.
       .onChange(of: player.speed) { _, _ in chrome.activity() }
       .onChange(of: player.volume) { _, _ in chrome.activity() }
@@ -324,10 +367,11 @@ struct VideoDetailPage: View {
     model.manifest?.video.filter { ["http", "https"].contains($0.url.scheme ?? "") && $0.url.host != nil } ?? []
   }
   private var playerControls: some View {
-    let layout = PlayerPanelLayout(stageWidth: stageWidth)
-    return PlayerControlPanel(chrome: chrome) {
+    let layout = PlayerPanelLayout(stageWidth: stageWidth, position: controlBarPosition)
+    return PlayerControlPanel(chrome: chrome, position: controlBarPosition) {
       PlaybackTimeline(clock: player.clock, duration: displayDuration, override: fixturePlayback ? fixtureTime : nil,
-        preview: videoShot, density: timelineDensity, chapters: timelineChapters, markers: model.aiMarks(for: model.aiMediaKey),
+        preview: videoShot, density: timelineDensity,
+        chapters: model.appSettings.bool(.playerControlBarChapters) ? timelineChapters : [], markers: model.aiMarks(for: model.aiMediaKey),
         bookmarkTimes: model.bookmarksForCurrentMedia.map(\.time),
         bufferedAhead: { [player] in player.bufferedAhead }, scrubbing: { scrubbing = $0 }) { position in
         if fixturePlayback { fixtureTime = position } else { player.seek(position) }
@@ -509,8 +553,7 @@ struct VideoDetailPage: View {
             "点赞", value: details.stats.like,
             icon: interactions.liked == true ? "hand.thumbsup.fill" : "hand.thumbsup"
           ) {
-            guard let aid = details.video.aid, aid > 0 else { return }
-            Task { await interactions.like(aid: aid) { model.showingLogin = true } }
+            toggleLike()
           }
           operation("投币", value: details.stats.coin, icon: "circle.hexagongrid") {
             coinCount = 1

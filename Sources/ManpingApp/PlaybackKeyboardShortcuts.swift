@@ -24,7 +24,7 @@ struct PlaybackPageShortcutActions {
 }
 
 enum PlaybackShortcut: Equatable, CaseIterable {
-  case home, player, cycleWindows, zoom, compact, info, comments, share, copyShareLink
+  case home, player, cycleWindows, zoom, compact, detached, info, comments, share, copyShareLink
   case speedUp, speedDown, volumeUp, volumeDown
   case previousAdjacent, nextAdjacent, previousHistory, nextHistory
   case like, coin, favorite, triple, playPause, seekBackward, seekForward
@@ -76,6 +76,7 @@ enum PlaybackShortcut: Equatable, CaseIterable {
     case "b": return .player
     case "g": return .zoom
     case "s": return .compact
+    case "p": return .detached
     case "x": return .info
     case "c": return .comments
     case "v": return .share
@@ -154,8 +155,9 @@ enum PlaybackKeyboardInput {
       return nil
     }
     if heldAction != nil && !event.isARepeat { cancelHold() }
-    guard let action = PlaybackShortcut.match(event),
-      delegate.canPerformShortcut(action, in: event.window ?? NSApp.keyWindow) else { return event }
+    guard let action = PlaybackShortcut.match(event) else { return event }
+    // Recognized playback keys stay consumed when unavailable, so AppKit does not beep.
+    guard delegate.canPerformShortcut(action, in: event.window ?? NSApp.keyWindow) else { return nil }
     switch action {
     case .like, .triple:
       if !event.isARepeat { beginHold(action, delay: 0.45) }

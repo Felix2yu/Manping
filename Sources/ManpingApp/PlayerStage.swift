@@ -1,5 +1,6 @@
 import AppKit
 import CoreImage
+import ManpingCore
 import SwiftUI
 
 // The playback stage (DesignSystem.md §11): the video page, the episode page and the live room
@@ -57,6 +58,17 @@ extension View {
   /// The right panel beside the stage: a `panel` surface with the `lg` radius and a hairline edge.
   func playerSidePanelSurface() -> some View {
     modifier(PlayerSidePanelSurface())
+  }
+
+  /// Floats playback controls over the stage so showing them never resizes the video.
+  func playerStageControls<Controls: View>(
+    shown: Bool,
+    position: PlayerControlBarPosition = .floating,
+    @ViewBuilder controls: () -> Controls
+  ) -> some View {
+    overlay(alignment: position == .top ? .top : .bottom) {
+      controls().playerChromeFade(shown, position: position)
+    }
   }
 }
 

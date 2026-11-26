@@ -23,6 +23,12 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
   private let operations: MomentOperationsService?
   private var offset = ""
   private var baseline = ""
+  private var pendingItems: [(item: RPCDynamic, identity: AuthSnapshot)] = []
+  private var knownIDs = Set<String>()
+  private var remoteHasMore = false
+  private var viewport: CGSize?
+  private var batchSize = 2
+  private static let estimatedFullCardHeight: CGFloat = 280
   private var generation = UUID()
   private var requestVersion = UUID()
   private var stateIdentities: [String: AuthSnapshot] = [:]
@@ -84,19 +90,44 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
     active = true
     if items.isEmpty && error == nil && hasMore { await loadNext() }
   }
+  func updateViewport(_ size: CGSize) {
+    guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return }
+    viewport = size
+    updateBatchSize()
+    if active, !loading, !pendingItems.isEmpty, items.count < batchSize {
+      appendNextBatch(limit: batchSize - items.count)
+    }
+  }
+  private func updateBatchSize() {
+    guard let viewport else { return }
+    let newBatchSize: Int
+    if section == .video {
+      newBatchSize = MomentVideoGridMetrics.batchSize(for: viewport)
+    } else {
+      let contentHeight = max(1, viewport.height - 2 * Theme.gridPadding)
+      let rows = max(1, Int(ceil(contentHeight / Self.estimatedFullCardHeight)))
+      newBatchSize = max(2, rows * 2)
+    }
+    guard batchSize != newBatchSize else { return }
+    batchSize = newBatchSize
+  }
   private func reset(clearUsers: Bool) {
     cancel(); items = []; offset = ""; baseline = ""; hasMore = true
+    pendingItems = []; knownIDs = []; remoteHasMore = false
     error = nil; mutationError = nil; likedOverrides = [:]; likeCounts = [:]
     if clearUsers { users = [] }
   }
   func start(section: MomentFeedSection? = nil) async {
     if let section { self.section = section }
+    updateBatchSize()
     reset(clearUsers: true); selectedUserID = nil; active = true
     await loadNext()
   }
   func select(section: MomentFeedSection) async {
     guard self.section != section else { return }
-    reset(clearUsers: true); self.section = section; selectedUserID = nil; active = true
+    self.section = section
+    updateBatchSize()
+    reset(clearUsers: true); selectedUserID = nil; active = true
     PerformanceEnvironment.defaults.set(section.rawValue, forKey: "moment.lastSection")
     await loadNext()
   }
@@ -112,6 +143,7 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
     reset(clearUsers: true)
     items = page.items; users = page.users; offset = page.historyOffset
     baseline = page.updateBaseline; hasMore = page.hasMore
+    knownIDs = Set(page.items.map(\.id)); remoteHasMore = page.hasMore
   }
   #endif
   func refresh() async {
@@ -128,31 +160,35 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
     let task = Task { @MainActor [weak self] in
       guard let self else { return }
       do {
-        guard let rpc else { throw BiliError.dependency("无法初始化动态服务") }
-        let initial = await auth.authSnapshot()
-        let snapshot = try await auth.authorizeAppInteraction(expectedIdentity: initial)
-        let query: RPCDynamicQuery = mid.map { .userAll(mid: $0, offset: offset) }
-          ?? (section == .video ? .video(offset: offset, baseline: baseline) : .all(offset: offset, baseline: baseline))
-        let page = try await rpc.dynamics(query)
-        let current = await auth.authSnapshot()
         try Task.checkCancellation()
-        guard generation == revision, requestVersion == requestRevision, sameIdentity(snapshot, current) else { throw CancellationError() }
-        var known = Set(items.map(\.id))
-        let incoming = page.items.filter {
-          guard !$0.id.isEmpty else { return false }
-          if section == .video && mid == nil {
-            switch $0.content { case .video, .episode: break; default: return false }
+        if pendingItems.isEmpty {
+          guard let rpc else { throw BiliError.dependency("无法初始化动态服务") }
+          let initial = await auth.authSnapshot()
+          let snapshot = try await auth.authorizeAppInteraction(expectedIdentity: initial)
+          let query: RPCDynamicQuery = mid.map { .userAll(mid: $0, offset: offset) }
+            ?? (section == .video ? .video(offset: offset, baseline: baseline) : .all(offset: offset, baseline: baseline))
+          let page = try await rpc.dynamics(query)
+          let current = await auth.authSnapshot()
+          try Task.checkCancellation()
+          guard generation == revision, requestVersion == requestRevision, sameIdentity(snapshot, current) else { throw CancellationError() }
+          let incoming = page.items.filter {
+            guard !$0.id.isEmpty else { return false }
+            if section == .video && mid == nil {
+              switch $0.content { case .video, .episode: break; default: return false }
+            }
+            return knownIDs.insert($0.id).inserted
           }
-          return known.insert($0.id).inserted
+          pendingItems = incoming.map { (item: $0, identity: current) }
+          if mid == nil && offset.isEmpty {
+            var userIDs = Set<Int64>()
+            users = page.users.filter { $0.id > 0 && userIDs.insert($0.id).inserted }
+          }
+          self.offset = page.historyOffset; self.baseline = page.updateBaseline
+          remoteHasMore = page.hasMore && !page.historyOffset.isEmpty && page.historyOffset != offset
         }
-        items += incoming
-        for item in incoming { stateIdentities[item.id] = current }
-        if mid == nil && offset.isEmpty {
-          var userIDs = Set<Int64>()
-          users = page.users.filter { $0.id > 0 && userIDs.insert($0.id).inserted }
-        }
-        self.offset = page.historyOffset; self.baseline = page.updateBaseline
-        hasMore = page.hasMore && !page.historyOffset.isEmpty && page.historyOffset != offset
+        try Task.checkCancellation()
+        guard generation == revision, requestVersion == requestRevision else { throw CancellationError() }
+        appendNextBatch()
       } catch is CancellationError {
       } catch {
         guard generation == revision, requestVersion == requestRevision else { return }
@@ -163,6 +199,14 @@ enum MomentFeedSection: String, CaseIterable { case video = "视频", comprehens
     }
     flight = task
     await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+  }
+  private func appendNextBatch(limit: Int? = nil) {
+    let count = min(limit ?? batchSize, pendingItems.count)
+    let batch = pendingItems.prefix(count)
+    pendingItems.removeFirst(count)
+    items.append(contentsOf: batch.map(\.item))
+    for entry in batch { stateIdentities[entry.item.id] = entry.identity }
+    hasMore = !pendingItems.isEmpty || remoteHasMore
   }
   func isLiked(_ item: RPCDynamic) -> Bool { likedOverrides[item.id] ?? item.liked }
   func likeCount(_ item: RPCDynamic) -> Int64 { likeCounts[item.id] ?? item.likes }

@@ -4,22 +4,27 @@ import OSLog
 import SwiftUI
 import VideoToolbox
 
-// The playback chrome shared by the video, episode and live pages (DesignSystem.md §11): a
-// Liquid Glass control panel inset 12pt from the bottom of the stage that hides itself, its
-// buttons, menus and popovers. Everything here is white-on-video and independent of the theme.
+// The playback chrome shared by the video, episode and live pages (DesignSystem.md §11). Its
+// controls overlay the stage; everything here is white-on-dark and independent of the window
+// theme and focus.
 
 // MARK: - Visibility
 
 /// When the player controls are up. Pointer movement and playback shortcuts bring them in;
-/// 2.5 s without movement, while the pointer is not over the controls, hides them (in full
-/// screen the pointer too). Pages keep them up while `pinned`: paused, a popover open, typing
-/// a comment or scrubbing.
+/// the configured idle delay hides them while the pointer is not over the controls. Pages keep
+/// them up while `pinned`: paused, a popover open, typing a comment or scrubbing. During playback,
+/// an idle pointer inside the picture hides with them.
 @MainActor final class PlayerChromeState: ObservableObject {
   @Published private(set) var visible = true
-  let idleDelay: TimeInterval
+  private(set) var idleDelay: TimeInterval
   private var deadline = Date.distantFuture
   private var timer: Timer?
   private var overControls = false
+  private var insidePlayer = false
+  private var cursorHidden = false
+  var playing = false {
+    didSet { updateCursor() }
+  }
   /// Mirrors the page's pin so the idle timer never hides pinned controls; releasing the pin
   /// starts a fresh idle period.
   var pinned = false {
@@ -28,16 +33,31 @@ import VideoToolbox
 
   init(idleDelay: TimeInterval = 2.5) { self.idleDelay = idleDelay }
 
+  func setIdleDelay(_ delay: TimeInterval) {
+    guard abs(delay - idleDelay) > 0.01 else { return }
+    idleDelay = delay
+    deadline = Date().addingTimeInterval(delay)
+    arm(replacing: true)
+  }
+
   /// The pointer moved over the player, or a shortcut changed playback.
   func activity() {
+    restoreCursor()
     if !visible { visible = true }
     deadline = Date().addingTimeInterval(idleDelay)
     arm(replacing: false)
   }
 
+  func pointerActivity() {
+    insidePlayer = true
+    activity()
+  }
+
   /// The pointer left the player: hide shortly.
   func pointerLeft() {
+    insidePlayer = false
     overControls = false
+    restoreCursor()
     deadline = Date().addingTimeInterval(0.35)
     arm(replacing: true)
   }
@@ -45,7 +65,7 @@ import VideoToolbox
   func setOverControls(_ value: Bool) {
     guard value != overControls else { return }
     overControls = value
-    if !value { activity() }
+    if value { restoreCursor() } else { activity() }
   }
 
   // One timer per idle period: pointer movement only moves the deadline. The timer runs in the
@@ -65,46 +85,87 @@ import VideoToolbox
     if Date() < deadline { arm(replacing: true); return }
     guard !overControls, !pinned, visible else { return }
     visible = false
-    if NSApp.keyWindow?.styleMask.contains(.fullScreen) == true { NSCursor.setHiddenUntilMouseMoves(true) }
+    updateCursor()
+  }
+
+  private func updateCursor() {
+    if PlayerCursorPolicy.hides(visible: visible, playing: playing, inside: insidePlayer, pinned: pinned, overControls: overControls) {
+      guard !cursorHidden else { return }
+      NSCursor.setHiddenUntilMouseMoves(true)
+      cursorHidden = true
+    } else {
+      restoreCursor()
+    }
+  }
+
+  private func restoreCursor() {
+    guard cursorHidden else { return }
+    NSCursor.unhide()
+    cursorHidden = false
+  }
+
+  func stop() {
+    timer?.invalidate()
+    timer = nil
+    insidePlayer = false
+    restoreCursor()
+  }
+}
+
+enum PlayerCursorPolicy {
+  static func hides(visible: Bool, playing: Bool, inside: Bool, pinned: Bool, overControls: Bool) -> Bool {
+    !visible && playing && inside && !pinned && !overControls
   }
 }
 
 extension View {
-  /// Feeds pointer movement over the player into `chrome` and keeps its pin in sync.
-  func tracksPlayerChrome(_ chrome: PlayerChromeState, pinned: Bool) -> some View {
-    modifier(PlayerChromeTracking(chrome: chrome, pinned: pinned))
+  /// Feeds pointer movement over the player into `chrome` and keeps its pin and cursor in sync.
+  func tracksPlayerChrome(_ chrome: PlayerChromeState, pinned: Bool, playing: Bool,
+    idleDelay: TimeInterval = 2.5) -> some View {
+    modifier(PlayerChromeTracking(chrome: chrome, pinned: pinned, playing: playing, idleDelay: idleDelay))
   }
 
-  /// Fades the controls in (0.18 s) and out (0.3 s, sliding down 6pt unless 减弱动态效果 is on).
+  /// Fades the controls in (0.18 s) and out (0.3 s, sliding away from their stage edge).
   /// They fade rather than leave the hierarchy, so a menu opened from them stays anchored.
-  func playerChromeFade(_ shown: Bool) -> some View {
-    modifier(PlayerChromeFade(shown: shown))
+  func playerChromeFade(_ shown: Bool, position: PlayerControlBarPosition = .floating) -> some View {
+    modifier(PlayerChromeFade(shown: shown, position: position))
   }
 }
 
 private struct PlayerChromeTracking: ViewModifier {
   let chrome: PlayerChromeState
   let pinned: Bool
+  let playing: Bool
+  let idleDelay: TimeInterval
   func body(content: Content) -> some View {
     content
       .onContinuousHover { phase in
         switch phase {
-        case .active: chrome.activity()
+        case .active: chrome.pointerActivity()
         case .ended: chrome.pointerLeft()
         }
       }
-      .onAppear { chrome.pinned = pinned; chrome.activity() }
-      .onChange(of: pinned) { _, value in chrome.pinned = value }
+      .onAppear {
+        chrome.setIdleDelay(idleDelay)
+        chrome.pinned = pinned
+        chrome.playing = playing
+        chrome.activity()
+      }
+      .onChange(of: idleDelay) { _, value in chrome.setIdleDelay(value) }
+      .onChange(of: pinned) { _, value in chrome.pinned = value; chrome.activity() }
+      .onChange(of: playing) { _, value in chrome.playing = value }
+      .onDisappear { chrome.stop() }
   }
 }
 
 private struct PlayerChromeFade: ViewModifier {
   let shown: Bool
+  let position: PlayerControlBarPosition
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   func body(content: Content) -> some View {
     content
       .opacity(shown ? 1 : 0)
-      .offset(y: shown || reduceMotion ? 0 : 6)
+      .offset(y: shown || reduceMotion ? 0 : (position == .top ? -6 : 6))
       .allowsHitTesting(shown)
       .animation(shown ? .easeOut(duration: 0.18) : .easeIn(duration: 0.3), value: shown)
   }
@@ -112,23 +173,36 @@ private struct PlayerChromeFade: ViewModifier {
 
 // MARK: - Panel
 
-/// The glass control panel: `stageInset` (8pt) inside the stage's edges, never touching them,
-/// with `md` radius and always dark.
+/// A compact dark panel. It floats by default, or meets the selected stage edge without resizing
+/// the picture. Its solid fill does not use Liquid Glass, so focus cannot turn it pale.
 struct PlayerControlPanel<Content: View>: View {
   let chrome: PlayerChromeState
+  var position: PlayerControlBarPosition = .floating
   @ViewBuilder var content: Content
   var body: some View {
-    VStack(spacing: 6) { content }
-      .padding(.horizontal, PlayerPanelLayout.padding).padding(.top, 8).padding(.bottom, 10)
+    let shape = RoundedRectangle(cornerRadius: position == .floating ? PlayerPanelLayout.radius : 0, style: .continuous)
+    VStack(spacing: PlayerPanelLayout.spacing) { content }
+      .padding(.horizontal, PlayerPanelLayout.padding)
+      .padding(.top, PlayerPanelLayout.topPadding)
+      .padding(.bottom, PlayerPanelLayout.bottomPadding)
       .foregroundStyle(.white)
-      .glassEffect(.regular.tint(.black.opacity(0.52)), in: RoundedRectangle(cornerRadius: PlayerPanelLayout.radius, style: .continuous))
-      .overlay {
-        RoundedRectangle(cornerRadius: PlayerPanelLayout.radius, style: .continuous)
-          .strokeBorder(.white.opacity(0.16), lineWidth: 0.5)
-      }
+      .frame(maxWidth: .infinity)
+      .background(Color.black.opacity(0.88), in: shape)
+      .overlay { shape.strokeBorder(.white.opacity(0.16), lineWidth: 0.5) }
       .environment(\.colorScheme, .dark)
+      .environment(\.playerControlBarPosition, position)
       .onHover { chrome.setOverControls($0) }
-      .padding(PlayerPanelLayout.inset)
+      .padding(position == .floating ? PlayerPanelLayout.inset : 0)
+  }
+}
+
+struct PlayerControlBarPositionKey: EnvironmentKey {
+  static let defaultValue = PlayerControlBarPosition.floating
+}
+extension EnvironmentValues {
+  var playerControlBarPosition: PlayerControlBarPosition {
+    get { self[PlayerControlBarPositionKey.self] }
+    set { self[PlayerControlBarPositionKey.self] = newValue }
   }
 }
 
@@ -139,11 +213,19 @@ struct PlayerPanelLayout: Equatable {
   static let inset: CGFloat = Theme.stageInset
   /// The panel's own horizontal padding around the row.
   static let padding: CGFloat = 12
+  static let spacing: CGFloat = 4
+  static let topPadding: CGFloat = 6
+  static let bottomPadding: CGFloat = 8
   static let radius: CGFloat = Theme.Radius.md
   /// Width of the panel's content row.
   let width: CGFloat
-  /// `stageWidth`: the stage as laid out now (the panel lives inside it).
-  init(stageWidth: CGFloat) { width = stageWidth - Self.inset * 2 - Self.padding * 2 }
+  init(stageWidth: CGFloat) {
+    self.init(stageWidth: stageWidth, position: .floating)
+  }
+  init(stageWidth: CGFloat, position: PlayerControlBarPosition) {
+    let inset = position == .floating ? Self.inset : 0
+    width = max(0, stageWidth - inset * 2 - Self.padding * 2)
+  }
   /// The time readout goes last, only when even the folded row would not fit.
   var showsTime: Bool { width >= 400 }
   /// 「章节 · 标题」 joins the left group only when the row has room to spare for it.
@@ -159,10 +241,10 @@ extension View {
 
 // MARK: - Buttons
 
-/// The panel's main button: a 40pt mist disc with dark ink.
+/// The panel's main button: a 36pt mist disc with dark ink.
 struct PlayerPlayButton: View {
   let paused: Bool
-  var size: CGFloat = 40
+  var size: CGFloat = 36
   let action: () -> Void
   var body: some View {
     Button(action: action) {
@@ -174,7 +256,7 @@ struct PlayerPlayButton: View {
 }
 
 struct PlayerPrimaryButtonStyle: ButtonStyle {
-  var size: CGFloat = 40
+  var size: CGFloat = 36
   func makeBody(configuration: Configuration) -> some View {
     PlayerPrimaryBody(configuration: configuration, size: size)
   }
@@ -321,12 +403,13 @@ struct PlayerVolumeButton: View {
   @ObservedObject var player: PlayerModel
   let maximum: Double
   @Binding var shown: Bool
+  @Environment(\.playerControlBarPosition) private var position
   var body: some View {
     Button { shown.toggle() } label: {
       Image(systemName: player.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
     }.buttonStyle(PlayerControlButtonStyle(size: 32)).help("音量").accessibilityLabel("音量")
       .accessibilityValue("\(Int(player.volume))%")
-      .popover(isPresented: $shown, arrowEdge: .top) { PlayerVolumePanel(player: player, maximum: maximum) }
+      .popover(isPresented: $shown, arrowEdge: position == .top ? .bottom : .top) { PlayerVolumePanel(player: player, maximum: maximum) }
   }
 }
 
@@ -513,6 +596,7 @@ struct PlayerBarRow<Leading: View>: View {
   var extraMenu: () -> AnyView = { AnyView(EmptyView()) }
   @ViewBuilder var leading: () -> Leading
   @ObservedObject private var store = PlayerBarStore.shared
+  @Environment(\.playerControlBarPosition) private var position
   @State private var leadingWidth: CGFloat = 220
   @State private var fullScreen = false
   @State private var bookmarksShown = false
@@ -570,16 +654,16 @@ struct PlayerBarRow<Leading: View>: View {
       case .volume: PlayerVolumeButton(player: player, maximum: model.appSettings.number(.maxVolume), shown: $volumeShown)
       case .danmakuSettings:
         iconButton(item, help: "弹幕设置", active: false) { danmakuShown.toggle() }
-          .popover(isPresented: $danmakuShown, arrowEdge: .top) { danmakuPopover }
+          .popover(isPresented: $danmakuShown, arrowEdge: position == .top ? .bottom : .top) { danmakuPopover }
       case .screenshot:
         iconButton(item, help: "截取画面（⇧⌘S）") { model.takePlayerScreenshot() }.disabled(!model.canTakeScreenshot)
       case .network:
         Button { networkShown.toggle() } label: {
           PlayerBarGlyph(item: item).overlay(alignment: .topTrailing) {
-            if let cdn { CDNHealthDot(cdn: cdn).offset(x: 6, y: -4) }
+            if let cdn { CDNHealthDot(cdn: cdn, paused: player.paused, eofReached: player.eofReached).offset(x: 6, y: -4) }
           }
         }.buttonStyle(PlayerControlButtonStyle(size: 32)).help("网络与节点").accessibilityLabel("网络与节点")
-          .popover(isPresented: cdn == nil ? .constant(false) : $networkShown, arrowEdge: .top) { networkPanel }
+          .popover(isPresented: cdn == nil ? .constant(false) : $networkShown, arrowEdge: position == .top ? .bottom : .top) { networkPanel }
       case .enhance:
         Menu { PlayerShaderItems(model: model) } label: { PlayerBarGlyph(item: item) }
           .menuStyle(.button).buttonStyle(PlayerControlButtonStyle(size: 32, active: !model.shaderSelections.isEmpty))
@@ -596,7 +680,7 @@ struct PlayerBarRow<Leading: View>: View {
         Button { model.togglePlaybackWindow() } label: {
           Image(systemName: model.playbackDetached ? "macwindow" : "macwindow.on.rectangle")
         }.buttonStyle(PlayerControlButtonStyle(size: 32))
-          .help(model.playbackDetached ? "回到主窗口（⌥⌘P）" : "在独立窗口播放（⌥⌘P）")
+          .help(model.playbackDetached ? "回到主窗口（P / ⌥⌘P）" : "在独立窗口播放（P / ⌥⌘P）")
           .accessibilityLabel(model.playbackDetached ? "回到主窗口" : "在独立窗口播放")
       case .fullscreen:
         Button { model.togglePlayerFullScreen() } label: {
@@ -617,7 +701,7 @@ struct PlayerBarRow<Leading: View>: View {
     Button { composeShown.toggle() } label: { Image(systemName: "pencil.line") }
       .buttonStyle(PlayerControlButtonStyle(size: 32, prominent: true)).help("发弹幕").accessibilityLabel("发弹幕")
     .popover(
-      isPresented: externalComposePopover ? .constant(false) : $composeShown, arrowEdge: .top
+      isPresented: externalComposePopover ? .constant(false) : $composeShown, arrowEdge: position == .top ? .bottom : .top
     ) {
         input().frame(width: 300).padding(12).preferredColorScheme(.dark)
       }
@@ -651,6 +735,9 @@ struct PlayerBarRow<Leading: View>: View {
     let folded = fit.hidden.count
     return Menu {
       PowerSavingStatusItem()
+      if let cdn {
+        CDNHealthMenuItem(cdn: cdn, paused: player.paused, eofReached: player.eofReached) { networkShown = true }
+      }
       Button {
         do { _ = try model.addPlaybackBookmark(at: page.bookmarkTime?() ?? model.currentBookmarkTime) }
         catch { model.bookmarkNotice = error.localizedDescription }
@@ -710,14 +797,16 @@ struct PlayerBarRow<Leading: View>: View {
           }
         }
         .overlay(alignment: .topLeading) {
-          if let cdn, !visible.contains(.network) { CDNHealthDot(cdn: cdn).offset(x: 4, y: 3) }
+          if let cdn, !visible.contains(.network) {
+            CDNHealthDot(cdn: cdn, paused: player.paused, eofReached: player.eofReached).offset(x: 4, y: 3)
+          }
         }
     }
     .menuStyle(.button).buttonStyle(PlayerControlButtonStyle(size: 32)).menuIndicator(.hidden).fixedSize()
     .help(folded > 0 ? "更多（已收起 \(folded) 项）" : "更多")
     .accessibilityLabel("更多").accessibilityValue(folded > 0 ? "已收起 \(folded) 项" : "")
     .animation(.snappy(duration: 0.2), value: folded)
-    .popover(isPresented: $bookmarksShown, arrowEdge: .top) {
+    .popover(isPresented: $bookmarksShown, arrowEdge: position == .top ? .bottom : .top) {
       ScrollView {
         PlaybackBookmarkList(
           model: model, clock: player.clock, override: page.bookmarkTime?(),
@@ -728,10 +817,10 @@ struct PlayerBarRow<Leading: View>: View {
         ).padding(14)
       }.frame(width: 360).frame(maxHeight: 440)
     }
-    .popover(isPresented: Self.gated($danmakuShown, !visible.contains(.danmakuSettings)), arrowEdge: .top) { danmakuPopover }
+    .popover(isPresented: Self.gated($danmakuShown, !visible.contains(.danmakuSettings)), arrowEdge: position == .top ? .bottom : .top) { danmakuPopover }
     .background {
       if cdn != nil {
-        Color.clear.popover(isPresented: Self.gated($networkShown, !visible.contains(.network)), arrowEdge: .top) { networkPanel }
+        Color.clear.popover(isPresented: Self.gated($networkShown, !visible.contains(.network)), arrowEdge: position == .top ? .bottom : .top) { networkPanel }
       }
     }
   }
@@ -855,7 +944,7 @@ struct PlayerToolbarActions: View {
     if windowToggle {
       Button { model.togglePlaybackWindow() } label: {
         ToolbarGroupIcon(model.playbackDetached ? "macwindow" : "macwindow.on.rectangle")
-      }.help(model.playbackDetached ? "回到主窗口" : "在独立窗口播放")
+      }.help(model.playbackDetached ? "回到主窗口（P / ⌥⌘P）" : "在独立窗口播放（P / ⌥⌘P）")
         .accessibilityLabel(model.playbackDetached ? "回到主窗口" : "在独立窗口播放")
     }
     Button { withAnimation(.snappy(duration: 0.25)) { sidebarHidden.toggle() } } label: { ToolbarGroupIcon("sidebar.right") }

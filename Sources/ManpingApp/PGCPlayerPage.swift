@@ -152,10 +152,13 @@ struct PGCPlayerPage: View {
   private var controlsShown: Bool { chrome.visible || controlsPinned }
   /// The picture's shape, from the stream being played (16:9 until it is known).
   private var pictureAspect: CGFloat? { playerAspect(width: playback.selectedStream?.width, height: playback.selectedStream?.height) }
+  private var controlBarPosition: PlayerControlBarPosition {
+    PlayerControlBarPosition(settings: model.appSettings)
+  }
   private var stageCover: URL? { playback.episode?.cover ?? playback.details?.season.cover }
   private var media: some View {
-    // The surface fills the stage: the video is fitted to the picture inside it, the danmaku and
-    // the gestures cover the whole stage.
+    // The surface fills the picture area; controls dock below it rather than covering subtitles
+    // already rendered into the video.
     PlayerSurface(model: player, pictureAspect: stagePictureAspect(pictureAspect))
       .onLongPressGesture(minimumDuration: 0.4, pressing: { pressing in
         if !pressing { restoreTemporarySpeed() }
@@ -193,28 +196,29 @@ struct PGCPlayerPage: View {
       .overlay(alignment: .topTrailing) {
         if let deadline = model.nextPlaybackDeadline {
           NextPlaybackOverlay(deadline: deadline, onPlay: model.playNext, onCancel: model.cancelNextPlayback)
+            .padding(.top, controlBarPosition == .top ? 84 : 0)
         }
       }
       .overlay(alignment: .bottomTrailing) {
         if let skips = playback.manifest?.skips, !skips.isEmpty, !playback.usesFixtures {
           PlaybackSkipPrompt(clock: player.clock, skips: skips,
             automatic: model.appSettings.bool(.autoSkipClips)) { playback.skip($0) }
-            .padding(.trailing, 20).padding(.bottom, controlsShown ? 132 : 24)
+            .padding(.trailing, 20)
+            .padding(.bottom, controlBarPosition != .top && controlsShown ? 132 : 24)
         }
       }
       .overlay(alignment: .bottom) {
-        ZStack(alignment: .bottom) {
-          if model.appSettings.bool(.bottomProgress) {
-            PlaybackProgressBar(clock: player.clock, duration: duration, override: playback.usesFixtures ? playback.fixturePosition : nil)
-              .opacity(controlsShown ? 0 : 1).animation(.easeOut(duration: 0.2), value: controlsShown)
-          }
-          controls.playerChromeFade(controlsShown)
+        if model.appSettings.bool(.bottomProgress) {
+          PlaybackProgressBar(clock: player.clock, duration: duration, override: playback.usesFixtures ? playback.fixturePosition : nil)
+            .opacity(controlsShown ? 0 : 1).animation(.easeOut(duration: 0.2), value: controlsShown)
         }
       }
       .animation(.snappy(duration: 0.3), value: model.nextPlaybackDeadline == nil)
       .animation(.easeOut(duration: 0.2), value: controlsShown)
+      .playerStageControls(shown: controlsShown, position: controlBarPosition) { controls }
       .reportsStageWidth($stageWidth)
-      .tracksPlayerChrome(chrome, pinned: controlsPinned)
+      .tracksPlayerChrome(chrome, pinned: controlsPinned, playing: !paused,
+        idleDelay: model.appSettings.number(.playerControlBarIdleDelay))
       // Playback shortcuts (menu bar, media keys) bring the controls in.
       .onChange(of: player.speed) { _, _ in chrome.activity() }
       .onChange(of: player.volume) { _, _ in chrome.activity() }
@@ -228,11 +232,12 @@ struct PGCPlayerPage: View {
   /// Bilibili's own chapters when the episode has them, else the media's.
   private var chapters: [PlaybackChapter] { PlaybackChapter.preferred(viewPoints: features.viewPoints, engine: player.chapters) }
   private var controls: some View {
-    let layout = PlayerPanelLayout(stageWidth: stageWidth)
-    return PlayerControlPanel(chrome: chrome) {
+    let layout = PlayerPanelLayout(stageWidth: stageWidth, position: controlBarPosition)
+    return PlayerControlPanel(chrome: chrome, position: controlBarPosition) {
       PlaybackTimeline(clock: player.clock, duration: duration, override: playback.usesFixtures ? playback.fixturePosition : nil,
         enabled: playback.manifest != nil || playback.usesFixtures, preview: videoShot,
-        density: player.timeline.density(duration: duration), chapters: chapters, markers: model.aiMarks(for: model.aiMediaKey),
+        density: player.timeline.density(duration: duration),
+        chapters: model.appSettings.bool(.playerControlBarChapters) ? chapters : [], markers: model.aiMarks(for: model.aiMediaKey),
         bookmarkTimes: model.bookmarksForCurrentMedia.map(\.time),
         bufferedAhead: { [player] in player.bufferedAhead }, scrubbing: { scrubbing = $0 }) { playback.seek($0) }
       PlayerBarRow(model: model, player: player, layout: layout, page: barPage, cdn: model.cdn,

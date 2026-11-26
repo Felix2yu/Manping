@@ -11,6 +11,7 @@ private struct ScrollPrefetchMetrics: Equatable {
 /// Matches IncrementVerticalScrollControl's 800-point preload threshold.
 private struct ScrollPrefetchModifier: ViewModifier {
   let enabled: Bool
+  let loadOnEnable: Bool
   let load: () -> Void
   @State private var isNearEnd = false
   @Environment(\.browsingPageActive) private var browsingPageActive
@@ -25,7 +26,7 @@ private struct ScrollPrefetchModifier: ViewModifier {
         if browsingPageActive && enabled && value.isNearEnd { load() }
       }
       .onChange(of: enabled) { _, value in
-        if browsingPageActive && value && isNearEnd { load() }
+        if loadOnEnable && browsingPageActive && value && isNearEnd { load() }
       }
       .onChange(of: browsingPageActive) { _, active in
         if active && enabled && isNearEnd { load() }
@@ -34,7 +35,7 @@ private struct ScrollPrefetchModifier: ViewModifier {
 }
 
 extension View {
-  func prefetchOnScroll(enabled: Bool, load: @escaping () -> Void) -> some View {
-    modifier(ScrollPrefetchModifier(enabled: enabled, load: load))
+  func prefetchOnScroll(enabled: Bool, loadOnEnable: Bool = true, load: @escaping () -> Void) -> some View {
+    modifier(ScrollPrefetchModifier(enabled: enabled, loadOnEnable: loadOnEnable, load: load))
   }
 }

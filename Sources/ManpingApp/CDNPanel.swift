@@ -6,11 +6,32 @@ import SwiftUI
 /// controller, so relay statistics refresh without re-rendering the player page.
 struct CDNHealthDot: View {
   @ObservedObject var cdn: CDNController
+  var paused = false
+  var eofReached = false
   var body: some View {
     let health = CDNHealth(bufferAhead: cdn.bufferAhead)
-    if cdn.activeHost != nil, health != .smooth {
+    if health.isVisible(activeHost: cdn.activeHost, paused: paused, eofReached: eofReached) {
       Circle().fill(health.color(.dark)).frame(width: 6, height: 6)
         .accessibilityLabel("播放状态：\(health.title)")
+    }
+  }
+}
+
+struct CDNHealthMenuItem: View {
+  @ObservedObject var cdn: CDNController
+  var paused: Bool
+  var eofReached: Bool
+  var action: () -> Void
+  @Environment(\.colorScheme) private var scheme
+
+  var body: some View {
+    let health = CDNHealth(bufferAhead: cdn.bufferAhead)
+    if health.isVisible(activeHost: cdn.activeHost, paused: paused, eofReached: eofReached) {
+      Button(action: action) {
+        Label("网络与节点 · \(health.title)", systemImage: PlayerBarItem.network.symbol)
+          .foregroundStyle(health.color(scheme))
+      }
+      Divider()
     }
   }
 }
@@ -22,6 +43,10 @@ enum CDNHealth {
   init(bufferAhead: Double) {
     if bufferAhead <= 0.5 { self = .stalled }
     else { self = bufferAhead < 8 ? .tight : .smooth }
+  }
+
+  func isVisible(activeHost: String?, paused: Bool, eofReached: Bool) -> Bool {
+    !paused && !eofReached && activeHost != nil && self != .smooth
   }
 
   var title: String {

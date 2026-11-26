@@ -53,11 +53,12 @@
 
 ## 覆盖安装
 
-先退出满屏，然后运行：
+从源码构建、替换并启动：
 
 ```bash
-python3 scripts/install_local_app.py --dry-run
-python3 scripts/install_local_app.py --replace
+python3 scripts/install_local_app.py --build --replace --restart
 ```
 
-脚本校验 Bundle ID、可执行文件和签名，在同目录暂存并再次校验后替换 `/Applications/满屏.app`。旧应用会保留为同名隐藏备份；替换失败时自动恢复。应用正在运行或没有目录写权限时，脚本会停止，不会自动提权或终止进程。
+脚本先完成 Release 编译、签名和暂存校验，再结束旧进程并替换 `/Applications/满屏.app`；编译失败不会中断当前应用。旧应用会保留为同名隐藏备份，替换失败时自动恢复。
+
+安装已有产物时可省略 `--build`。未传 `--restart` 时，应用正在运行或没有目录写权限，脚本会停止；不会自动提权。

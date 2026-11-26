@@ -598,7 +598,7 @@ struct DemoVideoSection: ViewModifier {
     await move(to: point(fraction: CGPoint(x: 0.62, y: 0.4), of: window))
     await pause(0.4)
     keys(["⌘", ","])
-    model.openSettings(.general)
+    model.openSettings(.interface)
     guard let settings = SettingsWindowController.shared.window else { throw Failure.missing("settings window") }
     // Over the middle of the main window, wherever it was left last time.
     settings.setFrameOrigin(NSPoint(x: window.frame.midX - settings.frame.width / 2, y: window.frame.midY - settings.frame.height / 2))

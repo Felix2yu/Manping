@@ -2,6 +2,26 @@ import AppKit
 import ManpingCore
 import SwiftUI
 
+enum MomentVideoGridMetrics {
+  static let minimumWidth: CGFloat = 260
+  private static let cardHorizontalPadding: CGFloat = 24
+  // Cover plus two title lines, metadata, card padding and stack spacing.
+  private static let estimatedCardChromeHeight: CGFloat = 104
+
+  static func batchSize(for viewport: CGSize) -> Int {
+    guard viewport.width.isFinite, viewport.height.isFinite,
+      viewport.width > 0, viewport.height > 0 else { return 2 }
+    let contentWidth = max(1, viewport.width - 2 * Theme.gridPadding)
+    let columns = max(1, Int(floor(
+      (contentWidth + Theme.gridSpacing) / (minimumWidth + Theme.gridSpacing))))
+    let cardWidth = (contentWidth - CGFloat(columns - 1) * Theme.gridSpacing) / CGFloat(columns)
+    let cardHeight = max(1, (cardWidth - cardHorizontalPadding) * 9 / 16 + estimatedCardChromeHeight)
+    let contentHeight = max(1, viewport.height - 2 * Theme.gridPadding)
+    let rows = max(1, Int(ceil(contentHeight / cardHeight)))
+    return max(2, columns * rows * 2)
+  }
+}
+
 struct MomentVideoCard: View {
   let item: RPCDynamic
   @ObservedObject var feed: MomentFeedModel
@@ -9,18 +29,29 @@ struct MomentVideoCard: View {
   let showComments: () -> Void
   @Environment(\.colorScheme) private var scheme
   private var media: MomentMedia? { MomentMedia.find(item.content) }
+  private var usesDescriptionAsTitle: Bool {
+    guard let media else { return false }
+    return media.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !item.text.isEmpty
+  }
+  static func title(for item: RPCDynamic) -> String {
+    guard let media = MomentMedia.find(item.content) else { return "" }
+    let title = media.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !title.isEmpty { return title }
+    let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return text.isEmpty ? "视频" : text
+  }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if let media {
         Button { media.open(model: model) } label: {
-          VideoCover(url: media.cover, duration: media.duration.map(Int.init), views: media.views)
+          VideoCover(url: media.cover, duration: media.duration.map(Int.init), views: media.views, bvid: media.bvid)
         }.buttonStyle(CardPressStyle())
         HStack(alignment: .top, spacing: 4) {
           Button { media.open(model: model) } label: {
-            Text(media.title).font(Theme.Font.headline).lineLimit(2)
+            Text(Self.title(for: item)).font(Theme.Font.headline).lineLimit(2)
               .frame(maxWidth: .infinity, alignment: .leading)
           }.buttonStyle(.plain)
-          if !item.text.isEmpty { MomentDescriptionButton(text: item.text, emotes: item.emotes) }
+          if !item.text.isEmpty && !usesDescriptionAsTitle { MomentDescriptionButton(text: item.text, emotes: item.emotes) }
         }
       } else if !item.text.isEmpty {
         MomentDescriptionButton(text: item.text, emotes: item.emotes)

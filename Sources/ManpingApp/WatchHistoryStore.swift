@@ -282,6 +282,9 @@ private enum HistoryError: LocalizedError {
 
   func record(_ bvid: String) -> WatchRecord? { records[bvid] }
   func flushLocal() { persist(immediate: true) }
+  #if DEBUG
+  func debugSeed(_ records: [String: WatchRecord]) { self.records.merge(records) { _, new in new } }
+  #endif
 
   /// Mirrors the position already being sent to Bilibili into the local cache; only the
   /// server upload depends on sync being enabled.

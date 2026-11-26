@@ -1,7 +1,8 @@
 {
-  "mpvTag": "v0.41.0",
-  "mpvArchiveSHA256": "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209",
+  "mpvTag": "v0.42.0",
+  "mpvArchiveSHA256": "bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a2afb874ed4df5070dd",
   "libplaceboVersion": "7.360.1",
+  "linkedLibplaceboVersion": "7.387.0",
   "references": [
     {
       "url": "https://github.com/haasn/libplacebo/blob/v7.360.1/src/colorspace.c",
@@ -24,13 +25,13 @@
   "shaderWeightsChanged": false,
   "newPublicMpvOptions": false,
   "mpvBuild": {
-    "version": "0.41.0",
-    "sourceSHA256": "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209",
+    "version": "0.42.0",
+    "sourceSHA256": "bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a2afb874ed4df5070dd",
     "deduplicatedTextureCoordinates": true,
     "patches": {
-      "mpv-coreaudio-device-change.patch": "769b218df220738cc1cf9f81cf696c16518c5dfe56a5ef028e33b22536e0e924",
-      "mpv-0.41.0-deduplicate-quad-coordinates.patch": "106dd6766887aead29b8cb5e10cec44702d29cf841d5d371c1b82618be9e16c6",
-      "mpv-0.41.0-renderer-compatibility.patch": "15f1c7022e15099c22b228e99b95588d21201a32343f3d0cf641baa538ee7d19"
+      "mpv-0.42.0-deduplicate-quad-coordinates.patch": "106dd6766887aead29b8cb5e10cec44702d29cf841d5d371c1b82618be9e16c6",
+      "mpv-0.42.0-renderer-compatibility.patch": "328208843576f88888678e65ccaa440542d9a4b47adf0c682636098dbbb2d472",
+      "mpv-0.42.0-swift-cametal-layer.patch": "2fc1d9004a3e1533f181e4918a2470eb114d72074eac9016d2920d9ca8d349c2"
     },
     "meson": "1.10.1",
     "options": [
@@ -45,6 +46,6 @@
       "-Dvulkan=disabled",
       "-Dswift-flags="
     ],
-    "librarySHA256": "df55dcaed22fad48b894a20722c51c9ed655cc5b7cd3ca931446646f1a251de8"
+    "librarySHA256": "5d760d6a5779c6fea4833a4fbf152792ef05abc8da700083f836de67425effe4"
   }
 }

@@ -66,7 +66,7 @@ python3 scripts/bundle.py --replace-release
 python3 scripts/verify_bundle.py --static-only
 ```
 
-`build_mpv.py` 只在项目 `.build/` 内建立 Meson 环境、下载校验固定 mpv 0.41.0 源码、应用锁定补丁并构建 arm64 libmpv，不安装或覆盖 Homebrew。现有 shader 资源已经入库，常规产品构建无需重新生成。构建输入和许可证由 `Dependencies.lock.json`、打包时写入 App 的 `Contents/Resources/MpvBuild.json` 与 `ThirdPartyNotices/` 记录。
+`build_mpv.py` 只在项目 `.build/` 内建立 Meson 环境、下载校验固定 mpv 0.42.0 源码、应用锁定补丁并构建 arm64 libmpv，不安装或覆盖 Homebrew。FFmpeg 的 pkg-config 路径由 `Dependencies.lock.json` 自动锁定，避免本机 Homebrew 升级改变重建输入。现有 shader 资源已经入库，常规产品构建无需重新生成。构建输入和许可证由 `Dependencies.lock.json`、打包时写入 App 的 `Contents/Resources/MpvBuild.json` 与 `ThirdPartyNotices/` 记录。
 
 若在另一台机器上 Homebrew 依赖的实际 SHA 或绝对源路径与锁文件不同，`--verify-inputs` 会明确失败。核对依赖版本和来源后，可显式运行 `python3 scripts/bundle.py --update-lock --verify-inputs` 记录该机器的输入；不要把校验失败当作成功。
 
@@ -74,12 +74,15 @@ python3 scripts/verify_bundle.py --static-only
 
 ## 覆盖安装到应用程序目录
 
+从源码一键构建并覆盖安装：
+
 ```bash
-python3 scripts/install_local_app.py --dry-run
-python3 scripts/install_local_app.py --replace
+python3 scripts/install_local_app.py --build --replace --restart
 ```
 
-安装脚本要求目标应用已退出，校验 `im.yufei.manping` 与签名，暂存后再次校验再替换 `/Applications/满屏.app`。旧应用保留为隐藏备份，替换失败自动恢复；不迁移原应用数据，不自动提权或终止进程。
+`--build` 先在 `.build/local-install-*` 创建临时 Release 产物，完成编译、签名和校验；之后才结束 `/Applications/满屏.app` 的旧进程，暂存并再次校验后替换，最后启动新应用。构建或校验失败时旧应用保持运行。旧应用保留为隐藏备份，替换失败自动恢复；不迁移原应用数据，不自动提权。
+
+安装已有产物时仍可运行 `python3 scripts/install_local_app.py --dry-run` 和 `python3 scripts/install_local_app.py --replace`；这种模式要求目标应用已退出，或显式传入 `--restart`。
 
 ## 登录与同一构建的实网验收
 

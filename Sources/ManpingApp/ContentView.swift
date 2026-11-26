@@ -28,7 +28,7 @@ struct ContentView: View {
 
 extension View {
   /// Download options, login and error alerts follow playback: while the player lives in its
-  /// own window (and the main window may be hidden) they are presented there instead.
+  /// own window they are presented there instead.
   func appDialogs(model: AppModel, inDetachedWindow: Bool) -> some View {
     modifier(AppDialogs(model: model, inDetachedWindow: inDetachedWindow))
   }
@@ -320,7 +320,7 @@ private struct ShellContent: View {
       Button { model.goBack() } label: {
         Image(systemName: "chevron.backward").font(.system(size: 14, weight: .medium))
           .frame(width: 34, height: Theme.toolbarControlHeight)
-      }.disabled(!model.canGoBack).help("返回（⌘[）")
+      }.disabled(!model.canGoBack).help("返回（Esc / ⌘[）")
       Button { model.goForward() } label: {
         Image(systemName: "chevron.forward").font(.system(size: 14, weight: .medium))
           .frame(width: 34, height: Theme.toolbarControlHeight)
@@ -341,7 +341,8 @@ private struct ShellContent: View {
   }
   private var searchBox: some View {
     M3SearchBox(suggestions: suggestions, text: $model.search, suggestionsEnabled: model.appSettings.bool(.searchSuggestions),
-      currentScopeName: currentScopeName, focusRequest: model.searchFocusRequest, hotRequest: model.hotSearchRequest) { keyword, scope in
+      currentScopeName: currentScopeName, active: model.browsingPageActive,
+      focusRequest: model.searchFocusRequest, hotRequest: model.hotSearchRequest) { keyword, scope in
         if scope == .current { model.submitRegionalSearch(keyword) }
         else { model.search = keyword; model.submitSearch() }
       }
@@ -366,8 +367,8 @@ private struct ShellContent: View {
   }
   @ViewBuilder private var playbackContent: some View {
     if model.mainShowsPlayer && model.playbackElsewhere {
-      // The picture plays in the mini window or the standalone window; the page waits here
-      // until the user browses elsewhere (playback then keeps going beside the main window).
+      // Mini playback keeps its placeholder until the user browses elsewhere; detached playback
+      // leaves the source page interactive as soon as its window opens.
       let mini = model.compactPlayer
       VStack(spacing: 12) {
         Image(systemName: mini ? "pip" : "macwindow").font(.system(size: 20, weight: .medium))

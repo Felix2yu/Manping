@@ -64,15 +64,24 @@ def resolve(dep, original, executable):
         return (original.parent / dep[len('@loader_path/'):]).resolve()
     if dep.startswith('@executable_path/'):
         return (executable.parent / dep[len('@executable_path/'):]).resolve()
+    if dep.startswith('/opt/homebrew/opt/'):
+        name = pathlib.Path(dep).name
+        pinned = executable.parent.parent / 'lib' / name
+        if pinned.exists(): return pinned.resolve()
+        sibling = original.parent / name
+        if sibling.exists(): return sibling.resolve()
     if dep.startswith('@rpath/'):
         suffix = dep[len('@rpath/'):]
-        paths = [original.parent / suffix, pathlib.Path('/opt/homebrew/lib') / suffix]
+        paths = [original.parent / suffix]
         lines = run('otool', '-l', str(original), capture=True).splitlines()
         for index, line in enumerate(lines):
             if line.strip() == 'cmd LC_RPATH':
                 raw = lines[index + 2].strip().split('path ')[1].split(' (offset')[0]
                 base = raw.replace('@loader_path', str(original.parent)).replace('@executable_path', str(executable.parent))
                 paths.append(pathlib.Path(base) / suffix)
+        paths.append(pathlib.Path('/opt/homebrew/lib') / suffix)
+        pinned = executable.parent.parent / 'lib' / suffix
+        if pinned.exists(): paths.insert(0, pinned)
         for candidate in paths:
             if candidate.exists(): return candidate.resolve()
         raise RuntimeError(f'Unresolved {dep} in {original}')

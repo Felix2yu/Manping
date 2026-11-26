@@ -15,8 +15,40 @@ private func exactCodingKeys(in decoder: any Decoder) throws -> Set<String> {
 
 /// The categories of the settings window, in sidebar order.
 public enum MacSettingGroup: String, CaseIterable, Sendable {
-  case general = "通用", playback = "播放", danmaku = "弹幕", live = "直播", network = "网络", download = "下载与截图"
+  case general = "通用", interface = "用户界面", playback = "播放", danmaku = "弹幕", live = "直播", network = "网络", download = "下载与截图"
   case notifications = "通知", privacy = "隐私", ai = "AI", advanced = "高级"
+}
+
+public enum PlayerControlBarPosition: String, CaseIterable, Sendable {
+  case floating, top, bottom
+  public var title: String {
+    switch self {
+    case .floating: "浮动"
+    case .top: "顶部"
+    case .bottom: "底部"
+    }
+  }
+  public init(settings: MacSettings) {
+    self = Self(rawValue: settings.text(.playerControlBarPosition)) ?? .floating
+  }
+}
+
+public enum PlayerArrowAction: String, CaseIterable, Sendable {
+  case seek, speed
+  public var title: String {
+    switch self {
+    case .seek: "快退 / 快进"
+    case .speed: "减速 / 加速"
+    }
+  }
+  public init(settings: MacSettings) {
+    self = Self(rawValue: settings.text(.playerArrowAction)) ?? .seek
+  }
+  public static let speedChoices = Array(stride(from: 0.25, through: 4, by: 0.25))
+  public static func adjustedSpeed(current: Double, up: Bool) -> Double {
+    up ? Self.speedChoices.first { $0 > current + 0.01 } ?? 4
+      : Self.speedChoices.last { $0 < current - 0.01 } ?? 0.25
+  }
 }
 /// Retired keys (Windows-only renderer switches and the old top navigation toggle) are no
 /// longer cases here and are never read; values already saved under their UserDefaults keys
@@ -37,7 +69,7 @@ public enum MacSettingKey: String, CaseIterable, Sendable {
   case danmakuOpacity = "Manping.danmakuOpacity", danmakuSpeed = "Manping.danmakuSpeed", screenshotFormat = "Manping.screenshotFormat"
   case danmakuFrameRate = "Manping.danmakuFrameRate", danmakuGlyphStyle = "Manping.danmakuGlyphStyle"
   case videoSmoothMotion = "Manping.videoSmoothMotion", fullscreenSurround = "Manping.fullscreenSurround"
-  case hideMainOnPlay = "Manping.hideMainOnPlay", integratedPlayer = "Manping.integratedPlayer", decode = "Manping.decode"
+  case integratedPlayer = "Manping.integratedPlayer", decode = "Manping.decode"
   case displayMode = "Manping.displayMode", skipNextPrompt = "Manping.skipNextPrompt", autoNextRelated = "Manping.autoNextRelated"
   case endWithPlaylist = "Manping.endWithPlaylist", liveWebPlayer = "Manping.liveWebPlayer"
   case autoLoadHistory = "autoLoadHistory"
@@ -52,6 +84,8 @@ public enum MacSettingKey: String, CaseIterable, Sendable {
   case navPopular = "Manping.navPopular", navMoment = "Manping.navMoment"
   case navVideo = "Manping.navVideo", navLive = "Manping.navLive", navAnime = "Manping.navAnime", navCinema = "Manping.navCinema", navArticle = "Manping.navArticle"
   case scrollAcceleration = "Manping.scrollAcceleration", searchSuggestions = "Manping.searchSuggestions"
+  case playerControlBarPosition = "Manping.playerControlBarPosition", playerControlBarIdleDelay = "Manping.playerControlBarIdleDelay"
+  case playerControlBarChapters = "Manping.playerControlBarChapters", playerArrowAction = "Manping.playerArrowAction"
   case notifications = "Manping.notifications", momentNotifications = "Manping.momentNotifications", logLevel = "Manping.mpvLogLevel"
   case liveNotifications = "Manping.liveNotifications", dockBadge = "Manping.dockBadge", menuBarItem = "Manping.menuBarItem"
   case cdnAuto = "Manping.cdnAuto", cdnMultiSource = "Manping.cdnMultiSource", cdnStallRecovery = "Manping.cdnStallRecovery"
@@ -151,29 +185,39 @@ public enum MacSettingsCatalog {
   ]
   /// Shown together as the single 「打开视频时」 choice (`MacOpenMode`) instead of two rows.
   public static let openModeKeys: Set<MacSettingKey> = [.integratedPlayer, .displayMode]
+  public static let playerBarKeys: Set<MacSettingKey> = [
+    .playerControlBarPosition, .playerControlBarIdleDelay, .playerControlBarChapters,
+    .stepForward, .stepBackward, .playerArrowAction, .bottomProgress,
+  ]
   public static let descriptors: [MacSettingDescriptor] = [
     // 通用
-    .init(.theme, .general, "外观", "外观", "", options([("跟随系统", "跟随系统"), ("浅色", "浅色"), ("深色", "深色")]), .text("跟随系统")),
-    .init(.navPopular, .general, "侧边栏项目", "首页", "", .toggle, .bool(true)),
-    .init(.navVideo, .general, "侧边栏项目", "分区", "", .toggle, .bool(true)),
-    .init(.navLive, .general, "侧边栏项目", "直播", "", .toggle, .bool(true)),
-    .init(.navAnime, .general, "侧边栏项目", "番剧", "", .toggle, .bool(true)),
-    .init(.navCinema, .general, "侧边栏项目", "影视", "", .toggle, .bool(true)),
-    .init(.navArticle, .general, "侧边栏项目", "专栏", "", .toggle, .bool(true)),
-    .init(.navMoment, .general, "侧边栏项目", "动态", "", .toggle, .bool(true)),
-    .init(.searchSuggestions, .general, "搜索建议", "显示搜索建议", "在搜索框下方列出热搜和输入补全。", .toggle, .bool(false)),
-    .init(.scrollAcceleration, .general, "滚动加速", "滚动加速", "连续转动鼠标滚轮时滚得更快，触控板和惯性滚动不受影响。", .toggle, .bool(true)),
+    .init(.liveWebPlayer, .general, "打开方式", "在浏览器中打开直播间", "点按直播卡片时打开哔哩哔哩网页，而不是在满屏中播放。", .toggle, .bool(false)),
+    // 用户界面
+    .init(.theme, .interface, "外观", "外观", "", options([("跟随系统", "跟随系统"), ("浅色", "浅色"), ("深色", "深色")]), .text("跟随系统")),
+    .init(.navPopular, .interface, "侧边栏项目", "首页", "", .toggle, .bool(true)),
+    .init(.navVideo, .interface, "侧边栏项目", "分区", "", .toggle, .bool(true)),
+    .init(.navLive, .interface, "侧边栏项目", "直播", "", .toggle, .bool(true)),
+    .init(.navAnime, .interface, "侧边栏项目", "番剧", "", .toggle, .bool(true)),
+    .init(.navCinema, .interface, "侧边栏项目", "影视", "", .toggle, .bool(true)),
+    .init(.navArticle, .interface, "侧边栏项目", "专栏", "", .toggle, .bool(true)),
+    .init(.navMoment, .interface, "侧边栏项目", "动态", "", .toggle, .bool(true)),
+    .init(.searchSuggestions, .interface, "搜索建议", "显示搜索建议", "在搜索框下方列出热搜和输入补全。", .toggle, .bool(false)),
+    .init(.scrollAcceleration, .interface, "滚动加速", "滚动加速", "连续转动鼠标滚轮时滚得更快，触控板和惯性滚动不受影响。", .toggle, .bool(true)),
+    .init(.playerControlBarPosition, .interface, "播放控制条", "样式", "三种位置都覆盖在画面上，不改变视频尺寸。", options([("floating", "浮动"), ("top", "顶部"), ("bottom", "底部")]), .text("floating")),
+    .init(.playerControlBarIdleDelay, .interface, "播放控制条", "自动隐藏延迟", "鼠标停止移动且不在控制条上时，等待这么久后隐藏。", .number(0.5...10, step: 0.5), .number(2.5)),
+    .init(.playerControlBarChapters, .interface, "播放控制条", "在进度条中显示章节", "章节列表和书签入口仍保留。", .toggle, .bool(true)),
+    .init(.stepForward, .interface, "播放控制条", "快进时长（秒）", "按右方向键时前进的秒数。", .number(1...600, step: 1), .number(30)),
+    .init(.stepBackward, .interface, "播放控制条", "快退时长（秒）", "按左方向键时后退的秒数。", .number(1...600, step: 1), .number(10)),
+    .init(.playerArrowAction, .interface, "播放控制条", "左右方向键功能", "Shift + 左右方向键仍用于调整倍速。", options([("seek", "快退 / 快进"), ("speed", "减速 / 加速")]), .text("seek")),
+    .init(.bottomProgress, .interface, "播放控制条", "控件隐藏时显示细进度条", "播放控件隐藏后，画面底边保留一条进度。", .toggle, .bool(true)),
     // 播放
     .init(.quality, .playback, "画质与编码", "首选画质", "视频没有这一档时选用最接近的画质。", .choice([MacSettingChoice(.number(0), "自动（沿用上次）"), MacSettingChoice(.number(127), "最高画质"), MacSettingChoice(.number(120), "4K 优先"), MacSettingChoice(.number(80), "1080P 优先"), MacSettingChoice(.number(64), "720P")]), .number(0)),
     .init(.codec, .playback, "画质与编码", "首选编码", "视频提供这种编码时优先使用它。", options([("h264", "H.264"), ("hevc", "HEVC"), ("av1", "AV1")]), .text("h264")),
     .init(.videoSmoothMotion, .playback, "画面", "画面平滑", "适合外接 60 Hz 屏幕播放 24 / 25 帧视频；按屏幕节奏重采样音频并混合相邻帧，可能略软，直播或音画不同步时请关闭。", .toggle, .bool(false)),
     .init(.fullscreenSurround, .playback, "画面", "全屏时画面四周", "只影响全屏，窗口内仍显示氛围色。", options([("black", "纯黑"), ("ambient", "氛围色")]), .text("black")),
-    .init(.stepForward, .playback, "进度与倍速", "快进时长（秒）", "按右方向键时前进的秒数。", .number(1...600, step: 1), .number(30)),
-    .init(.stepBackward, .playback, "进度与倍速", "快退时长（秒）", "按左方向键时后退的秒数。", .number(1...600, step: 1), .number(10)),
     .init(.temporarySpeed, .playback, "进度与倍速", "长按倍速", "在画面上按住时临时加速，松开后恢复原速。", .number(1.1...4, step: 0.1), .number(3)),
     .init(.globalSpeed, .playback, "进度与倍速", "记住倍速", "之后打开的视频都使用默认倍速。", .toggle, .bool(true)),
     .init(.speed, .playback, "进度与倍速", "默认倍速", "开启「记住倍速」后生效。", .number(0.25...4, step: 0.25), .number(1)),
-    .init(.bottomProgress, .playback, "进度与倍速", "控件隐藏时显示细进度条", "播放控件隐藏后，画面底边保留一条进度。", .toggle, .bool(true)),
     .init(.volume, .playback, "进度与倍速", "默认音量", "新打开的视频从这个音量开始。", .number(0...100, step: 5), .number(80)),
     .init(.powerSavingMode, .playback, "省电", "省电模式", "只调整弹幕和画面处理，不影响解码、加载与缓冲。", options([(PowerSavingMode.auto.rawValue, "自动（用电池或机身发热时）"), (PowerSavingMode.always.rawValue, "始终"), (PowerSavingMode.off.rawValue, "关闭")]), .text(PowerSavingMode.auto.rawValue)),
     .init(.powerSavingDanmaku60, .playback, "省电", "省电时弹幕最高 60 帧", "120 Hz 屏幕上肉眼差别很小，GPU 占用约减半。", .toggle, .bool(true)),
@@ -184,8 +228,6 @@ public enum MacSettingsCatalog {
     .init(.endWithPlaylist, .playback, "连续播放", "列表播完后停止", "不进入列表之外的推荐视频。", .toggle, .bool(true)),
     .init(.integratedPlayer, .playback, "打开方式", "在主窗口中播放", "关闭后视频在独立窗口中播放。", .toggle, .bool(true)),
     .init(.displayMode, .playback, "打开方式", "播放显示模式", "打开视频时窗口的样子。", options([("default", "默认"), ("fullscreen", "全屏"), ("compact", "小窗")]), .text("default")),
-    .init(.hideMainOnPlay, .playback, "打开方式", "在独立窗口播放时隐藏主窗口", "视频移到独立窗口后，主窗口自动收起。", .toggle, .bool(true)),
-    .init(.liveWebPlayer, .playback, "打开方式", "在浏览器中打开直播间", "点按直播卡片时打开哔哩哔哩网页，而不是在满屏中播放。", .toggle, .bool(false)),
     .init(.autoSkipClips, .playback, "番剧", "自动跳过片头片尾", "标注了片头片尾的番剧直接跳过；关闭时显示「跳过」按钮。", .toggle, .bool(false)),
     .init(.autoLoadHistory, .playback, "番剧", "从上次看到的位置继续", "打开番剧和影视时从账号记录的进度开始播放。", .toggle, .bool(true)),
     // 弹幕

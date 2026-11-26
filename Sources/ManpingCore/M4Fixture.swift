@@ -146,8 +146,9 @@ public enum M4Fixture {
       item.cardType = .av; item.extend.businessID = String(100 + index)
       content.moduleDynamic.type = .mdlDynArchive
       content.moduleDynamic.dynArchive.avid = Int64(100 + index)
+      content.moduleDynamic.dynArchive.bvid = "BV1sample\(String(format: "%03d", index))"
       content.moduleDynamic.dynArchive.cid = Int64(1000 + index)
-      content.moduleDynamic.dynArchive.title = "动态视频 · \(index + 1) · 记录创作与生活"
+      content.moduleDynamic.dynArchive.title = !performance && index == 0 ? "" : "动态视频 · \(index + 1) · 记录创作与生活"
       content.moduleDynamic.dynArchive.cover = "https://fixture.invalid/cover/\(performance ? index % 8 : index)"
       content.moduleDynamic.dynArchive.uri = "https://www.bilibili.com/video/av\(100 + index)"
       content.moduleDynamic.dynArchive.duration = 180; content.moduleDynamic.dynArchive.view = 120_000

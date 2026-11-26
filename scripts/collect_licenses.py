@@ -64,7 +64,7 @@ def main():
         license = CHOSEN[name][0] + '（双许可之一）' if name in CHOSEN else formulae.get(name, {}).get('license', '?')
         files = ', '.join(f'`{name}-{version}/{path.name}`' for path in copied)
         rows.append(f'| {", ".join(sorted(libraries))} | {name} {version} | {license} | {files} |')
-    rows.append('| libmpv.2.dylib | mpv 0.41.0（本项目构建） | GPL-2.0-or-later | `../mpv-LICENSE.GPL`, `../mpv-LICENSE.LGPL`, `../mpv-Copyright` |')
+    rows.append('| libmpv.2.dylib | mpv 0.42.0（本项目构建） | GPL-2.0-or-later | `../mpv-LICENSE.GPL`, `../mpv-LICENSE.LGPL`, `../mpv-Copyright` |')
     (OUTPUT / 'README.md').write_text(
         '# 随附动态库的许可\n\n由 `scripts/collect_licenses.py` 从 `Dependencies.lock.json` 对应的 Homebrew keg 原样复制。'
         '源码地址与校验和见上级目录 `HomebrewFormulae.json`。\n\n'

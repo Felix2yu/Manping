@@ -53,7 +53,7 @@ public enum Acknowledgements {
 
     // MARK: 播放与渲染
     .init(name: "mpv", author: "mpv contributors", license: "GPL-2.0-or-later / LGPL", url: "https://mpv.io",
-      contribution: "播放核心，本项目打补丁构建的 libmpv 0.41.0。", group: .playback),
+      contribution: "播放核心，本项目打补丁构建的 libmpv 0.42.0。", group: .playback),
     .init(name: "FFmpeg", author: "FFmpeg developers", license: "GPL-3.0-or-later 构建", url: "https://ffmpeg.org",
       contribution: "解码、封装与下载合并。", group: .playback),
     .init(name: "libplacebo", author: "VideoLAN", license: "LGPL-2.1-or-later", url: "https://code.videolan.org/videolan/libplacebo",
