@@ -226,43 +226,53 @@ struct PlaybackTimeline: View {
     let buffered = clamp((time + max(0, bufferedAhead())) / total)
     VStack(spacing: 0) {
       energyCurve.frame(height: Self.curveHeight)
-      ZStack(alignment: .leading) {
-        // One bar per chapter with a gap between them, as on Bilibili; the hovered chapter brightens.
+      GeometryReader { geometry in
+        // Drawing uses this layout pass directly; measured width is only for pointer conversion.
+        let width = max(1, geometry.size.width)
         ZStack(alignment: .leading) {
-          Capsule().fill(.white.opacity(0.22)).frame(height: Self.trackHeight)
-          if let segment = hoveredSegment {
-            Rectangle().fill(.white.opacity(0.24))
-              .frame(width: trackWidth * (segment.upperBound - segment.lowerBound), height: Self.trackHeight)
-              .offset(x: trackWidth * segment.lowerBound)
+          // One bar per chapter with a gap between them, as on Bilibili; the hovered chapter brightens.
+          ZStack(alignment: .leading) {
+            Capsule().fill(.white.opacity(0.22)).frame(maxWidth: .infinity).frame(height: Self.trackHeight)
+            if let segment = hoveredSegment {
+              Rectangle().fill(.white.opacity(0.24))
+                .frame(width: width * (segment.upperBound - segment.lowerBound), height: Self.trackHeight)
+                .offset(x: width * segment.lowerBound)
+            }
+            Capsule().fill(.white.opacity(0.32)).frame(width: width * buffered, height: Self.trackHeight)
+            StreakShape(progress: fraction)
+              .fill(LinearGradient(colors: [Theme.accent.opacity(0.25), Theme.accent], startPoint: .leading, endPoint: .trailing))
+              .frame(maxWidth: .infinity).frame(height: Self.trackHeight)
           }
-          Capsule().fill(.white.opacity(0.32)).frame(width: trackWidth * buffered, height: Self.trackHeight)
-          StreakFill(progress: fraction).frame(height: Self.trackHeight)
-        }
-        .frame(height: Self.hitHeight)
-        .mask(ChapterSegments(marks: chapterMarks, gap: Self.chapterGap))
-        ForEach(markerFractions, id: \.self) { mark in
-          RoundedRectangle(cornerRadius: 1.5).fill(Theme.highlight).frame(width: 3, height: 10)
-            .shadow(color: Theme.highlight.opacity(0.9), radius: 4)
-            .offset(x: trackWidth * mark - 1.5)
-            .allowsHitTesting(false).accessibilityHidden(true)
-        }
-        ForEach(bookmarkFractions, id: \.self) { mark in
-          PlaybackBookmarkPin()
-            .fill(Theme.accent)
-            .frame(width: 9, height: 13)
-            .offset(x: trackWidth * mark - 4.5, y: -2)
-            .allowsHitTesting(false).accessibilityHidden(true)
-        }
-        if enabled {
-          Circle().fill(.white).frame(width: 14, height: 14)
-            .background(Circle().fill(Theme.accent.opacity(0.55)).frame(width: 22, height: 22))
-            .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
-            .offset(x: trackWidth * fraction - 7)
+          .frame(height: Self.hitHeight)
+          .mask(ChapterSegments(marks: chapterMarks, gap: Self.chapterGap))
+          ForEach(markerFractions, id: \.self) { mark in
+            RoundedRectangle(cornerRadius: 1.5).fill(Theme.highlight).frame(width: 3, height: 10)
+              .shadow(color: Theme.highlight.opacity(0.9), radius: 4)
+              .offset(x: width * mark - 1.5)
+              .allowsHitTesting(false).accessibilityHidden(true)
+          }
+          ForEach(bookmarkFractions, id: \.self) { mark in
+            PlaybackBookmarkPin()
+              .fill(Theme.accent)
+              .frame(width: 9, height: 13)
+              .offset(x: width * mark - 4.5, y: -2)
+              .allowsHitTesting(false).accessibilityHidden(true)
+          }
+          if enabled {
+            Circle().fill(.white).frame(width: 14, height: 14)
+              .background(Circle().fill(Theme.accent.opacity(0.55)).frame(width: 22, height: 22))
+              .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+              .offset(x: width * fraction - 7)
+          }
         }
       }
       .frame(height: Self.hitHeight)
       .contentShape(Rectangle())
-      .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { trackWidth = max(1, $0) }
+      .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { value in
+        let width = max(1, value)
+        guard width.isFinite, width != trackWidth else { return }
+        trackWidth = width
+      }
       .gesture(DragGesture(minimumDistance: 0)
         .onChanged { value in
           guard enabled else { return }
@@ -370,12 +380,15 @@ struct PlaybackTimeline: View {
       // Placed by offset from its measured size, centred on the pointer and kept within the
       // track, 4pt above it. Explicit alignment guides are not used: SwiftUI drops them for
       // content inside this `if`, which pinned the preview to the panel's bottom-left corner.
-      .onGeometryChange(for: CGSize.self) { $0.size } action: { previewSize = $0 }
+      .onGeometryChange(for: CGSize.self) { $0.size } action: { value in
+        guard value != previewSize else { return }
+        previewSize = value
+      }
       .offset(x: min(max(0, trackWidth * CGFloat(clamp(fraction)) - previewSize.width / 2), max(0, trackWidth - previewSize.width)),
         y: -(previewSize.height + 4))
       .opacity(previewSize == .zero ? 0 : 1)
       // Measured afresh each time it appears, so it never shows for a frame at an old size.
-      .onDisappear { previewSize = .zero }
+      .onDisappear { if previewSize != .zero { previewSize = .zero } }
       .allowsHitTesting(false)
       .transition(.opacity)
     }
