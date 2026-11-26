@@ -436,7 +436,9 @@ import SwiftUI
     SettingsWindowController.shared.diagnosticTheme = launchTheme
     // `--ui-page settings…` opens the settings window on that category; screenshots capture it.
     let settingsWindow: NSWindow? = model.launchSettingsGroup.flatMap { group in
-      if model.launchSettingsPlayerBar { model.openPlayerBarSettings() } else { model.openSettings(group) }
+      if model.launchSettingsPlayerBar { model.openPlayerBarSettings() }
+      else if model.launchSettingsFilters { model.openSettings(page: .recommendationFilters) }
+      else { model.openSettings(group) }
       return SettingsWindowController.shared.window
     }
     #if DEBUG

@@ -32,7 +32,7 @@ enum Theme {
   /// Default danmaku colour and the player's primary button.
   static let mist = color(0xF6F3EE)
   /// The main window's toolbar across the top of the content (back / forward, title, search).
-  static let toolbarHeight: CGFloat = 60
+  static let toolbarHeight: CGFloat = 48
   /// Toolbar controls (navigation group, search field, refresh).
   static let toolbarControlHeight: CGFloat = 36
   static let pageHeaderHeight: CGFloat = 52

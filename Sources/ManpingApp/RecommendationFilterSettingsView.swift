@@ -15,85 +15,83 @@ struct RecommendationFilterSettingsView: View {
   @Environment(\.colorScheme) private var scheme
 
   var body: some View {
-    ScrollView {
-      Form {
-        Section {
-          Picker("规则类型", selection: $kind) {
-            ForEach(RecommendationRuleKind.allCases, id: \.self) { Text($0.title).tag($0) }
-          }
-          partitionEditor
-          authorEditor
-          if let validationError {
-            Text(validationError).font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(scheme))
-          }
-          HStack {
-            Spacer()
-            Button("新增规则", action: addRule).buttonStyle(AppButtonStyle(role: .primary, size: .small))
-              .disabled(!canAdd)
-          }
-          if let message {
-            Text(message).font(Theme.Font.caption).foregroundStyle(
-              message.hasPrefix("没能") || message.hasPrefix("规则") || message.hasPrefix("请")
-                ? Theme.danger(scheme) : Theme.secondaryText(scheme))
-          }
-          if let error = directory.error, directory.partitions.isEmpty {
-            Text("没能加载分区：\(error)").font(Theme.Font.caption).foregroundStyle(Theme.danger(scheme))
-            Button("重试") { directory.load(service: model.service) }
-          }
-        } header: {
-          Text("新增规则")
-        } footer: {
-          Text("规则影响首页推荐与热门、分区推荐、视频页相关推荐和精选播放；收藏、稍后再看、历史记录、搜索、排行榜及按最新/热度等指标排序的分区列表不受影响。")
+    Form {
+      Section {
+        Picker("规则类型", selection: $kind) {
+          ForEach(RecommendationRuleKind.allCases, id: \.self) { Text($0.title).tag($0) }
         }
-
-        Section("已有规则（\(store.filter.rules.count)）") {
-          if store.filter.rules.isEmpty {
-            Text("还没有推荐过滤规则。可在推荐视频的右键菜单中快速添加。")
-              .foregroundStyle(Theme.secondaryText(scheme))
-          } else {
-            ForEach(store.filter.rules) { rule in
-              HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(rule.name).font(Theme.Font.body).lineLimit(1)
-                  Text("\(rule.kind.title) · ID \(rule.valueID)").font(Theme.Font.caption2)
-                    .foregroundStyle(Theme.tertiaryText(scheme))
-                }
-                Spacer(minLength: 0)
-                Button { store.remove(id: rule.id) } label: {
-                  Image(systemName: "trash").font(.system(size: 12))
-                }.buttonStyle(AppButtonStyle(role: .plain, size: .small, iconOnly: true))
-                  .help("删除规则").accessibilityLabel("删除 \(rule.kind.title) \(rule.name) 规则")
-              }
-            }
-          }
+        partitionEditor
+        authorEditor
+        if let validationError {
+          Text(validationError).font(Theme.Font.caption).foregroundStyle(Theme.secondaryText(scheme))
         }
+        HStack {
+          Spacer()
+          Button("新增规则", action: addRule).buttonStyle(AppButtonStyle(role: .primary, size: .small))
+            .disabled(!canAdd)
+        }
+        if let message {
+          Text(message).font(Theme.Font.caption).foregroundStyle(
+            message.hasPrefix("没能") || message.hasPrefix("规则") || message.hasPrefix("请")
+              ? Theme.danger(scheme) : Theme.secondaryText(scheme))
+        }
+        if let error = directory.error, directory.partitions.isEmpty {
+          Text("没能加载分区：\(error)").font(Theme.Font.caption).foregroundStyle(Theme.danger(scheme))
+          Button("重试") { directory.load(service: model.service) }
+        }
+      } header: {
+        Text("新增规则")
+      } footer: {
+        Text("规则影响首页推荐与热门、分区推荐、视频页相关推荐和精选播放；收藏、稍后再看、历史记录、搜索、排行榜及按最新/热度等指标排序的分区列表不受影响。")
+      }
 
-        Section {
-          if store.filter.hiddenVideos.isEmpty {
-            Text("还没有隐藏的推荐视频。可在推荐视频的“不再推荐 › 这个视频”中添加。")
-              .foregroundStyle(Theme.secondaryText(scheme))
-          } else {
-            ForEach(store.filter.hiddenVideos) { video in
+      Section("已有规则（\(store.filter.rules.count)）") {
+        if store.filter.rules.isEmpty {
+          Text("还没有推荐过滤规则。可在推荐视频的右键菜单中快速添加。")
+            .foregroundStyle(Theme.secondaryText(scheme))
+        } else {
+          ForEach(store.filter.rules) { rule in
+            HStack(spacing: 10) {
               VStack(alignment: .leading, spacing: 2) {
-                Text(video.title.isEmpty ? video.id : video.title).font(Theme.Font.body).lineLimit(1)
-                Text(video.id).font(Theme.Font.caption2).foregroundStyle(Theme.tertiaryText(scheme))
+                Text(rule.name).font(Theme.Font.body).lineLimit(1)
+                Text("\(rule.kind.title) · ID \(rule.valueID)").font(Theme.Font.caption2)
+                  .foregroundStyle(Theme.tertiaryText(scheme))
               }
+              Spacer(minLength: 0)
+              Button { store.remove(id: rule.id) } label: {
+                Image(systemName: "trash").font(.system(size: 12))
+              }.buttonStyle(AppButtonStyle(role: .plain, size: .small, iconOnly: true))
+                .help("删除规则").accessibilityLabel("删除 \(rule.kind.title) \(rule.name) 规则")
             }
-            Button("清除单视频反馈", action: clearVideoFeedback)
-              .buttonStyle(AppButtonStyle(role: .destructive, size: .small))
           }
-          if let videoFeedbackMessage {
-            Text(videoFeedbackMessage).font(Theme.Font.caption).foregroundStyle(
-              videoFeedbackMessage.hasPrefix("没能") ? Theme.danger(scheme) : Theme.secondaryText(scheme))
-          }
-        } header: {
-          Text("单视频反馈（\(store.filter.hiddenVideos.count)）")
-        } footer: {
-          Text("清除后，这些视频会重新符合推荐条件；不会删除收藏、稍后再看或观看记录。")
         }
-      }.formStyle(.grouped).scrollContentBackground(.hidden)
-        .padding(.horizontal, 30).padding(.top, 16).padding(.bottom, 24)
-    }
+      }
+
+      Section {
+        if store.filter.hiddenVideos.isEmpty {
+          Text("还没有隐藏的推荐视频。可在推荐视频的“不再推荐 › 这个视频”中添加。")
+            .foregroundStyle(Theme.secondaryText(scheme))
+        } else {
+          ForEach(store.filter.hiddenVideos) { video in
+            VStack(alignment: .leading, spacing: 2) {
+              Text(video.title.isEmpty ? video.id : video.title).font(Theme.Font.body).lineLimit(1)
+              Text(video.id).font(Theme.Font.caption2).foregroundStyle(Theme.tertiaryText(scheme))
+            }
+          }
+          Button("清除单视频反馈", action: clearVideoFeedback)
+            .buttonStyle(AppButtonStyle(role: .destructive, size: .small))
+        }
+        if let videoFeedbackMessage {
+          Text(videoFeedbackMessage).font(Theme.Font.caption).foregroundStyle(
+            videoFeedbackMessage.hasPrefix("没能") ? Theme.danger(scheme) : Theme.secondaryText(scheme))
+        }
+      } header: {
+        Text("单视频反馈（\(store.filter.hiddenVideos.count)）")
+      } footer: {
+        Text("清除后，这些视频会重新符合推荐条件；不会删除收藏、稍后再看或观看记录。")
+      }
+    }.formStyle(.grouped).scrollContentBackground(.hidden)
+      .padding(.horizontal, 30).padding(.top, 8).padding(.bottom, 24)
     .task { directory.loadIfNeeded(service: model.service) }
     .onDisappear { directory.cancel() }
     .onChange(of: parentID) { _, _ in childID = nil; message = nil }

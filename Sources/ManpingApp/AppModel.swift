@@ -330,6 +330,7 @@ import WebKit
   var launchSettingsGroup: MacSettingGroup?
   /// `--ui-page settings:playerbar`: the settings window on 控制条.
   var launchSettingsPlayerBar = false
+  var launchSettingsFilters = false
   var launchVideoTab: String?
   @Published var player = PlayerModel()
   /// CDN selection, multi-node relay, stall recovery and smart cache for every playback.
@@ -1241,6 +1242,8 @@ import WebKit
     case "settings:playback", "settings:behavior": launchSettingsGroup = .playback
     case "settings:playerbar":
       launchSettingsGroup = .interface; launchSettingsPlayerBar = true
+    case "settings:filters":
+      launchSettingsGroup = .general; launchSettingsFilters = true
     case "settings:danmaku": launchSettingsGroup = .danmaku
     case "settings:network", "settings:proxy": launchSettingsGroup = .network
     case "settings:download", "settings:screenshot": launchSettingsGroup = .download

@@ -285,7 +285,7 @@ private struct ShellContent: View {
     }
     // Pages describe their toolbar with `.pageToolbar(…)`; it is drawn once, here.
     .overlayPreferenceValue(PageToolbarKey.self, alignment: .top) { item in
-      if !immersive { toolbar(item, leadingInset: leadingInset, divided: !playbackPage) }
+      if !immersive { toolbar(item, leadingInset: leadingInset, divided: !playbackPage, centeredTitle: playbackPage) }
     }
   }
   private var showsHomeTabs: Bool {
@@ -293,27 +293,43 @@ private struct ShellContent: View {
   }
   /// `divided`: a hairline under the toolbar; the playback page's stage and panel keep their own
   /// 12 pt gap below it instead.
-  private func toolbar(_ item: PageToolbarItem?, leadingInset: CGFloat, divided: Bool) -> some View {
-    HStack(spacing: 12) {
-      navigationButtons
-      PageToolbarTitle(item: item, fallback: model.toolbarTitle).layoutPriority(-1)
-      if showsHomeTabs {
-        SegmentedTabs(options: AppModel.PopularTab.allCases.map { ($0, $0.rawValue) },
-          selection: Binding(get: { model.popularTab }, set: { model.selectPopularTab($0) })).fixedSize()
-      } else if let segments = item?.segments {
-        segments.fixedSize()
+  private func toolbar(_ item: PageToolbarItem?, leadingInset: CGFloat, divided: Bool, centeredTitle: Bool) -> some View {
+    Group {
+      if centeredTitle {
+        CenteredToolbarLayout(centerOffset: -leadingInset / 2) {
+          navigationButtons
+          PageToolbarTitle(item: item, fallback: model.toolbarTitle)
+            .multilineTextAlignment(.center).truncationMode(.middle)
+          toolbarTrailingControls(item)
+        }
+      } else {
+        HStack(spacing: 12) {
+          navigationButtons
+          PageToolbarTitle(item: item, fallback: model.toolbarTitle).layoutPriority(-1)
+          if showsHomeTabs {
+            SegmentedTabs(options: AppModel.PopularTab.allCases.map { ($0, $0.rawValue) },
+              selection: Binding(get: { model.popularTab }, set: { model.selectPopularTab($0) })).fixedSize()
+          } else if let segments = item?.segments {
+            segments.fixedSize()
+          }
+          Spacer(minLength: 8)
+          toolbarTrailingControls(item)
+        }
       }
-      Spacer(minLength: 8)
+    }
+    .foregroundStyle(Theme.text(scheme))
+    .padding(.leading, 16 + leadingInset).padding(.trailing, 16)
+    .frame(height: Theme.toolbarHeight)
+    .overlay(alignment: .bottom) { Hairline().opacity(divided ? 1 : 0) }
+  }
+  private func toolbarTrailingControls(_ item: PageToolbarItem?) -> some View {
+    HStack(spacing: 12) {
       if let accessory = item?.accessory {
         HStack(spacing: 8) { accessory }.fixedSize()
       }
       searchBox.frame(minWidth: 180, idealWidth: 300, maxWidth: 300)
       refreshButton(item)
     }
-    .foregroundStyle(Theme.text(scheme))
-    .padding(.leading, 16 + leadingInset).padding(.trailing, 16)
-    .frame(height: Theme.toolbarHeight)
-    .overlay(alignment: .bottom) { Hairline().opacity(divided ? 1 : 0) }
   }
   private var navigationButtons: some View {
     HStack(spacing: 0) {
@@ -435,6 +451,57 @@ private struct ShellContent: View {
       case .downloads: M7DownloadsPage(model: model)
       }
     }
+  }
+}
+
+private struct CenteredToolbarLayout: Layout {
+  private let spacing: CGFloat = 12
+  private let minimumCenteredWidth: CGFloat = 160
+  private let maximumTrailingWidth: CGFloat = 440
+  private let centerOffset: CGFloat
+
+  init(centerOffset: CGFloat = 0) { self.centerOffset = centerOffset }
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+    guard subviews.count == 3 else { return .zero }
+    let leading = subviews[0].sizeThatFits(proposal)
+    let trailing = trailingSize(proposal: proposal, subviews: subviews)
+    let width = proposal.width ?? leading.width + trailing.width + spacing * 2
+    let title = titleSize(available: titleWidth(width: width, leading: leading, trailing: trailing),
+      subview: subviews[1], proposal: proposal)
+    return CGSize(width: width, height: max(leading.height, title.height, trailing.height))
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+    guard subviews.count == 3 else { return }
+    let leading = subviews[0].sizeThatFits(proposal)
+    let trailing = trailingSize(proposal: proposal, subviews: subviews)
+    let available = titleWidth(width: bounds.width, leading: leading, trailing: trailing)
+    let title = titleSize(available: available, subview: subviews[1], proposal: proposal)
+    let centeredWidth = max(0, bounds.width - max(leading.width, trailing.width) * 2 - spacing * 2)
+    let titleX = centeredWidth >= minimumCenteredWidth
+      ? bounds.width / 2 + centerOffset - title.width / 2 : leading.width + spacing
+    subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY - leading.height / 2), proposal: proposal)
+    subviews[1].place(at: CGPoint(x: bounds.minX + titleX, y: bounds.midY - title.height / 2),
+      proposal: ProposedViewSize(width: title.width, height: bounds.height))
+    subviews[2].place(at: CGPoint(x: bounds.maxX - trailing.width, y: bounds.midY - trailing.height / 2),
+      proposal: ProposedViewSize(width: maximumTrailingWidth, height: bounds.height))
+  }
+
+  private func titleSize(available: CGFloat, subview: LayoutSubview, proposal: ProposedViewSize) -> CGSize {
+    let ideal = subview.sizeThatFits(ProposedViewSize(width: nil, height: proposal.height))
+    return CGSize(width: min(ideal.width, available), height: ideal.height)
+  }
+
+  private func trailingSize(proposal: ProposedViewSize, subviews: Subviews) -> CGSize {
+    subviews[2].sizeThatFits(ProposedViewSize(
+      width: proposal.width.map { min($0, maximumTrailingWidth) }, height: proposal.height))
+  }
+
+  private func titleWidth(width: CGFloat, leading: CGSize, trailing: CGSize) -> CGFloat {
+    let centered = max(0, width - max(leading.width, trailing.width) * 2 - spacing * 2)
+    if centered >= minimumCenteredWidth { return centered }
+    return max(1, width - leading.width - trailing.width - spacing * 2)
   }
 }
 
