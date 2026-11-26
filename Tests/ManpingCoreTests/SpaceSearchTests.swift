@@ -182,6 +182,13 @@ final class SpaceSearchTests: XCTestCase, @unchecked Sendable {
     var item = base; item["upper"] = ["mid": 8]; XCTAssertEqual(try BiliService.libraryVideo(item).authorID, 8)
     item["owner"] = ["mid": 7]; XCTAssertEqual(try BiliService.libraryVideo(item).authorID, 7)
   }
+  func testPartitionDirectoryFixturePreservesHierarchyForSearch() async throws {
+    let service = BiliService(transport: SpaceSearchTransport(), credentials: SpaceSearchStore())
+    let partitions = try await service.videoPartitions()
+    XCTAssertEqual(partitions.map(\.id), [160, 36])
+    XCTAssertEqual(partitions[0].children.map(\.id), [161, 162])
+    XCTAssertEqual(partitions[0].children[0].title, "生活记录")
+  }
   func testSearchUsersKeepsFullFieldsAndUsesOwnSort() async throws {
     let transport = SpaceSearchTransport()
     let service = BiliService(transport: transport, credentials: SpaceSearchStore())

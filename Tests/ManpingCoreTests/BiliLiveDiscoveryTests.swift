@@ -11,9 +11,12 @@ private final class LiveDiscoveryStore: AuthCredentialStore, @unchecked Sendable
       refreshToken: "live-fixture-refresh", expiresAt: 9_999_999_999) : nil
   }
   func load() -> [HTTPCookie] {
-    ["SESSDATA": "live-fixture-session", "bili_jct": "live-fixture-csrf"].compactMap { name, value in
-      HTTPCookie(properties: [.name: name, .value: value, .domain: ".bilibili.com", .path: "/",
-        .secure: "TRUE", .expires: Date(timeIntervalSince1970: 9_999_999_999)])
+    lock.withLock {
+      guard token != nil else { return [] }
+      return ["SESSDATA": "live-fixture-session", "DedeUserID": "123", "bili_jct": "live-fixture-csrf"].compactMap { name, value in
+        HTTPCookie(properties: [.name: name, .value: value, .domain: ".bilibili.com", .path: "/",
+          .secure: "TRUE", .expires: Date(timeIntervalSince1970: 9_999_999_999)])
+      }
     }
   }
   func save(_ cookies: [HTTPCookie]) {}

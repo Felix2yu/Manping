@@ -144,17 +144,12 @@ final class WatchHistoryTests: XCTestCase {
     XCTAssertEqual(loaded["BV04999"]?.progress, 4999)
   }
 
-  func testCacheFilesAreSeparatedByAccountAndAppVariant() {
-    let first = WatchHistoryCache.cacheFileURL("watch-history", accountID: 1, variant: "-debug")
-    let second = WatchHistoryCache.cacheFileURL("watch-history", accountID: 2, variant: "-debug")
-    let guest = WatchHistoryCache.cacheFileURL("watch-history", accountID: nil, variant: "-debug")
-    let release = WatchHistoryCache.cacheFileURL("watch-history", accountID: 1, variant: "")
-    XCTAssertEqual(first?.lastPathComponent, "watch-history-1-debug.json")
-    XCTAssertEqual(second?.lastPathComponent, "watch-history-2-debug.json")
-    XCTAssertEqual(guest?.lastPathComponent, "watch-history-guest-debug.json")
-    XCTAssertEqual(release?.lastPathComponent, "watch-history-1.json")
-    XCTAssertNotEqual(first, second)
-    XCTAssertNotEqual(first, guest)
+  func testCacheFilesAreSharedAcrossLoginStatesAndSeparatedByAppVariant() {
+    let debug = WatchHistoryCache.cacheFileURL("watch-history", variant: "-debug")
+    let release = WatchHistoryCache.cacheFileURL("watch-history", variant: "")
+    XCTAssertEqual(debug?.lastPathComponent, "watch-history-guest-debug.json")
+    XCTAssertEqual(release?.lastPathComponent, "watch-history-guest.json")
+    XCTAssertNotEqual(debug, release)
   }
 
   func testTokenRoundTrip() {

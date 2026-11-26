@@ -534,7 +534,7 @@ final class M2CoreTests: XCTestCase, @unchecked Sendable {
   }
 
   private func curatedCookies() -> [HTTPCookie] {
-    [("SESSDATA", "fixture-session"), ("bili_jct", "fixture-csrf")].map { name, value in
+    [("SESSDATA", "fixture-session"), ("DedeUserID", "123"), ("bili_jct", "fixture-csrf")].map { name, value in
       HTTPCookie(properties: [.domain: ".bilibili.com", .path: "/", .name: name, .value: value])!
     }
   }
@@ -571,7 +571,7 @@ final class M2CoreTests: XCTestCase, @unchecked Sendable {
       _ = try await service.curatedPlaylist(expectedIdentity: expected)
       XCTFail("Web cookies are required even with an App token")
     } catch { XCTAssertTrue(error.localizedDescription.contains("网页登录")) }
-    let csrfMissing = BiliService(transport: transport, credentials: M2Store(cookies: [curatedCookies()[0]]))
+    let csrfMissing = BiliService(transport: transport, credentials: M2Store(cookies: Array(curatedCookies().prefix(2))))
     try await csrfMissing.restoreCookies()
     do {
       _ = try await csrfMissing.curatedPlaylist(expectedIdentity: await csrfMissing.authSnapshot())

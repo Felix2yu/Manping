@@ -113,6 +113,27 @@ final class DanmakuTimelineViewportCacheTests: XCTestCase {
     XCTAssertEqual(cache.timeline.visible(at: 1).map(\.comment.text), ["Replacement"])
   }
 
+  func testAggregatedDisplayWidthAffectsLanesWithoutRewritingPublishedEntries() {
+    let original = DanmakuComment(time: 0, text: "干杯")
+    let aggregated = DanmakuComment(time: 0, text: "干杯", displayText: "干杯 ×11")
+    let next = DanmakuComment(time: 0.9, text: "下一条")
+    var source = DanmakuTimeline(comments: [aggregated, next])
+    var cache = DanmakuTimeline.ViewportCache()
+    cache.update(source: source, scrollingDurationScale: 1.5)
+    let layout = cache.timeline.layoutRevision
+    let visible = cache.timeline.visible(at: 1.6)
+    XCTAssertEqual(visible.map(\.comment.text), ["干杯", "下一条"])
+    XCTAssertEqual(visible.map(\.comment.displayText), ["干杯 ×11", nil])
+    XCTAssertEqual(visible.map(\.lane), [0, 1])
+    XCTAssertNotEqual(aggregated, original)
+
+    source.append(DanmakuComment(time: 2, text: "后来", displayText: "后来 ×2"))
+    cache.update(source: source, scrollingDurationScale: 1.5)
+    XCTAssertEqual(cache.timeline.layoutRevision, layout)
+    XCTAssertEqual(cache.timeline.visible(at: 1.6).map(\.comment), visible.map(\.comment),
+      "a later batch must not replace an already placed entry")
+  }
+
   func test120HzKeepsTheOriginalSourceLayoutAcrossWidthsAndAppends() {
     var source = DanmakuTimeline(comments: [DanmakuComment(time: 0, text: "Native")])
     var cache = DanmakuTimeline.ViewportCache()

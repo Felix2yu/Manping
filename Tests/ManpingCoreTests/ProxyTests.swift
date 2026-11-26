@@ -206,6 +206,8 @@ final class ProxyTests: XCTestCase {
     _ = try await service.data(URL(string: "https://api.bilibili.com/x/web-interface/zone")!)
     XCTAssertEqual(direct.totalRequests, 0, "nothing goes direct in always mode, device cookies included")
     XCTAssertEqual(proxied.totalRequests, 2, "finger/spi, then the request itself")
+    XCTAssertEqual(proxied.userAgents, [BiliService.webUserAgent, BiliService.webUserAgent])
+    XCTAssertEqual(proxied.referers, [BiliService.webReferer, BiliService.webReferer])
 
     let offDirect = RouteFake(limited: false)
     let offProxied = RouteFake(limited: false)
@@ -483,13 +485,21 @@ final class RouteFake: AuthTransport, @unchecked Sendable {
   private let limited: Bool
   private let lock = NSLock()
   private var paths: [String] = []
+  private var agents: [String] = []
+  private var refererValues: [String] = []
   init(limited: Bool) { self.limited = limited }
   var playurlRequests: Int { lock.withLock { paths.filter { $0.contains("playurl") }.count } }
   var totalRequests: Int { lock.withLock { paths.count } }
+  var userAgents: [String] { lock.withLock { agents } }
+  var referers: [String] { lock.withLock { refererValues } }
 
   func send(_ request: URLRequest) async throws -> AuthHTTPResponse {
     let path = request.url?.path ?? ""
-    lock.withLock { paths.append(path) }
+    lock.withLock {
+      paths.append(path)
+      agents.append(request.value(forHTTPHeaderField: "User-Agent") ?? "")
+      refererValues.append(request.value(forHTTPHeaderField: "Referer") ?? "")
+    }
     let body: String
     if path.hasSuffix("/nav") {
       body = #"{"code":-101,"data":{"wbi_img":{"img_url":"https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png","sub_url":"https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png"}}}"#

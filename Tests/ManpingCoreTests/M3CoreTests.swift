@@ -82,6 +82,65 @@ final class M3CoreTests: XCTestCase, @unchecked Sendable {
     let sortParameters = LibrarySearchOrder.allCases.map(\.rawValue)
     XCTAssertEqual(sortParameters, ["totalrank", "click", "dm", "pubdate"])
   }
+  func testVideoSearchFilterMappingPagingAndFixtureMetadata() async throws {
+    let transport = M3Transport(); let service = try await m3Service(transport, authenticated: false)
+    for value in 0...4 {
+      _ = try await service.librarySearch("duration", duration: value)
+      _ = try await service.librarySearch("pubtime", pubtime: value)
+    }
+    _ = try await service.librarySearch("filtered", order: .newest, duration: 2, pubtime: 3, tid: 161, page: 2)
+    let requests = await transport.requests
+    let search = requests.filter { $0.url!.path == "/x/web-interface/wbi/search/type" }
+    for (index, value) in (0...4).enumerated() {
+      XCTAssertEqual(m3Fields(search[index * 2])["duration"], String(value))
+      XCTAssertEqual(m3Fields(search[index * 2])["pubtime"], "0")
+      XCTAssertEqual(m3Fields(search[index * 2 + 1])["pubtime"], String(value))
+    }
+    let filtered = m3Fields(search[10])
+    XCTAssertEqual(filtered["page"], "2"); XCTAssertEqual(filtered["order"], "pubdate")
+    XCTAssertEqual(filtered["duration"], "2"); XCTAssertEqual(filtered["pubtime"], "3")
+    XCTAssertEqual(filtered["tid"], "161")
+    let defaultFields = m3Fields(search[0])
+    XCTAssertEqual(defaultFields["duration"], "0"); XCTAssertEqual(defaultFields["pubtime"], "0")
+    XCTAssertNil(defaultFields["tid"])
+
+    var metadataFields = filtered; metadataFields["page"] = "1"
+    let body = try XCTUnwrap(M3Fixture.response(path: "/x/web-interface/wbi/search/type", parameters: metadataFields))
+    let root = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    let data = try XCTUnwrap(root["data"] as? [String: Any])
+    let result = try XCTUnwrap(data["result"] as? [[String: Any]])
+    let video = try BiliService.libraryVideo(result[0])
+    XCTAssertEqual(video.duration, 1200); XCTAssertEqual(video.partitionID, 161)
+    XCTAssertEqual(video.publishedAt, 1_760_000_000 - 15 * 86400)
+  }
+  func testNonVideoSearchOmitsVideoFiltersAndUserOrdersUseExactValues() async throws {
+    let transport = M3Transport(); let service = try await m3Service(transport, authenticated: false)
+    for type in LibrarySearchType.allCases where type != .video {
+      _ = try await service.librarySearch("other", type: type, duration: 4, pubtime: 4, tid: 161)
+    }
+    for order in LibraryUserSearchOrder.allCases {
+      _ = try await service.searchUsers(term: "user", order: order, page: 2)
+    }
+    let requests = await transport.requests
+    let fields = requests.filter { $0.url!.path == "/x/web-interface/wbi/search/type" }.map(m3Fields)
+    for field in fields.prefix(LibrarySearchType.allCases.count - 1) {
+      XCTAssertNil(field["duration"]); XCTAssertNil(field["pubtime"]); XCTAssertNil(field["tid"])
+    }
+    XCTAssertEqual(fields.suffix(3).map { $0["order"] }, ["0", "fans", "level"])
+    XCTAssertTrue(fields.suffix(3).allSatisfy { $0["page"] == "2" && $0["search_type"] == "bili_user" })
+    XCTAssertEqual(LibraryUserSearchOrder.allCases.map(\.rawValue), ["0", "fans", "level"])
+  }
+  func testInvalidVideoSearchFiltersNeverSendRequests() async throws {
+    let transport = M3Transport(); let service = try await m3Service(transport, authenticated: false)
+    for (duration, pubtime, tid) in [(-1, 0, 0), (5, 0, 0), (0, -1, 0), (0, 5, 0), (0, 0, -1)] {
+      do {
+        _ = try await service.librarySearch("bad", duration: duration, pubtime: pubtime, tid: tid)
+        XCTFail("Invalid filters must fail")
+      } catch BiliError.invalidResponse {}
+    }
+    let requests = await transport.requests
+    XCTAssertTrue(requests.isEmpty)
+  }
   func testProfileDoesNotAttachAppToken() async throws {
     let transport = M3Transport(); let service = try await m3Service(transport)
     let user = try await service.libraryProfile(mid: 123)

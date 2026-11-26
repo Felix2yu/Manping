@@ -1,17 +1,22 @@
 import XCTest
+
 @testable import ManpingCore
 
 final class PlaybackBrowsingStateTests: XCTestCase {
   private let player = UUID(), generation = UUID()
-  private func binding(media: String = "av100", epoch: UInt64 = 1, revision: UInt64 = 2,
-    player: UUID? = nil, generation: UUID? = nil) -> PlaybackBrowsingState.Binding {
-    .init(player: player ?? self.player, media: media, generation: generation ?? self.generation,
+  private func binding(
+    media: String = "av100", epoch: UInt64 = 1, revision: UInt64 = 2,
+    player: UUID? = nil, generation: UUID? = nil
+  ) -> PlaybackBrowsingState.Binding {
+    .init(
+      player: player ?? self.player, media: media, generation: generation ?? self.generation,
       epoch: epoch, revision: revision)
   }
   func testOriginallyPausedRemainsPaused() {
     var state = PlaybackBrowsingState()
     state.enter(binding: binding(), depth: 2, playing: false)
-    XCTAssertEqual(state.returnToPlayback(binding: binding(), depth: 2, playbackVisible: true), false)
+    XCTAssertEqual(
+      state.returnToPlayback(binding: binding(), depth: 2, playbackVisible: true), false)
     XCTAssertFalse(state.isBrowsing)
   }
   func testLoadingIntentSurvivesNestedBackAndForward() {
@@ -20,17 +25,22 @@ final class PlaybackBrowsingStateTests: XCTestCase {
     state.enter(binding: binding(), depth: 2, playing: false)
     XCTAssertEqual(state.suspension?.depth, 1)
     XCTAssertNil(state.returnToPlayback(binding: binding(), depth: 2, playbackVisible: false))
-    XCTAssertEqual(state.returnToPlayback(binding: binding(), depth: 1, playbackVisible: true), true)
+    XCTAssertEqual(
+      state.returnToPlayback(binding: binding(), depth: 1, playbackVisible: true), true)
     state.enter(binding: binding(), depth: 1, playing: true)
     XCTAssertTrue(state.isBrowsing)
-    XCTAssertEqual(state.returnToPlayback(binding: binding(), depth: 1, playbackVisible: true), true)
+    XCTAssertEqual(
+      state.returnToPlayback(binding: binding(), depth: 1, playbackVisible: true), true)
   }
   func testReplacementRejectsEveryStaleBinding() {
-    for replacement in [binding(media: "av200"), binding(epoch: 2), binding(revision: 3),
-      binding(player: UUID()), binding(generation: UUID())] {
+    for replacement in [
+      binding(media: "av200"), binding(epoch: 2), binding(revision: 3),
+      binding(player: UUID()), binding(generation: UUID()),
+    ] {
       var state = PlaybackBrowsingState()
       state.enter(binding: binding(), depth: 1, playing: true)
-      XCTAssertEqual(state.returnToPlayback(binding: replacement, depth: 1, playbackVisible: true), false)
+      XCTAssertEqual(
+        state.returnToPlayback(binding: replacement, depth: 1, playbackVisible: true), false)
     }
   }
   func testIdentityAndQueueInvalidationRevokeResume() {
@@ -39,7 +49,10 @@ final class PlaybackBrowsingStateTests: XCTestCase {
     state.invalidate()
     XCTAssertTrue(state.isBrowsing)
     XCTAssertNil(state.suspension)
-    XCTAssertEqual(state.returnToPlayback(binding: binding(), depth: 1, playbackVisible: true), false)
+    XCTAssertEqual(state.returnToPlayback(binding: binding(), depth: 1, playbackVisible: true), nil)
+    XCTAssertTrue(state.isBrowsing)
+    XCTAssertEqual(state.finishForPlacement(binding: binding()), false)
+    XCTAssertFalse(state.isBrowsing)
   }
   func testWindowMigrationPreservesOriginalIntentAndResetsSuspension() {
     for playing in [false, true] {
@@ -67,7 +80,8 @@ final class PlaybackBrowsingStateTests: XCTestCase {
   func testWrongDepthNeverResumesAndNewMediaClearsRecord() {
     var state = PlaybackBrowsingState()
     state.enter(binding: binding(), depth: 2, playing: true)
-    XCTAssertEqual(state.returnToPlayback(binding: binding(), depth: 1, playbackVisible: true), false)
+    XCTAssertEqual(
+      state.returnToPlayback(binding: binding(), depth: 1, playbackVisible: true), false)
     state.enter(binding: binding(), depth: 1, playing: true)
     state.reset()
     XCTAssertNil(state.suspension)

@@ -56,6 +56,38 @@ final class PlaybackNodePolicyTests: XCTestCase {
     XCTAssertEqual(allowed.videoURL, p2p)
   }
 
+  func testAudioTracksAreIdentifiedWithoutAssumingAtmosFromCodecAlone() {
+    let url = URL(string: "https://cdn.example/audio")!
+    func audio(_ quality: Int, _ codec: String) -> MediaStream {
+      MediaStream(quality: quality, codec: codec, url: url, bandwidth: 100, label: "Audio")
+    }
+    XCTAssertEqual(audio(30280, "mp4a.40.2").audioTitle, "AAC")
+    XCTAssertEqual(audio(30251, "flac").audioTitle, "Hi-Res")
+    XCTAssertEqual(audio(30255, "flac").audioTitle, "FLAC")
+    XCTAssertEqual(audio(30250, "mp4a.40.2").audioTitle, "杜比全景声")
+    XCTAssertEqual(audio(30250, "ec-3").audioTitle, "Dolby Digital Plus")
+    XCTAssertNil(MediaStream(quality: 80, codec: "avc1", url: url, bandwidth: 100, label: "Video").audioKind)
+  }
+
+  func testAudioPreferenceAndExplicitTrackTakePriorityOverBandwidth() throws {
+    let url = URL(string: "https://cdn.example/audio")!
+    func audio(_ quality: Int, _ codec: String, bandwidth: Int) -> MediaStream {
+      MediaStream(quality: quality, codec: codec, url: url, bandwidth: bandwidth, label: "Audio")
+    }
+    let aac = audio(30280, "mp4a", bandwidth: 192)
+    let hires = audio(30251, "flac", bandwidth: 1000)
+    let dolby = audio(30250, "ec-3", bandwidth: 768)
+    let manifest = PlaybackManifest(video: [
+      MediaStream(quality: 80, codec: "avc1", url: url, bandwidth: 100, label: "1080P"),
+    ], audio: [aac, hires, dolby], duration: 30)
+    XCTAssertEqual(try PlaybackSelector.select(manifest).audio.id, "30250-ec-3")
+    XCTAssertEqual(try PlaybackSelector.select(manifest, preferences: .init(audio: .hires)).audio.id, "30251-flac")
+    XCTAssertEqual(try PlaybackSelector.select(manifest, preferences: .init(audio: .flac)).audio.id, "30251-flac")
+    XCTAssertEqual(try PlaybackSelector.select(manifest, preferences: .init(audio: .aac)).audio.id, "30280-mp4a")
+    XCTAssertEqual(try PlaybackSelector.select(manifest, preferences: .init(audio: .aac, audioStreamID: "30251-flac")).audio.id, "30251-flac")
+    XCTAssertEqual(try PlaybackSelector.select(manifest, preferences: .init(audio: .aac, audioStreamID: "missing")).audio.id, "30280-mp4a")
+  }
+
   func testAvoidP2PThrowsWhenVideoOrAudioHasOnlyPeerNodes() {
     let p2p = URL(string: "https://mcdn.bilivideo.cn/media")!
     let regular = URL(string: "https://cdn.example/media")!

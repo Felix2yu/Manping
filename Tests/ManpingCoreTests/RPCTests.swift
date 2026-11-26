@@ -245,18 +245,32 @@ final class RPCTests: XCTestCase, @unchecked Sendable {
     let headers = try builder.build(snapshot, timestamp: 1_700_000_000)
     XCTAssertEqual(Array(headers[stringValues: "authorization"]), ["identify_v1 fixture-access"])
     XCTAssertEqual(Array(headers[stringValues: "x-bili-mid"]), ["42"])
-    XCTAssertEqual(
-      try XCTUnwrap(Array(headers[binaryValues: "x-bili-metadata-bin"]).first).count,
-      try data("metadata").count)
-    XCTAssertEqual(
-      Data(try XCTUnwrap(Array(headers[binaryValues: "x-bili-metadata-bin"]).first)),
-      try data("metadata"))
+    let userAgent = try XCTUnwrap(Array(headers[stringValues: "user-agent"]).first)
+    XCTAssertTrue(userAgent.hasPrefix("bili-universal/80200100 "))
+    XCTAssertTrue(userAgent.contains("Manping/1.0 (iPhone; iOS 16.6)"))
+    XCTAssertTrue(userAgent.contains("grpc-swift-2/2.4.3"))
+    XCTAssertFalse(userAgent.contains("cronet"))
+    XCTAssertFalse(userAgent.contains("grpc-c"))
+    let expectedBuvid = "XY4161845a5c89a991173a19d8a624af5423f"
+    XCTAssertEqual(BiliRPCMetadata.outerBuvid("fixture-installation"), expectedBuvid)
+    XCTAssertEqual(Array(headers[stringValues: "buvid"]), [expectedBuvid])
+    let actualMetadata = Data(try XCTUnwrap(Array(headers[binaryValues: "x-bili-metadata-bin"]).first))
+    XCTAssertEqual(actualMetadata.count, try data("metadata").count)
+    // Keep the committed golden for every other field. Its historical profile buvid intentionally
+    // disagreed with the outer header; substitute the single installation-derived value before
+    // comparing the complete protobuf bytes.
+    var golden = try Bilibili_Metadata_Metadata(serializedBytes: data("metadata"))
+    XCTAssertNotEqual(golden.buvid, expectedBuvid)
+    golden.buvid = expectedBuvid
+    XCTAssertEqual(actualMetadata, try golden.serializedData())
     let device = try Bilibili_Metadata_Device_Device(
       serializedBytes: XCTUnwrap(Array(headers[binaryValues: "x-bili-device-bin"]).first))
     XCTAssertEqual(device.build, 6_070_600)
     XCTAssertEqual(device.appID, 1)
     XCTAssertEqual(device.model, "iPhone 14 Pro")
     XCTAssertEqual(device.platform, "iphone")
+    XCTAssertEqual(device.buvid, expectedBuvid)
+    XCTAssertEqual(golden.buvid, expectedBuvid)
     let locale = try Bilibili_Metadata_Locale_Locale(
       serializedBytes: XCTUnwrap(Array(headers[binaryValues: "x-bili-locale-bin"]).first))
     XCTAssertEqual(locale.cLocale.language, "zh")

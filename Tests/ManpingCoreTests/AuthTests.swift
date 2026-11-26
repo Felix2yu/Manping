@@ -143,7 +143,10 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
       ),
       .init(
         #"{"code":0,"data":{"code":0}}"#,
-        headers: ["Set-Cookie": "SESSDATA=fixture-B; Domain=.bilibili.com; Path=/; Secure"]),
+        headers: [
+          "Set-Cookie":
+            "SESSDATA=fixture-B; Domain=.bilibili.com; Path=/; Secure, DedeUserID=99; Domain=.bilibili.com; Path=/; Secure"
+        ]),
     ])
     let service = BiliService(transport: transport, credentials: store)
     try await service.restoreCookies()
@@ -237,7 +240,12 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
         expiresAt: 9_999_999_999))
     store.failNewToken = true
     let service = BiliService(
-      transport: FixtureTransport([qrReply, tokenReply]), credentials: store)
+      transport: FixtureTransport([
+        qrReply,
+        .init(
+          #"{"code":0,"data":{"mid":99,"access_token":"fixture-new","refresh_token":"fixture-new-refresh","expires_in":3600,"cookie_info":{"cookies":[{"name":"SESSDATA","value":"fixture-B"},{"name":"DedeUserID","value":"99"},{"name":"bili_jct","value":"fixture-B-csrf"}]}}}"#
+        ),
+      ]), credentials: store)
     try await service.restoreCookies()
     let qr = try await service.beginQR()
     do {
@@ -299,22 +307,59 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
     XCTAssertNil(store.loadToken())
     XCTAssertTrue(store.load().isEmpty)
   }
-  func testRestoreQuarantinesMixedPersistedIdentity() async throws {
+  func testRestoreRejectsMixedPersistedIdentityWithoutMutation() async throws {
     let store = FixtureStore()
-    store.save([fixtureCookie(value: "fixture-B"), fixtureCookie("DedeUserID", value: "456")])
-    store.saveToken(
-      AppToken(
-        mid: 123, accessToken: "fixture-A-token", refreshToken: "fixture-A-refresh",
-        expiresAt: 9_999_999_999))
+    let storedToken = AppToken(
+      mid: 123, accessToken: "fixture-A-token", refreshToken: "fixture-A-refresh",
+      expiresAt: 9_999_999_999)
+    let storedCookies = [
+      fixtureCookie(value: "fixture-B"), fixtureCookie("DedeUserID", value: "456"),
+    ]
+    store.save(storedCookies)
+    store.saveToken(storedToken)
     let service = BiliService(transport: FixtureTransport([]), credentials: store)
+    let before = await service.authSnapshot()
     do {
       try await service.restoreCookies()
       XCTFail("Mixed identity must reject")
     } catch AuthFailure.invalidResponse {}
     let snapshot = await service.authSnapshot()
-    XCTAssertEqual(snapshot.state, .webOnly)
-    XCTAssertNil(snapshot.token)
-    XCTAssertNil(store.loadToken())
+    XCTAssertEqual(snapshot.epoch, before.epoch)
+    XCTAssertEqual(snapshot.identityRevision, before.identityRevision)
+    XCTAssertEqual(snapshot.state, before.state)
+    XCTAssertEqual(snapshot.token, before.token)
+    XCTAssertEqual(snapshot.state, .needsLogin)
+    XCTAssertEqual(store.loadToken(), storedToken)
+    XCTAssertEqual(store.load().map(\.value), storedCookies.map(\.value))
+  }
+  func testFailedRestorePreservesTheActiveIdentity() async throws {
+    let store = FixtureStore()
+    store.save([fixtureCookie(value: "fixture-A"), fixtureCookie("DedeUserID", value: "99")])
+    let oldToken = AppToken(
+      mid: 99, accessToken: "fixture-A-token", refreshToken: "fixture-A-refresh",
+      expiresAt: 9_999_999_999)
+    store.saveToken(oldToken)
+    let service = BiliService(transport: FixtureTransport([]), credentials: store)
+    try await service.restoreCookies()
+    let before = await service.authSnapshot()
+    let replacement = BiliService.StoredCredentials(
+      cookies: [fixtureCookie(value: "fixture-B"), fixtureCookie("DedeUserID", value: "456")],
+      token: AppToken(
+        mid: 123, accessToken: "fixture-B-token", refreshToken: "fixture-B-refresh",
+        expiresAt: 9_999_999_999))
+    do {
+      try await service.restore(replacement)
+      XCTFail("Mixed identity must reject")
+    } catch AuthFailure.invalidResponse {}
+    let snapshot = await service.authSnapshot()
+    XCTAssertEqual(snapshot.epoch, before.epoch)
+    XCTAssertEqual(snapshot.identityRevision, before.identityRevision)
+    XCTAssertEqual(snapshot.state, before.state)
+    XCTAssertEqual(snapshot.token, before.token)
+    XCTAssertEqual(snapshot.token, oldToken)
+    let cookies = await service.loginCookies()
+    XCTAssertTrue(cookies.contains { $0.value == "fixture-A" })
+    XCTAssertFalse(cookies.contains { $0.value == "fixture-B" })
   }
   func testLastWaiterCancellationInterleavesWithNewRegistration() async throws {
     let task = Task<AppToken, Error> {
@@ -379,6 +424,12 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(parsed["ts"], "123")
     XCTAssertNil(parsed["access_key"])
     XCTAssertEqual(parsed["sign"]?.count, 32)
+    var authorizedRequest = URLRequest(url: URL(string: "https://example.invalid")!)
+    authorizedRequest.httpBody = AppForm.authorized(
+      [:], timestamp: 123, accessKey: "fixture-access")
+    let authorized = fields(authorizedRequest)
+    XCTAssertEqual(authorized["access_key"], "fixture-access")
+    XCTAssertEqual(authorized["sign"], "f1f48f6d2ed6f00c56754732f70cab12")
   }
   func testCookieDomainPathSecureExpiryAndSetCookie() {
     let now = Date()
@@ -449,6 +500,8 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(requests[0].url?.path, "/x/passport-tv-login/qrcode/auth_code")
     XCTAssertEqual(requests[0].httpMethod, "POST")
     for request in requests {
+      XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), BiliService.appUserAgent)
+      XCTAssertEqual(request.value(forHTTPHeaderField: "Referer"), BiliService.appReferer)
       XCTAssertNil(fields(request)["access_key"])
       XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
     }
@@ -464,7 +517,10 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
     try await service.restoreCookies()
     let epoch = await service.beginLogin()
     let accepted = try await service.synchronizeCookies(
-      [fixtureCookie(), fixtureCookie("bili_jct", value: "fixture-csrf")], token: epoch)
+      [
+        fixtureCookie(), fixtureCookie("DedeUserID", value: "99"),
+        fixtureCookie("bili_jct", value: "fixture-csrf"),
+      ], token: epoch)
     XCTAssertTrue(accepted)
     let snapshot = try await service.authorizeWebCookies(token: epoch)
     XCTAssertEqual(snapshot.state, .appAuthorized)
@@ -483,7 +539,10 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
     let service = BiliService(transport: transport, credentials: store)
     let epoch = await service.beginLogin()
     _ = try await service.synchronizeCookies(
-      [fixtureCookie(), fixtureCookie("bili_jct", value: "fixture-csrf")], token: epoch)
+      [
+        fixtureCookie(), fixtureCookie("DedeUserID", value: "123"),
+        fixtureCookie("bili_jct", value: "fixture-csrf"),
+      ], token: epoch)
     do {
       _ = try await service.authorizeWebCookies(token: epoch)
       XCTFail("Must reject")
@@ -491,13 +550,14 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
     let snapshot = await service.authSnapshot()
     XCTAssertEqual(snapshot.state, .webOnly)
     XCTAssertNil(store.loadToken())
-    XCTAssertEqual(store.load().count, 2)
+    XCTAssertEqual(store.load().count, 3)
   }
   func testMissingCSRFDoesNotStartNetwork() async throws {
     let transport = FixtureTransport([])
     let service = BiliService(transport: transport, credentials: FixtureStore())
     let epoch = await service.beginLogin()
-    _ = try await service.synchronizeCookies([fixtureCookie()], token: epoch)
+    _ = try await service.synchronizeCookies(
+      [fixtureCookie(), fixtureCookie("DedeUserID", value: "123")], token: epoch)
     do {
       _ = try await service.authorizeWebCookies(token: epoch)
       XCTFail("Must require CSRF")
@@ -749,7 +809,10 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
       ),
       .init(
         #"{"code":0,"data":{"code":0}}"#,
-        headers: ["Set-Cookie": "SESSDATA=fixture-web; Domain=.bilibili.com; Path=/; Secure"]),
+        headers: [
+          "Set-Cookie":
+            "SESSDATA=fixture-web; Domain=.bilibili.com; Path=/; Secure, DedeUserID=123; Domain=.bilibili.com; Path=/; Secure"
+        ]),
     ])
     let store = FixtureStore()
     let service = BiliService(transport: transport, credentials: store)
@@ -758,9 +821,63 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
     XCTAssertEqual(status, .success)
     let snapshot = await service.authSnapshot()
     XCTAssertEqual(snapshot.state, .webOnly)
-    XCTAssertEqual(store.load().count, 1)
+    XCTAssertEqual(Set(store.load().map(\.name)), ["SESSDATA", "DedeUserID"])
+    XCTAssertEqual(store.load().first { $0.name == "DedeUserID" }?.value, "123")
     XCTAssertNil(store.loadToken())
   }
+  func testRequestProfilesDoNotMixWebAndNativeProtocolIdentities() async throws {
+    let transport = FixtureTransport([
+      .init(#"{"code":0,"data":{}}"#), .init(#"{"code":0,"data":{}}"#),
+      .init("ok"), .init("ok"),
+    ])
+    let store = FixtureStore()
+    store.save([
+      fixtureCookie(value: "fixture-A"), fixtureCookie("DedeUserID", value: "123"),
+      fixtureCookie("bili_jct", value: "fixture-csrf"),
+    ])
+    store.saveToken(
+      AppToken(
+        mid: 123, accessToken: "fixture-access", refreshToken: "fixture-refresh",
+        expiresAt: 9_999_999_999))
+    let service = BiliService(transport: transport, credentials: store)
+    try await service.restoreCookies()
+    try await service.consumeAppREST(.recommend)
+    try await service.consumeAppREST(.articleLike, fields: ["aid": "1"])
+    _ = try await service.data(URL(string: "https://api.bilibili.com/x/web-interface/nav")!)
+    _ = try await service.data(URL(string: "https://example.invalid/read")!)
+    let requests = await transport.requests
+    XCTAssertEqual(requests[0].httpMethod, "GET")
+    XCTAssertEqual(requests[0].value(forHTTPHeaderField: "User-Agent"), BiliService.appUserAgent)
+    XCTAssertEqual(requests[0].value(forHTTPHeaderField: "Referer"), BiliService.appReferer)
+    XCTAssertNil(
+      requests[0].value(forHTTPHeaderField: "Cookie"),
+      "ordinary App reads use the signed form, not Web cookies")
+    XCTAssertEqual(
+      URLComponents(url: requests[0].url!, resolvingAgainstBaseURL: false)!.queryItems?.first {
+        $0.name == "access_key"
+      }?.value, "fixture-access")
+    XCTAssertEqual(requests[1].httpMethod, "POST")
+    XCTAssertEqual(requests[1].value(forHTTPHeaderField: "User-Agent"), BiliService.appUserAgent)
+    XCTAssertEqual(requests[1].value(forHTTPHeaderField: "Referer"), BiliService.appReferer)
+    XCTAssertEqual(
+      requests[1].value(forHTTPHeaderField: "Content-Type"), "application/x-www-form-urlencoded")
+    XCTAssertEqual(fields(requests[1])["access_key"], "fixture-access")
+    XCTAssertEqual(fields(requests[1])["csrf"], "fixture-csrf")
+    XCTAssertTrue(requests[1].value(forHTTPHeaderField: "Cookie")!.contains("SESSDATA=fixture-A"))
+    for request in requests[0...1] {
+      XCTAssertFalse(request.value(forHTTPHeaderField: "User-Agent")!.contains("Safari"))
+      XCTAssertNotEqual(request.value(forHTTPHeaderField: "Referer"), BiliService.webReferer)
+    }
+    XCTAssertEqual(requests[2].value(forHTTPHeaderField: "User-Agent"), BiliService.webUserAgent)
+    XCTAssertEqual(requests[2].value(forHTTPHeaderField: "Referer"), BiliService.webReferer)
+    XCTAssertEqual(requests[3].value(forHTTPHeaderField: "User-Agent"), BiliService.webUserAgent)
+    XCTAssertNil(
+      requests[3].value(forHTTPHeaderField: "Referer"),
+      "unrelated hosts never receive a Bilibili Referer")
+    let cdn = service.request(URL(string: "https://upos-sz-mirrorcos.bilivideo.com/subtitle")!)
+    XCTAssertNil(cdn.value(forHTTPHeaderField: "Referer"))
+  }
+
   @MainActor func testUIAndWKCallbackGenerationRejectsLogoutAndDismantle() {
     let gate = AuthCallbackGate()
     let accountGeneration = gate.generation
@@ -779,6 +896,13 @@ final class AuthTests: XCTestCase, @unchecked Sendable {
     XCTAssertFalse(transport.session.configuration.httpShouldSetCookies)
     XCTAssertNil(transport.session.configuration.httpAdditionalHeaders)
     XCTAssertNotNil(config.httpCookieStorage)
+  }
+}
+extension BiliService {
+  fileprivate func consumeAppREST(_ route: BiliAppRoute, fields: [String: String] = [:])
+    async throws
+  {
+    _ = try await appREST(route, fields: fields)
   }
 }
 extension FixtureTransport {

@@ -63,6 +63,29 @@ private struct SearchToolbarHarness: View {
     }
   }
 
+  func testSearchQueryIDCoversEveryRequestStateAndKeepsStringNavigation() {
+    let app = model()
+    defer { app.shutdown() }
+    app.openOverlay(.search("山野"))
+    XCTAssertEqual(app.currentOverlay, .search("山野"))
+
+    let base = LibrarySearchQuery(term: "山野")
+    let original = base.queryID(refreshToken: 0)
+    let variants = [
+      LibrarySearchQuery(term: "新词"),
+      LibrarySearchQuery(term: "山野", type: .user),
+      LibrarySearchQuery(term: "山野", type: .article),
+      LibrarySearchQuery(term: "山野", order: .newest),
+      LibrarySearchQuery(term: "山野", userOrder: .followers),
+      LibrarySearchQuery(term: "山野", userOrder: .level),
+      LibrarySearchQuery(term: "山野", filters: LibraryVideoSearchFilters(duration: 1)),
+      LibrarySearchQuery(term: "山野", filters: LibraryVideoSearchFilters(pubtime: 1)),
+      LibrarySearchQuery(term: "山野", filters: LibraryVideoSearchFilters(tid: 161)),
+    ]
+    for variant in variants { XCTAssertNotEqual(variant.queryID(refreshToken: 0), original) }
+    XCTAssertNotEqual(base.queryID(refreshToken: 1), original)
+  }
+
   func testPlaybackReleasesToolbarSearchFocusWithoutDisablingLaterSearch() async throws {
     let app = model()
     defer { app.shutdown() }
