@@ -6,13 +6,13 @@ let package = Package(
   platforms: [.macOS("27.0")],
   products: [.executable(name: "Manping", targets: ["ManpingApp"])],
   dependencies: [
-    .package(url: "https://github.com/grpc/grpc-swift-2.git", exact: "2.4.3"),
-    .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.10.0"),
-    .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", exact: "2.4.1"),
-    .package(url: "https://github.com/apple/swift-protobuf.git", exact: "1.39.0"),
+    .package(url: "https://github.com/grpc/grpc-swift-2.git", exact: "2.4.4"),
+    .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.13.3"),
+    .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", exact: "2.5.0"),
+    .package(url: "https://github.com/apple/swift-protobuf.git", exact: "1.41.0"),
     // Explicit test products below exercise a raw HTTP/2 failure using the same NIOTS pipeline.
-    .package(url: "https://github.com/apple/swift-nio.git", exact: "2.104.0"),
-    .package(url: "https://github.com/apple/swift-nio-http2.git", exact: "1.46.0"),
+    .package(url: "https://github.com/apple/swift-nio.git", exact: "2.105.2"),
+    .package(url: "https://github.com/apple/swift-nio-http2.git", exact: "1.46.1"),
     .package(url: "https://github.com/apple/swift-nio-transport-services.git", exact: "1.28.0"),
   ],
   targets: [
