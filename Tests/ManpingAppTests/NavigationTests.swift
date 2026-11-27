@@ -51,9 +51,11 @@ private struct SearchToolbarHarness: View {
     for _ in 0..<20 { await Task.yield() }
   }
 
-  private func returnExternalPicture(_ app: AppModel, mode: MacOpenMode) {
+  /// Mini playback returns its picture to the main window; the standalone window closes and
+  /// ends playback, leaving the main window on its list.
+  private func closeExternalPicture(_ app: AppModel, mode: MacOpenMode) {
     if mode == .compact { app.closeMiniPlayer(activateMain: false) }
-    else { app.togglePlaybackWindow() }
+    else { app.closeDetachedPlayback() }
   }
 
   private func settleFocus(_ view: NSView) async throws {
@@ -244,13 +246,21 @@ private struct SearchToolbarHarness: View {
         XCTAssertTrue(app.browsingPageActive)
         let backRefresh = app.refreshToken
         XCTAssertEqual(backRefresh, refresh + (mode == .detached ? 1 : 0))
-        if mode != .mainWindow {
-          returnExternalPicture(app, mode: mode)
+        if mode == .compact {
+          closeExternalPicture(app, mode: mode)
           XCTAssertEqual(app.currentOverlay, route)
           XCTAssertEqual(app.browsingPage, backedSource)
           XCTAssertFalse(app.browsingPageActive)
           app.goBack()
           await settle()
+          XCTAssertTrue(app.browsingPageActive)
+          XCTAssertEqual(app.refreshToken, backRefresh)
+        } else if mode == .detached {
+          closeExternalPicture(app, mode: mode)
+          await settle()
+          XCTAssertFalse(app.hasPlayback)
+          XCTAssertNil(app.currentOverlay)
+          XCTAssertEqual(app.browsingPage, backedSource)
           XCTAssertTrue(app.browsingPageActive)
           XCTAssertEqual(app.refreshToken, backRefresh)
         }
@@ -278,18 +288,29 @@ private struct SearchToolbarHarness: View {
       let backRefresh = app.refreshToken
       XCTAssertEqual(backRefresh, refresh + (mode == .detached ? 1 : 0))
       let backedSource = app.browsingPage
-      returnExternalPicture(app, mode: mode)
-      XCTAssertTrue(app.mainShowsPlayer && !app.playbackElsewhere)
-      XCTAssertEqual(app.browsingPage, backedSource)
-      XCTAssertFalse(app.browsingPageActive)
-      app.goBack()
-      await settle()
-      XCTAssertTrue(app.hasPlayback)
-      XCTAssertTrue(app.pausedBrowsing.isBrowsing)
-      XCTAssertTrue(app.canGoForward)
-      XCTAssertEqual(app.currentOverlay, mode == .compact ? .userSpace(42) : nil)
-      XCTAssertEqual(app.browsingPage, backedSource)
-      XCTAssertEqual(app.refreshToken, backRefresh)
+      if mode == .compact {
+        closeExternalPicture(app, mode: mode)
+        XCTAssertTrue(app.mainShowsPlayer && !app.playbackElsewhere)
+        XCTAssertEqual(app.browsingPage, backedSource)
+        XCTAssertFalse(app.browsingPageActive)
+        app.goBack()
+        await settle()
+        XCTAssertTrue(app.hasPlayback)
+        XCTAssertTrue(app.pausedBrowsing.isBrowsing)
+        XCTAssertTrue(app.canGoForward)
+        XCTAssertEqual(app.currentOverlay, .userSpace(42))
+        XCTAssertEqual(app.browsingPage, backedSource)
+        XCTAssertEqual(app.refreshToken, backRefresh)
+      } else {
+        // Closing the standalone window ends playback; the main window stays on its list.
+        closeExternalPicture(app, mode: mode)
+        await settle()
+        XCTAssertFalse(app.hasPlayback)
+        XCTAssertNil(app.currentOverlay)
+        XCTAssertTrue(app.browsingPageActive)
+        XCTAssertEqual(app.browsingPage, backedSource)
+        XCTAssertEqual(app.refreshToken, backRefresh)
+      }
     }
   }
 
@@ -302,13 +323,19 @@ private struct SearchToolbarHarness: View {
         let source = app.browsingPage
         let refresh = app.refreshToken
         await openVideo(app, mode: mode)
-        if stop { app.closePlayer() }
-        else { returnExternalPicture(app, mode: mode); app.goBack() }
+        if mode == .detached {
+          app.closeDetachedPlayback()
+        } else if stop {
+          app.closePlayer()
+        } else {
+          closeExternalPicture(app, mode: mode)
+          app.goBack()
+        }
         await settle()
         XCTAssertEqual(app.browsingPage, source)
         XCTAssertTrue(app.browsingPageActive)
-        XCTAssertEqual(app.hasPlayback, !stop)
-        XCTAssertEqual(app.canGoForward, !stop)
+        XCTAssertEqual(app.hasPlayback, mode == .compact && !stop)
+        XCTAssertEqual(app.canGoForward, mode == .compact && !stop)
         XCTAssertEqual(app.refreshToken, refresh)
       }
     }

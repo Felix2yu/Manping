@@ -20,8 +20,10 @@ import SwiftUI
   @Published private(set) var notice: String?
   @Published private(set) var failure: String?
   @Published private(set) var status = "未配置"
-  /// Applies settings and a password (nil keeps the stored one); returns an error message.
-  var apply: ((ProxySettings, String?) async -> String?)?
+  /// Applies settings and a password (nil keeps the stored one). `persistSecret` separates
+  /// "start the tunnel for a test" from "save the password", so a failed test can roll back while
+  /// the old password is still in the store. Returns an error message.
+  var apply: ((ProxySettings, String?, Bool) async -> String?)?
   var test: (() async -> (proxied: Result<ProxyProbeResult, Error>, direct: ProxyProbeResult?))?
   private var storedSecret = false
 
@@ -64,8 +66,11 @@ import SwiftUI
     busy = true; proxied = nil; direct = nil; notice = nil; failure = nil
     let draft = self.draft
     let secret = password.isEmpty ? nil : password
+    // 回滚需要操作前的完整快照；新密码先不落盘，失败时本机仍是旧密码。
+    let previous = ProxySettings.load(from: PerformanceEnvironment.defaults)
+    let previousHadSecret = storedSecret
     Task {
-      if let error = await apply(draft, secret) {
+      if let error = await apply(draft, secret, false) {
         failure = error; busy = false; return
       }
       if secret != nil { storedSecret = true; password = "" }
@@ -74,8 +79,21 @@ import SwiftUI
       switch outcome.proxied {
       case .success(let exit):
         proxied = exit; direct = outcome.direct
+        if let secret, let error = await apply(draft, secret, true) {
+          failure = "代理已生效，但密码未能保存：\(error)"
+          FeedbackCenter.shared.failure("代理已生效，但密码未能保存。")
+        } else {
+          FeedbackCenter.shared.success("代理已生效。")
+        }
       case .failure(let error):
-        failure = "代理连接失败：\(error.localizedDescription)"
+        // 测试不通过：恢复原来的设置。secret 传 nil 会复用仍留在本机的旧密码。
+        let rollback = await apply(previous, nil, false)
+        self.load(previous, hasSecret: previousHadSecret,
+          status: previous.kind == .none ? "未配置" : "已恢复原设置")
+        let reason = error.localizedDescription
+        let sentence = reason.hasSuffix("。") || reason.hasSuffix(".") ? reason : reason + "。"
+        let recovery = rollback == nil ? "已恢复原来的设置。" : "恢复原设置时出错：\(rollback!)"
+        failure = "代理连接失败：\(sentence)" + recovery
       }
       busy = false
     }
@@ -166,7 +184,7 @@ struct ProxySettingsCard: View {
         if model.busy { ProgressView().controlSize(.small) }
         if let message = model.validation { InlineErrorText(message: message) }
         else if model.kind != .none {
-          Text("测试通过后才会切换到新设置。").font(Theme.Font.caption).foregroundStyle(Theme.tertiaryText(scheme))
+          Text("会先应用新设置再测试；测试不通过会自动恢复原设置。").font(Theme.Font.caption).foregroundStyle(Theme.tertiaryText(scheme))
         }
       }
       if let notice = model.notice {

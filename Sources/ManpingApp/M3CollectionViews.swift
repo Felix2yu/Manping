@@ -138,8 +138,12 @@ struct M3CollectionResults: View {
           PageStateView(.loading, title: "正在加载\(collection.title)…")
         } else {
           PageStateView(collection.error == nil ? .empty : .error, title: collection.error == nil ? emptyTitle : "没能加载\(collection.title)",
-            message: collection.error ?? "添加的视频会出现在这里。", icon: collection.error == nil ? "tray" : "wifi.exclamationmark",
-            actionTitle: collection.error == nil ? "刷新" : "重试") { Task { await collection.refresh() } }
+            message: collection.error ?? "添加的视频会出现在这里。",
+            icon: collection.error == nil ? "tray" : (errorRequiresLogin(collection.error) ? "person.crop.circle.badge.exclamationmark" : "wifi.exclamationmark"),
+            actionTitle: collection.error == nil ? "刷新" : (errorRequiresLogin(collection.error) ? "去登录" : "重试")) {
+            if collection.error != nil, errorRequiresLogin(collection.error) { model.showingLogin = true }
+            else { Task { await collection.refresh() } }
+          }
         }
       } else {
         ScrollView {
@@ -152,7 +156,10 @@ struct M3CollectionResults: View {
           if let error = collection.error {
             VStack(spacing: 10) {
               InlineErrorText(message: error)
-              Button("重试") { Task { await collection.loadNext() } }.buttonStyle(AppButtonStyle(size: .small))
+              Button(errorRequiresLogin(error) ? "去登录" : "重试") {
+                if errorRequiresLogin(error) { model.showingLogin = true }
+                else { Task { await collection.loadNext() } }
+              }.buttonStyle(AppButtonStyle(size: .small))
             }.padding(16)
           } else if collection.hasMore {
             LoadMoreFooter(isLoading: collection.isLoading, autoLoad: false) { Task { await collection.loadNext() } }

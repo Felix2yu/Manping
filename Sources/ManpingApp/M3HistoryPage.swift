@@ -69,9 +69,15 @@ struct M3HistoryPage: View {
         if !available { source = .account }
       }
       .onChange(of: history.identityVersion) { _, _ in reloadIdentityIfNeeded() }
+      .onChange(of: source) { _, value in
+        // 切到归档时丢弃账号侧未确认的删除/清空，避免只读视图里残留可执行的确认。
+        if value == .archive { history.cancelConfirmation() }
+      }
       .onDisappear { history.cancelRequests() }
       .confirmationDialog(confirmationTitle, isPresented: Binding(
-        get: { history.confirmation != nil }, set: { if !$0 { history.cancelConfirmation() } }
+        // 归档是只读来源：账号侧遗留的删除/清空确认不能在这里被确认。
+        get: { source == .account && history.confirmation != nil },
+        set: { if !$0 { history.cancelConfirmation() } }
       ), titleVisibility: .visible) {
         Button(confirmationTitle, role: .destructive) { history.confirmInBackground() }
         Button("取消", role: .cancel) { history.cancelConfirmation() }
@@ -139,8 +145,11 @@ struct M3HistoryPage: View {
       if history.records.isEmpty && history.isLoading {
         PageStateView(.loading, title: "正在加载历史记录…")
       } else if history.records.isEmpty, let error = history.error {
-        PageStateView(.error, title: "没能加载历史记录", message: error, icon: "wifi.exclamationmark", actionTitle: "重试") {
-          Task { await history.refresh() }
+        PageStateView(.error, title: "没能加载历史记录", message: error,
+          icon: errorRequiresLogin(error) ? "person.crop.circle.badge.exclamationmark" : "wifi.exclamationmark",
+          actionTitle: errorRequiresLogin(error) ? "去登录" : "重试") {
+          if errorRequiresLogin(error) { model.showingLogin = true }
+          else { Task { await history.refresh() } }
         }
       } else if history.records.isEmpty {
         PageStateView(title: history.keyword.isEmpty ? "历史记录是空的" : "没有找到匹配的记录",

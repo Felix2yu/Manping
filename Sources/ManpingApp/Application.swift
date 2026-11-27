@@ -970,7 +970,7 @@ import SwiftUI
   @objc private func openFavorites() { model.go(to: .favorites) }
   @objc private func openLater() { model.go(to: .viewLater) }
   @objc private func openHistory() { model.go(to: .history) }
-  @objc private func openMessages() { model.navigate(to: .message) }
+  @objc private func openMessages() { model.go(to: .page(.message)) }
   @objc private func saveVideoScreenshot() { model.takePlayerScreenshot() }
   @objc private func composeLiveDanmaku() {
     guard !model.compactPlayer else { return }
@@ -1054,11 +1054,11 @@ import SwiftUI
     case .nextAdjacent: model.playAdjacentPart(false)
     case .fullScreen: model.togglePlayerFullScreen()
     case .exitFullScreen:
-      if (player.surface?.window ?? NSApp.keyWindow)?.styleMask.contains(.fullScreen) == true {
+      if model.playbackDetached {
+        model.closeDetachedPlayback()
+      } else if (player.surface?.window ?? NSApp.keyWindow)?.styleMask.contains(.fullScreen) == true {
         if model.hasPlayback { model.togglePlayerFullScreen() }
         else { NSApp.keyWindow?.toggleFullScreen(nil) }
-      } else if model.playbackDetached {
-        model.togglePlaybackWindow()
       } else {
         model.goBack()
       }

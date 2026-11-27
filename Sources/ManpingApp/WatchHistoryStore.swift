@@ -28,6 +28,9 @@ private enum HistoryError: LocalizedError {
   @Published private(set) var token = ""
   @Published var tokenDraft = ""
   @Published private(set) var testStatus: String?
+  /// 地址已填写但格式不合法（normalizedBaseURL 返回 nil）。设置页据此给出可见提示，
+  /// 而不是把「测试连接」直接禁用到用户无从得知原因。
+  @Published private(set) var addressInvalid = false
 
   private(set) var enabled = false
   private(set) var baseURL = ""
@@ -54,6 +57,10 @@ private enum HistoryError: LocalizedError {
   private var blockedUntil: Date?
   private var officialBlockedUntil: Date?
   private var persistTask: Task<Void, Never>?
+  /// 令牌输入的防抖提交；逐字符写盘会让 configure 反复判定「地址变了」并清空缓存。
+  private var tokenCommitTask: Task<Void, Never>?
+  /// 用户在设置里填写的原始地址，用于在令牌提交时重算校验状态。
+  private(set) var rawBaseURL = ""
 
   /// Shown in settings so a user off VPN understands where the marks come from.
   var serverStatus: String? {
@@ -100,7 +107,12 @@ private enum HistoryError: LocalizedError {
   /// Called from settings and at launch. The first call only adopts the settings; changing
   /// server or token afterwards means a different data set, so the saved cache is dropped.
   func configure(enabled: Bool, baseURL: String, token: String? = nil) {
-    let normalized = BiliHistoryConfig.normalizedBaseURL(baseURL) ?? ""
+    let raw = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    let parsed = BiliHistoryConfig.normalizedBaseURL(baseURL)
+    let normalized = parsed ?? ""
+    // 区分「没填」与「填了但格式不对」，测试连接才能给出可操作的提示。
+    rawBaseURL = raw
+    addressInvalid = !raw.isEmpty && parsed == nil
     let nextToken = token ?? self.token
     let addressChanged = self.baseURL != normalized || self.token != nextToken
     let changed = self.enabled != enabled || addressChanged
@@ -202,11 +214,21 @@ private enum HistoryError: LocalizedError {
   func setTokenDraft(_ value: String) {
     tokenDraft = value
     let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    tokenCommitTask?.cancel()
+    // 停顿后再提交：逐字符写盘会触发 configure 判定「地址变了」，把观看状态缓存反复清空。
+    tokenCommitTask = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(600))
+      guard let self, !Task.isCancelled else { return }
+      self.commitToken(trimmed)
+    }
+  }
+
+  private func commitToken(_ trimmed: String) {
     guard BiliHistoryConfig.writeToken(trimmed) else {
       testStatus = "令牌未能保存，请检查本机存储权限。"
       return
     }
-    configure(enabled: enabled, baseURL: baseURL, token: trimmed)
+    configure(enabled: enabled, baseURL: rawBaseURL, token: trimmed)
   }
 
   /// A card asks for its state on appear; requests from one screen coalesce. Cached records are
@@ -293,8 +315,18 @@ private enum HistoryError: LocalizedError {
   }
 
   @discardableResult func testConnection() async -> String {
+    guard enabled else {
+      let message = "请先开启「在封面上显示观看状态」，再填写服务器地址。"
+      testStatus = message
+      return message
+    }
+    guard !addressInvalid else {
+      let message = "服务器地址格式不正确，请填写完整的 http 或 https 地址。"
+      testStatus = message
+      return message
+    }
     guard canConnect else {
-      let message = "请先开启同步并填写服务器地址。"
+      let message = "请填写服务器地址。"
       testStatus = message
       return message
     }
@@ -309,6 +341,8 @@ private enum HistoryError: LocalizedError {
       flushOutbox()
     } catch {
       testStatus = "连接失败：\(error.localizedDescription)"
+      // 测试失败与自动上报共用同一套退避，避免设置页反复重试把失败放大。
+      noteFailure()
     }
     return testStatus ?? ""
   }

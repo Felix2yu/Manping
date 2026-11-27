@@ -306,7 +306,11 @@ private struct AIPresetEditor: View {
     .foregroundStyle(Theme.text(scheme))
     .confirmationDialog("删除预设「\(draft.preset.name)」？", isPresented: $confirmDelete) {
       Button("删除", role: .destructive) {
-        do { try presets.delete(draft.preset.id); close() } catch { self.error = error.localizedDescription }
+        do {
+          try presets.delete(draft.preset.id)
+          FeedbackCenter.shared.success("已删除预设。")
+          close()
+        } catch { self.error = error.localizedDescription }
       }
       Button("取消", role: .cancel) {}
     }
@@ -321,6 +325,7 @@ private struct AIPresetEditor: View {
       } else {
         try presets.update(draft.preset)
       }
+      FeedbackCenter.shared.success(draft.isNew ? "已创建预设。" : "已保存预设。")
       close()
     } catch { self.error = error.localizedDescription }
   }

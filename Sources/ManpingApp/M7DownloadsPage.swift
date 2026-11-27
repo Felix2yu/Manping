@@ -9,6 +9,7 @@ struct M7DownloadsPage: View {
   init(model: AppModel) { self.model = model; queue = model.downloadQueue }
   @Environment(\.colorScheme) private var scheme
   @State private var filter = "全部"
+  @State private var confirmClear = false
   private let filters = ["全部", "进行中", "已完成", "待恢复"]
   private var records: [DownloadRecord] {
     queue.records.filter { record in
@@ -35,7 +36,18 @@ struct M7DownloadsPage: View {
       }
     }.foregroundStyle(Theme.text(scheme))
       .pageToolbar(title: "下载", subtitle: "取消后已下载的部分会保留",
-        segments: AnyView(SegmentedTabs(options: filters.map { ($0, $0) }, selection: $filter)))
+        segments: AnyView(SegmentedTabs(options: filters.map { ($0, $0) }, selection: $filter))) {
+        if queue.hasFinishedRecords {
+          Button { confirmClear = true } label: { Label("清空已结束", systemImage: "trash") }
+            .toolbarActionStyle(.destructive)
+        }
+      }
+      .confirmationDialog("清空已结束的下载记录？", isPresented: $confirmClear) {
+        Button("清空", role: .destructive) { queue.clearFinished() }
+        Button("取消", role: .cancel) {}
+      } message: {
+        Text("只删除记录，已经下载的文件仍保留在磁盘上。")
+      }
   }
   private func taskRow(_ record: DownloadRecord) -> some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -52,20 +64,28 @@ struct M7DownloadsPage: View {
               Text("·"); Text(options.content.title)
               if options.content == .video { Text("· \(qualityName(options.quality)) · \(options.codec.title)") }
             }
+            if let date = record.completedAt ?? record.createdAt {
+              Text("·"); Text(date.formatted(date: .abbreviated, time: .shortened))
+            }
           }.font(Theme.Font.caption).foregroundStyle(Theme.tertiaryText(scheme))
         }.frame(maxWidth: .infinity, alignment: .leading)
         Text(String(format: "%.0f%%", fraction(record) * 100)).font(Theme.Font.caption.monospacedDigit())
           .foregroundStyle(Theme.secondaryText(scheme))
         if ["queued", "downloading", "merging"].contains(record.state) {
           action("取消", icon: "xmark") { model.cancelDownload(record.id) }
-        } else if ["cancelled", "failed", "interrupted", "attachment_failed"].contains(record.state) {
-          action(record.state == "attachment_failed" ? "补弹幕" : "恢复", icon: "arrow.clockwise") { model.retryDownload(record) }
-            .disabled(record.options == nil)
-            .help(record.options == nil ? "此旧任务没有保存下载选项，请回到播放页重新下载。" : "重新获取下载地址并继续已有数据。")
-        } else if record.state == "complete" {
-          action("在 Finder 中显示", icon: "folder") {
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: record.output)])
-          }.disabled(record.output.isEmpty || !FileManager.default.fileExists(atPath: record.output))
+        } else {
+          if ["cancelled", "failed", "interrupted", "attachment_failed"].contains(record.state) {
+            action(record.state == "attachment_failed" ? "补弹幕" : "恢复", icon: "arrow.clockwise") { model.retryDownload(record) }
+              .disabled(record.options == nil)
+              .help(record.options == nil ? "此旧任务没有保存下载选项，请回到播放页重新下载。" : "重新获取下载地址并继续已有数据。")
+          }
+          if record.state == "complete" {
+            action("在 Finder 中显示", icon: "folder") {
+              NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: record.output)])
+            }.disabled(record.output.isEmpty || !FileManager.default.fileExists(atPath: record.output))
+          }
+          action("删除", icon: "trash") { queue.delete(record) }
+            .help("只删除这条记录，已下载的文件仍保留在磁盘上。")
         }
       }
       GeometryReader { geometry in
@@ -87,7 +107,7 @@ struct M7DownloadsPage: View {
   }
   private func action(_ title: String, icon: String, perform: @escaping () -> Void) -> some View {
     Button(action: perform) { Label(title, systemImage: icon) }
-      .buttonStyle(AppButtonStyle(role: title == "取消" ? .destructive : .secondary, size: .small))
+      .buttonStyle(AppButtonStyle(role: ["取消", "删除"].contains(title) ? .destructive : .secondary, size: .small))
   }
   private func fraction(_ record: DownloadRecord) -> Double {
     record.state == "complete" ? 1 : record.progress.isFinite ? min(1, max(0, record.progress)) : 0

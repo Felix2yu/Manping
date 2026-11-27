@@ -707,8 +707,8 @@ struct PlayerBarRow<Leading: View>: View {
         Button { model.togglePlaybackWindow() } label: {
           Image(systemName: model.playbackDetached ? "macwindow" : "macwindow.on.rectangle")
         }.buttonStyle(PlayerControlButtonStyle(size: 32))
-          .help(model.playbackDetached ? "回到主窗口（P / ⌥⌘P）" : "在独立窗口播放（P / ⌥⌘P）")
-          .accessibilityLabel(model.playbackDetached ? "回到主窗口" : "在独立窗口播放")
+          .help(model.playbackDetached ? "关闭独立窗口（P / ⌥⌘P）" : "在独立窗口播放（P / ⌥⌘P）")
+          .accessibilityLabel(model.playbackDetached ? "关闭独立窗口" : "在独立窗口播放")
       case .fullscreen:
         Button { model.togglePlayerFullScreen() } label: {
           Image(systemName: fullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
@@ -888,7 +888,7 @@ struct PlayerBarRow<Leading: View>: View {
         Button { model.toggleCompactPlayer() } label: { Label("小窗", systemImage: item.symbol) }
       case .detached:
         Button { model.togglePlaybackWindow() } label: {
-          Label(model.playbackDetached ? "回到主窗口" : "在独立窗口播放", systemImage: item.symbol)
+          Label(model.playbackDetached ? "关闭独立窗口" : "在独立窗口播放", systemImage: item.symbol)
         }
       case .fullscreen:
         Button { model.togglePlayerFullScreen() } label: {
@@ -971,8 +971,8 @@ struct PlayerToolbarActions: View {
     if windowToggle {
       Button { model.togglePlaybackWindow() } label: {
         ToolbarGroupIcon(model.playbackDetached ? "macwindow" : "macwindow.on.rectangle")
-      }.help(model.playbackDetached ? "回到主窗口（P / ⌥⌘P）" : "在独立窗口播放（P / ⌥⌘P）")
-        .accessibilityLabel(model.playbackDetached ? "回到主窗口" : "在独立窗口播放")
+      }.help(model.playbackDetached ? "关闭独立窗口（P / ⌥⌘P）" : "在独立窗口播放（P / ⌥⌘P）")
+        .accessibilityLabel(model.playbackDetached ? "关闭独立窗口" : "在独立窗口播放")
     }
     Button { withAnimation(.snappy(duration: 0.25)) { sidebarHidden.toggle() } } label: { ToolbarGroupIcon("sidebar.right") }
       .help(sidebarHidden ? "显示右侧栏" : "隐藏右侧栏").accessibilityLabel(sidebarHidden ? "显示右侧栏" : "隐藏右侧栏").demoAnchor("toolbar.sidebar")

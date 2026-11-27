@@ -11,9 +11,13 @@ public struct DownloadRecord: Codable, Identifiable, Sendable {
   public var output: String
   public var error: String
   public var options: DownloadOptions?
+  /// 记录创建与完成时间；旧版本写入的记录没有这两个字段，解码后为 nil。
+  public var createdAt: Date?
+  public var completedAt: Date?
   public init(
     id: String = UUID().uuidString, bvid: String, title: String, state: String = "queued",
-    progress: Double = 0, output: String = "", error: String = "", options: DownloadOptions? = nil
+    progress: Double = 0, output: String = "", error: String = "", options: DownloadOptions? = nil,
+    createdAt: Date? = nil, completedAt: Date? = nil
   ) {
     self.id = id
     self.bvid = bvid
@@ -23,6 +27,8 @@ public struct DownloadRecord: Codable, Identifiable, Sendable {
     self.output = output
     self.error = error
     self.options = options
+    self.createdAt = createdAt
+    self.completedAt = completedAt
   }
 }
 public final class DownloadStore {
@@ -95,6 +101,27 @@ public final class DownloadStore {
           from: Data(bytes: blob, count: Int(sqlite3_column_bytes(statement, 0)))))
     }
     return result
+  }
+  /// Removes one task record. The downloaded file on disk is intentionally left alone.
+  public func delete(id: String) throws {
+    lock.lock()
+    defer { lock.unlock() }
+    var statement: OpaquePointer?
+    guard sqlite3_prepare_v2(db, "DELETE FROM tasks WHERE id = ?", -1, &statement, nil) == SQLITE_OK
+    else { throw BiliError.dependency("下载记录删除准备失败") }
+    defer { sqlite3_finalize(statement) }
+    let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+    guard sqlite3_bind_text(statement, 1, id, -1, transient) == SQLITE_OK,
+      sqlite3_step(statement) == SQLITE_DONE
+    else { throw BiliError.dependency("下载记录删除失败") }
+  }
+  /// Removes every task record; files on disk are kept.
+  public func clear() throws {
+    lock.lock()
+    defer { lock.unlock() }
+    guard sqlite3_exec(db, "DELETE FROM tasks", nil, nil, nil) == SQLITE_OK else {
+      throw BiliError.dependency("下载记录清空失败")
+    }
   }
 }
 /// Response validators and a caller-provided media identity only. Never persists signed URLs, headers or resumeData.

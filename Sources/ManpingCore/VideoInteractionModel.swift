@@ -206,8 +206,14 @@ import Foundation
         try await operation(snapshot)
         let current = await service.authSnapshot()
         try Task.checkCancellation()
-        guard self.accepts(request, aid: aid), Self.sameIdentity(snapshot, current) else { return false }
-        success()
+        guard self.accepts(request, aid: aid) else { return false }
+        // 写入已提交：身份在途中变化也要复位 busy，否则按钮永久禁用、重试会二次投币。
+        // 身份不一致时不把旧账号状态写回新账号界面，改为提示刷新。
+        if Self.sameIdentity(snapshot, current) {
+          success()
+        } else {
+          self.message = "操作已提交，界面状态待刷新。"
+        }
         self.busy = false; self.operationTask = nil
         self.completeMissingState(request: request, aid: aid, boundary: snapshot, current: current)
         return true

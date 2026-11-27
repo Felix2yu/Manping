@@ -27,8 +27,8 @@ struct M6MessagePage: View {
           HStack(spacing: 12) {
             InlineErrorText(message: error)
             Spacer()
-            if error.contains("登录") {
-              Button("登录") { model.showingLogin = true }.buttonStyle(AppButtonStyle(role: .primary, size: .small))
+            if errorRequiresLogin(error) {
+              Button("去登录") { model.showingLogin = true }.buttonStyle(AppButtonStyle(role: .primary, size: .small))
             }
           }.padding(.horizontal, Theme.gridPadding).padding(.vertical, 10).background(Theme.danger(scheme).opacity(0.08))
         }

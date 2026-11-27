@@ -196,7 +196,14 @@ enum MessageMarkReadState: Equatable {
       let current = await service.authSnapshot()
       let valid = !Task.isCancelled && sameIdentity(snapshot, current) && markReadGeneration == revision
       finishMarkRead(revision, result: valid ? result : nil)
-      guard valid else { return }
+      guard valid else {
+        // 身份变化或操作被中断时必须离开 running，否则按钮会永久停在「正在标记」。
+        if markReadGeneration == revision {
+          markReadState = .partialFailure("操作被中断，可以重试。")
+          markReadTask = nil
+        }
+        return
+      }
       let failures = MessageSection.allCases.compactMap { section -> String? in
         switch result.outcomes[section] ?? .unknown {
         case .success: return nil

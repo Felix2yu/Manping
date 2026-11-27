@@ -782,8 +782,22 @@ import WebKit
       return appSettings.bool(key)
     }
   }
+  /// 「我的」组里未登录就无法查看的入口。下载是本地队列，匿名也能打开，不拦。
+  func destinationRequiresLogin(_ destination: Destination) -> Bool {
+    switch destination {
+    case .favorites, .viewLater, .history, .page(.moment), .page(.message): true
+    case .page: false
+    }
+  }
+  /// 登录态：凭据恢复后 `account` 立即离开「登录」，比等到资料加载完的 `accountMID` 更早可用，
+  /// 避免已登录用户在启动瞬间被误弹登录页。
+  var hasAccount: Bool { accountMID != nil || account != "登录" }
   /// Opens a sidebar item: a page, or a library list as the only route on the stack.
   func go(to destination: Destination) {
+    if destinationRequiresLogin(destination), !hasAccount {
+      showingLogin = true
+      return
+    }
     switch destination {
     case .page(let page): navigate(to: page)
     default:
@@ -1011,15 +1025,19 @@ import WebKit
     DownloadRecord(
       id: "fixture-complete", bvid: "BV1fixture01", title: "山野记录 · 已完成的样本", state: "complete",
       progress: 1, output: "/tmp/Bili Downloads/sample.mp4",
-      options: DownloadOptions(cid: 1000, directory: "/tmp/Bili Downloads")),
+      options: DownloadOptions(cid: 1000, directory: "/tmp/Bili Downloads"),
+      createdAt: Date(timeIntervalSince1970: 1_760_000_000),
+      completedAt: Date(timeIntervalSince1970: 1_760_003_600)),
     DownloadRecord(
       id: "fixture-interrupted", bvid: "BV1fixture02", title: "城市的声音 · 中断后可恢复",
       state: "interrupted", progress: 0.42, error: "上次运行中断，可恢复下载",
-      options: DownloadOptions(cid: 1001, directory: "/tmp/Bili Downloads")),
+      options: DownloadOptions(cid: 1001, directory: "/tmp/Bili Downloads"),
+      createdAt: Date(timeIntervalSince1970: 1_760_010_000)),
     DownloadRecord(
       id: "fixture-failed", bvid: "BV1fixture03", title: "桌面计划 · 磁盘错误样本", state: "failed",
       progress: 0.12, error: "磁盘空间不足，请释放空间后恢复",
-      options: DownloadOptions(cid: 1002, directory: "/tmp/Bili Downloads")),
+      options: DownloadOptions(cid: 1002, directory: "/tmp/Bili Downloads"),
+      createdAt: Date(timeIntervalSince1970: 1_760_020_000)),
   ]
   init() {
     let bookmarkStore = (try? PlaybackBookmarkStore.recover()) ?? (try? PlaybackBookmarkStore())
@@ -1364,7 +1382,11 @@ import WebKit
         if compactPlayer {
           closeMiniPlayer(activateMain: false)
         } else {
-          playbackWindow.close(showMain: true)
+          // 前进到播放页是用户主动把画面带回主窗口，不是关闭独立播放器。
+          playbackDetached = false
+          playbackWindow.close(showMain: true, notify: false)
+          restorePlaybackPage()
+          resumeVisiblePlayback(revealing: true)
         }
         return
       }
@@ -1546,8 +1568,10 @@ import WebKit
     _ video: Video, startAt: Double, part: Int? = nil, mode: MacOpenMode? = nil,
     useHistory: Bool
   ) {
-    startVideo(video, preservingQueue: false, part: part, startAt: startAt, useHistory: useHistory)
-    pendingOpenMode = mode.map { OpenPlacement(mode: $0) } ?? defaultOpenPlacement
+    let placement = mode.map { OpenPlacement(mode: $0) } ?? defaultOpenPlacement
+    startVideo(video, preservingQueue: false, part: part, startAt: startAt, useHistory: useHistory,
+      detachedFromStart: placement.mode == .detached)
+    pendingOpenMode = placement
     // An explicit window opens right away; the media fills it when it loads, leaving the
     // window as it is by then.
     if let mode, [.compact, .detached].contains(mode) {
@@ -1600,7 +1624,11 @@ import WebKit
       .removeDuplicates()
       .sink { [weak self] media in self?.playbackFeatures.follow(aid: media.aid, cid: media.cid) }
     pgcSelection = selection
-    overlays.append(.pgc(selection))
+    if defaultOpenPlacement.mode == .detached {
+      browsingBesidePlayback = true
+    } else {
+      overlays.append(.pgc(selection))
+    }
     // The model owns the load, so it runs even when the page is not on screen (小窗).
     Task { await playback.ensureLoaded(selection) }
   }
@@ -1628,10 +1656,10 @@ import WebKit
     let settings = ProxySettings.load(from: PerformanceEnvironment.defaults)
     proxySettingsModel.load(
       settings, hasSecret: false, status: settings.kind == .none ? "未配置" : "等待启动")
-    proxySettingsModel.apply = { [weak self] settings, secret in
+    proxySettingsModel.apply = { [weak self] settings, secret, persistSecret in
       // nil is success; only a released model reports an error here.
       guard let self else { return "应用已关闭" }
-      return await self.applyProxy(settings, secret: secret, saveSecret: true)
+      return await self.applyProxy(settings, secret: secret, saveSecret: persistSecret)
     }
     proxySettingsModel.test = { [weak self] in
       guard let self else { return (.failure(BiliError.invalidResponse("应用已关闭")), nil) }
@@ -1707,7 +1735,11 @@ import WebKit
       preferHEVC: playbackPreferences.codec == .hevc,
       avoidPeerAssisted: playbackPreferences.avoidP2P, usesFixtures: usesUIFixtures)
     livePlayback = live
-    overlays.append(.live(roomID))
+    if mode == .detached {
+      browsingBesidePlayback = true
+    } else {
+      overlays.append(.live(roomID))
+    }
     live.start()
     if !usesUIFixtures { attachLiveSystemMedia(live) }
   }
@@ -1892,7 +1924,8 @@ import WebKit
 
   private func startVideo(
     _ video: Video, preservingQueue: Bool, identityRetry: Bool = false,
-    initiallyPaused: Bool = false, part: Int? = nil, startAt: Double = 0, useHistory: Bool = false
+    initiallyPaused: Bool = false, part: Int? = nil, startAt: Double = 0, useHistory: Bool = false,
+    detachedFromStart: Bool = false
   ) {
     let requestedStart = startAt.isFinite ? max(0, startAt) : 0
     currentUsesHistory = useHistory
@@ -1929,12 +1962,14 @@ import WebKit
     }
     eofObservation = nil
     clipGeneration = UUID()
-    // A new video replaces what plays; the main window shows its page (or placeholder) again.
-    browsingBesidePlayback = false
+    // A new video replaces what plays. When the picture belongs to the standalone window the
+    // main window never receives a playback route, so it stays on the list it was showing.
+    let playsInStandalone = detachedFromStart || playbackDetached
+    browsingBesidePlayback = playsInStandalone
     pausedBrowsing.reset()
     overlays.removeAll(where: Self.isPlayerRoute)
     forwardRoutes.removeAll(where: Self.isPlayerRoute)
-    overlays.append(.video(video.id))
+    if !playsInStandalone { overlays.append(.video(video.id)) }
     loadTask?.cancel()
     player.shutdown()
     sessionMediaKey = video.id
@@ -2190,7 +2225,8 @@ import WebKit
     artworkTask = nil
     systemMedia.clear()
     watchActivity.end()
-    playbackWindow.close(showMain: true)
+    // The close callback already ends playback, so close without notifying here.
+    playbackWindow.close(showMain: true, notify: false)
     playbackDetached = false
     cancelCuratedPlaylist()
     clearPlaybackQueue()
@@ -2599,16 +2635,16 @@ import WebKit
     guard hasPlayback else { return }
     userPlacedPicture()
     if playbackDetached {
-      #if DEBUG
-        if debugSuppressPlaybackWindows {
-          returnFromPlaybackWindow()
-          return
-        }
-      #endif
-      playbackWindow.close(showMain: true)
+      closeDetachedPlayback()
     } else {
       presentPlaybackWindow()
     }
+  }
+  /// Closing the standalone window ends playback instead of putting the picture back on the
+  /// main window. `closePlayer` clears any playback route, so the main window keeps its list.
+  func closeDetachedPlayback() {
+    userPlacedPicture()
+    closePlayer()
   }
   /// Moves the picture into the standalone window, shown as `displayMode` (a plain window
   /// unless 设置 › 打开视频时 asked for 全屏 / 小窗 there).
@@ -2628,11 +2664,6 @@ import WebKit
       self.refreshPlaybackWindowContent(displayMode: displayMode)
     }
   }
-  private func returnFromPlaybackWindow() {
-    userPlacedPicture()
-    playbackDetached = false
-    restorePlaybackPage()
-  }
   /// Puts the playing page into the standalone window. With `displayMode` (an open) the window
   /// takes that look; without it (next part, playlist, reload) it stays as it is.
   private func refreshPlaybackWindowContent(displayMode: String? = nil) {
@@ -2646,9 +2677,9 @@ import WebKit
       content: host, mainWindow: (NSApp.delegate as? AppDelegate)?.window,
       displayMode: displayMode
     ) { [weak self] in
-      // Closing the standalone window (its close button included) puts the picture back in
-      // the main window; a load still pending must not move it again.
-      self?.returnFromPlaybackWindow()
+      // The red close button (and any other close path) ends playback. The main window stays
+      // on its list instead of being pulled back to the playback page.
+      self?.closeDetachedPlayback()
     }
   }
   /// 小窗 on or off (⇧⌘P). Opening it leaves full screen and the standalone window first; the
@@ -2663,7 +2694,10 @@ import WebKit
   private func presentMiniPlayer() {
     guard hasPlayback, !compactPlayer else { return }
     finishBrowsingForPlacement()
-    if playbackDetached { playbackWindow.close(showMain: false) }
+    if playbackDetached {
+      playbackWindow.close(showMain: false, notify: false)
+      playbackDetached = false
+    }
     if let window = mainWindow, window.styleMask.contains(.fullScreen) {
       window.toggleFullScreen(nil)
     }
@@ -3123,7 +3157,7 @@ import WebKit
     artworkTask?.cancel()
     systemMedia.clear()
     watchActivity.end()
-    playbackWindow.close(showMain: false)
+    playbackWindow.close(showMain: false, notify: false)
     miniPlayer.close()
     pgcPlayback?.shutdown()
     pgcPlayback = nil

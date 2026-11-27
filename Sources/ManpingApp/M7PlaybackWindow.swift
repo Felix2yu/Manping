@@ -48,6 +48,8 @@ import AppKit
       self.window = window
     }
     guard let window else { return }
+    // The window instance is kept across closes so its frame (size and position) is remembered.
+    window.delegate = self
     window.contentView = content
     #if DEBUG
     publishWindowID(window)
@@ -69,15 +71,15 @@ import AppKit
       }
     }
   }
-  func close(showMain: Bool = true) {
-    guard let window, !closing else { return }
+  func close(showMain: Bool = true, notify: Bool = true) {
+    guard let window, window.isVisible, !closing else { return }
     closing = true
-    let callback = onClose
+    let callback = notify ? onClose : nil
     onClose = nil
     window.delegate = nil
     window.contentView = nil
     window.close()
-    self.window = nil
+    // Keep the instance: its autosaved frame survives, so reopening restores the same size.
     #if DEBUG
     if let file = playbackWindowIDFile { try? FileManager.default.removeItem(at: file) }
     #endif

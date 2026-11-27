@@ -209,6 +209,8 @@ private struct SettingsLayout: View {
             .id(selection.group)
         }
       }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 反馈条贴在分类标题这一行的空白处，不压住下面的分组标题与说明。
+        .overlay(alignment: .top) { FeedbackToastHost() }
     }
     .background(Theme.panel(scheme))
     .ignoresSafeArea(.container, edges: .top)
@@ -380,17 +382,27 @@ private struct SettingsCategoryView: View {
 private struct WatchHistoryTokenRow: View {
   @ObservedObject var store: WatchHistoryStore
   @Environment(\.colorScheme) private var scheme
+  @State private var testing = false
+  @State private var confirmClear = false
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       LabeledContent {
+        // 固定 260pt 与上方「服务器地址」的控件列同宽；超宽时 LabeledContent 会退化成
+        // 标签在上、控件在下，把「测试连接」挤到下一行旁边。
         HStack(spacing: 8) {
           SecureField("可选", text: Binding(get: { store.tokenDraft }, set: { store.setTokenDraft($0) }))
-            .textFieldStyle(.roundedBorder).frame(width: 200).labelsHidden()
-          Button { Task { await store.testConnection() } } label: { Text("测试连接") }
-            .disabled(!store.canConnect)
-        }
+            .textFieldStyle(.roundedBorder).labelsHidden()
+          // 地址非法时也要能点：由 testConnection 给出具体原因，而不是静默禁用按钮。
+          Button {
+            guard !testing else { return }
+            testing = true
+            Task { await store.testConnection(); testing = false }
+          } label: {
+            if testing { ProgressView().controlSize(.small) } else { Text("测试连接") }
+          }.fixedSize().disabled(testing)
+        }.frame(width: 260)
       } label: {
-        SettingLabel(title: "访问令牌", detail: "服务器设置了 api_token 时填写；只保存在本机加密存储。")
+        SettingLabel(title: "服务器访问令牌", detail: "服务器设置了 api_token 时填写；只保存在本机加密存储。")
       }
       if let status = store.serverStatus {
         Text(status).font(Theme.Font.caption).foregroundStyle(.secondary)
@@ -399,10 +411,16 @@ private struct WatchHistoryTokenRow: View {
         Text(status).font(Theme.Font.caption).foregroundStyle(.secondary)
       }
       LabeledContent {
-        Button("清除缓存") { store.clearCache() }
+        Button("清除本机缓存") { confirmClear = true }
       } label: {
         SettingLabel(title: "本机观看状态缓存", detail: "清除后，再看列表时会重新从服务器读取观看状态和进度。")
       }
+    }
+    .confirmationDialog("清除本机观看状态缓存？", isPresented: $confirmClear) {
+      Button("清除", role: .destructive) { store.clearCache() }
+      Button("取消", role: .cancel) {}
+    } message: {
+      Text("缓存清除后不可恢复，下次浏览时会重新从服务器读取。")
     }
   }
 }

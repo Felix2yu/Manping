@@ -218,7 +218,6 @@ private extension PartitionOrder {
 struct BrowseVideoResults: View, Equatable {
   @ObservedObject var feed: BrowseFeedModel
   @ObservedObject private var recommendationFilter = RecommendationFilterStore.shared
-  @State private var videoFeedback: VideoFeedbackNotice?
   let open: (Video) -> Void
   let filtersRecommendations: Bool
   private let feedID: ObjectIdentifier
@@ -232,19 +231,6 @@ struct BrowseVideoResults: View, Equatable {
 
   nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.feedID == rhs.feedID && lhs.filtersRecommendations == rhs.filtersRecommendations
-  }
-
-  private struct VideoFeedbackNotice: Equatable {
-    let title: String
-    let message: String
-    let offersUndo: Bool
-
-    static let hidden = Self(title: "已从推荐中移除",
-      message: "这个视频已从推荐中隐藏。可立即撤销，或稍后在设置 › 推荐过滤中清除。", offersUndo: true)
-    static let hideFailed = Self(title: "没能更新推荐反馈",
-      message: "偏好设置写入失败，这个视频仍在推荐列表中。", offersUndo: false)
-    static let undoFailed = Self(title: "没能撤销",
-      message: "偏好设置写入失败，这个视频仍保持隐藏。", offersUndo: false)
   }
 
   private var visibleItems: [Video] {
@@ -276,7 +262,11 @@ struct BrowseVideoResults: View, Equatable {
               VideoCard(video: video, action: { open(video) }, filterRecommendation: filtersRecommendations ? { (kind: RecommendationRuleKind) in
                 if recommendationFilter.add(video: video, kind: kind).succeeded { feed.remove(videoID: video.id) }
               } : nil, hideRecommendation: filtersRecommendations ? {
-                videoFeedback = recommendationFilter.hide(video: video) ? .hidden : .hideFailed
+                if recommendationFilter.hide(video: video) {
+                  FeedbackCenter.shared.success("已从推荐中移除，可在设置 › 推荐过滤中撤销。")
+                } else {
+                  FeedbackCenter.shared.failure("没能更新推荐反馈，偏好设置可能未写入。")
+                }
               } : nil)
             }
           }.cardGridContent().performanceScrollTarget(target: PerformanceOptions.scrollPage ?? "")
@@ -296,20 +286,6 @@ struct BrowseVideoResults: View, Equatable {
           feed.loadNext()
         }
       }
-    }
-    .alert(videoFeedback?.title ?? "", isPresented: Binding(
-      get: { videoFeedback != nil },
-      set: { if !$0 { videoFeedback = nil } }
-    )) {
-      if videoFeedback?.offersUndo == true {
-        Button("撤销") {
-          if recommendationFilter.undoLastHide() { videoFeedback = nil }
-          else { videoFeedback = .undoFailed }
-        }
-      }
-      Button("知道了", role: .cancel) { videoFeedback = nil }
-    } message: {
-      Text(videoFeedback?.message ?? "")
     }
   }
 }

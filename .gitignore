@@ -1,7 +1,5 @@
-.build
 .build/
 dist/
-.DS_Store
 *.xcuserstate
 
 __pycache__/
@@ -33,3 +31,23 @@ docs/media/.out/
 docs/media/.assets/
 docs/media/remotion/frames/
 node_modules/
+
+# ---- AI Agent 生成目录（不进版本库，本地保留）----
+.workbuddy/
+.trae/
+.trea/
+.qoder/
+.opencode/
+.cursor/
+.claude/
+.codex/
+.gemini/
+.continue/
+.windsurf/
+.aider*
+.zcode/
+
+# ---- 系统垃圾文件（macOS / Windows 都会生成）----
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -69,7 +69,7 @@ struct RecommendationFilterSettingsView: View {
 
       Section {
         if store.filter.hiddenVideos.isEmpty {
-          Text("还没有隐藏的推荐视频。可在推荐视频的“不再推荐 › 这个视频”中添加。")
+          Text("还没有隐藏的推荐视频。可在推荐视频右键菜单的「这个视频」中添加。")
             .foregroundStyle(Theme.secondaryText(scheme))
         } else {
           ForEach(store.filter.hiddenVideos) { video in

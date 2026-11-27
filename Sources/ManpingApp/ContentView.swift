@@ -282,6 +282,8 @@ private struct ShellContent: View {
       Color.clear.frame(height: immersive ? 0 : Theme.toolbarHeight)
       pageContent.frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(\.immersivePlayback, immersive)
+        // 保存反馈挂在内容列上：既不会遮住工具栏，也不会因为把侧边栏算进窗口宽度而偏心。
+        .overlay(alignment: .top) { FeedbackToastHost() }
     }
     // Pages describe their toolbar with `.pageToolbar(…)`; it is drawn once, here.
     .overlayPreferenceValue(PageToolbarKey.self, alignment: .top) { item in
@@ -392,7 +394,9 @@ private struct ShellContent: View {
           .frame(width: 48, height: 48).background(Theme.selectedFill(scheme), in: Circle()).padding(.bottom, 4)
         Text(mini ? "正在小窗中播放" : "正在独立窗口中播放").font(Theme.Font.section)
         HStack(spacing: 8) {
-          Button("回到主窗口") { if mini { model.toggleCompactPlayer() } else { model.togglePlaybackWindow() } }
+          Button(mini ? "回到主窗口" : "关闭独立窗口") {
+            if mini { model.toggleCompactPlayer() } else { model.closeDetachedPlayback() }
+          }
             .buttonStyle(AppButtonStyle(role: .primary))
           Button("停止播放") { model.closePlayer() }.buttonStyle(AppButtonStyle())
         }.padding(.top, 6)

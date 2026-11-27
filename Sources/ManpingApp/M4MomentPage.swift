@@ -122,8 +122,11 @@ struct M4MomentPage: View {
       if feed.items.isEmpty && feed.loading {
         PageStateView(.loading, title: "正在加载动态…")
       } else if feed.items.isEmpty, let error = feed.error {
-        PageStateView(.error, title: "没能加载动态", message: error, actionTitle: "重试") {
-          Task { await feed.loadNext() }
+        PageStateView(.error, title: "没能加载动态", message: error,
+          icon: errorRequiresLogin(error) ? "person.crop.circle.badge.exclamationmark" : "wifi.exclamationmark",
+          actionTitle: errorRequiresLogin(error) ? "去登录" : "重试") {
+          if errorRequiresLogin(error) { model.showingLogin = true }
+          else { Task { await feed.loadNext() } }
         }
       } else if feed.items.isEmpty {
         PageStateView(title: "动态是空的", message: "关注的 UP 主发布新内容后会出现在这里。", icon: "person.2")

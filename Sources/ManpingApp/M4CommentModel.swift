@@ -70,7 +70,7 @@ struct M4CommentTarget: Equatable, Sendable {
         } ?? false
         if changed, let target = self.target {
           let sort = self.sort
-          await self.select(target, sort: sort)
+          await self.select(target, sort: sort, preservingDraft: true)
         }
       }
     }
@@ -86,8 +86,12 @@ struct M4CommentTarget: Equatable, Sendable {
     targetIdentity = nil; identities = [:]; likedOverrides = [:]; likeCounts = [:]
     mutationError = nil; notice = nil; canInteract = false; draft = ""; cancelReply()
   }
-  func select(_ target: M4CommentTarget, sort: RPCCommentSort = .hot) async {
-    cancel(); self.target = target; self.sort = sort
+  func select(_ target: M4CommentTarget, sort: RPCCommentSort = .hot, preservingDraft: Bool = false) async {
+    let draft = self.draft
+    cancel()
+    // 身份刷新或同目标刷新不应清掉用户正在编辑的内容；只有切换评论目标才清空。
+    if preservingDraft { self.draft = draft }
+    self.target = target; self.sort = sort
     await loadNext()
   }
   func setSort(_ sort: RPCCommentSort) async {
@@ -96,7 +100,7 @@ struct M4CommentTarget: Equatable, Sendable {
   }
   func refresh() async {
     guard !busy, let target else { return }
-    await select(target, sort: sort)
+    await select(target, sort: sort, preservingDraft: true)
   }
   private func readIdentity() async throws -> AuthSnapshot {
     let initial = await auth.authSnapshot()
@@ -251,9 +255,10 @@ struct M4CommentTarget: Equatable, Sendable {
           throw CancellationError()
         }
         try await operation(snapshot)
-        let current = await auth.authSnapshot()
         try Task.checkCancellation()
-        guard self.generation == revision, self.sameIdentity(snapshot, current) else { return }
+        // 请求已写入成功：必须收敛 busy 并让界面反映结果，否则按钮会永久禁用、
+        // 草稿残留导致重复提交。身份在途中变化时无需回写旧状态，列表刷新会以当前身份重建。
+        guard self.generation == revision else { return }
         success(); self.busy = false; self.mutation = nil
       } catch {
         guard let self, self.generation == revision else { return }

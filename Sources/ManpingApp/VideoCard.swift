@@ -82,7 +82,6 @@ struct VideoContextMenu: View {
       Button("进入 UP 主空间") { actions.openSpace(mid) }
     }
     if let filterRecommendation {
-      Divider()
       RecommendationFilterMenu(video: video, onFilter: filterRecommendation, onHide: hideRecommendation)
     }
     if let extra {
@@ -206,7 +205,9 @@ private struct RecommendationFilterMenu: View {
   @ObservedObject private var store = RecommendationFilterStore.shared
 
   var body: some View {
-    Menu("不再推荐") {
+    // A section header keeps the grouping without forcing a second-level submenu:
+    // both the card grid and the detail page's related list show these actions inline.
+    Section("不再推荐") {
       if let onHide {
         Button {
           onHide()
@@ -216,7 +217,6 @@ private struct RecommendationFilterMenu: View {
         }
         .disabled(store.filter.hides(video)
           || RecommendationHiddenVideo.identity(bvid: video.bvid, aid: video.aid) == nil)
-        Divider()
       }
       if let id = video.partitionID, let name = video.partitionName, !name.isEmpty {
         filterButton("一级分区：\(name)", kind: .primaryPartition, id: Int64(id))

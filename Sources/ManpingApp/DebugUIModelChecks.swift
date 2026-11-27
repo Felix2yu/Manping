@@ -374,10 +374,10 @@
       try require(
         model.playbackDetached && !model.pausedBrowsing.isBrowsing && model.player.paused,
         "detached migration preserves original pause")
-      model.togglePlaybackWindow()
+      model.closeDetachedPlayback()
       try require(
-        model.mainShowsPlayer && !model.playbackDetached && model.player.paused,
-        "closing detached restores paused main picture")
+        !model.hasPlayback && !model.playbackDetached && model.currentOverlay == .userSpace(946974),
+        "closing detached leaves the main window on its list")
       model.openOverlay(.userSpace(946974))
       model.open(Video(bvid: "", title: "Replacement", cid: 1001, aid: 101))
       await model.debugVideoLoadRequest?.value

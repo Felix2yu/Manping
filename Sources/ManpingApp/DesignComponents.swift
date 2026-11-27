@@ -2,6 +2,13 @@ import SwiftUI
 
 // Shared page scaffolding and controls keep heights, insets and type consistent across the app.
 
+/// 「我的」列表在未登录时都会返回含「登录」的错误。统一识别，让页面给「去登录」而不是
+/// 让用户反复点一个必然失败的「重试」。
+func errorRequiresLogin(_ message: String?) -> Bool {
+  guard let message else { return false }
+  return message.contains("登录")
+}
+
 /// The 52pt header above a page's content: optional symbol, title, trailing controls.
 struct PageHeader<Controls: View>: View {
   let title: String

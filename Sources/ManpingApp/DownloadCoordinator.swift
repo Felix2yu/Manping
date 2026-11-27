@@ -24,7 +24,7 @@ import SwiftUI
     guard let store else { report("没有可下载的分集。"); return }
     for (source, title, var choice) in choices {
       choice.directory = directory.path
-      let record = DownloadRecord(bvid: source, title: title, options: choice)
+      let record = DownloadRecord(bvid: source, title: title, options: choice, createdAt: Date())
       do { try store.save(record); run(record) } catch { report(error.localizedDescription) }
     }
     records = (try? store.records()) ?? records
@@ -184,7 +184,10 @@ import SwiftUI
     }
   }
   private func update(_ record: DownloadRecord) throws {
-    try store?.save(record)
+    var value = record
+    // 完成时间只写一次：重试或补弹幕再次完成时不覆盖首次完成时刻。
+    if value.state == "complete", value.completedAt == nil { value.completedAt = Date() }
+    try store?.save(value)
     records = try store?.records() ?? []
   }
   /// Progress callbacks arrive per network packet; publish at most every half percent so a
@@ -193,6 +196,29 @@ import SwiftUI
     if let index = records.firstIndex(where: { $0.id == id && $0.state == "downloading" }),
       progress - records[index].progress >= 0.005 || progress >= 1 {
       records[index].progress = progress
+    }
+  }
+  private static func isActive(_ state: String) -> Bool {
+    ["queued", "downloading", "merging"].contains(state)
+  }
+  var hasFinishedRecords: Bool { records.contains { !Self.isActive($0.state) } }
+  /// 只删任务记录，磁盘上已下载的文件保持不动。
+  func delete(_ record: DownloadRecord) {
+    guard !Self.isActive(record.state) else { return }
+    tasks[record.id]?.cancel(); tasks[record.id] = nil
+    if let store {
+      do { try store.delete(id: record.id) } catch { report(error.localizedDescription); return }
+    }
+    records.removeAll { $0.id == record.id }
+  }
+  /// 清空所有已结束的记录；进行中的任务不受影响。
+  func clearFinished() {
+    for record in records where !Self.isActive(record.state) {
+      tasks[record.id]?.cancel(); tasks[record.id] = nil
+      if let store {
+        do { try store.delete(id: record.id) } catch { report(error.localizedDescription); return }
+      }
+      records.removeAll { $0.id == record.id }
     }
   }
   func cancel(_ id: String) { tasks[id]?.cancel() }

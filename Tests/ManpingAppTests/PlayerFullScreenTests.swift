@@ -36,11 +36,16 @@ final class PlayerFullScreenTests: XCTestCase {
       XCTAssertTrue(window.contentView === content, "resizing must not create a second player owner")
     }
 
+    let savedFrame = window.frame
     coordinator.close(showMain: false)
     coordinator.close(showMain: false)
-    XCTAssertNil(coordinator.window)
     XCTAssertNil(window.contentView)
-    XCTAssertEqual(closeCalls, 1, "closing restores the main player exactly once")
+    XCTAssertEqual(closeCalls, 1, "closing ends standalone playback exactly once")
+
+    coordinator.present(content: NSView(), mainWindow: nil, displayMode: nil) {}
+    XCTAssertTrue(coordinator.window === window, "reopening reuses the same window instance")
+    XCTAssertEqual(window.frame, savedFrame, "the window remembers its size and position")
+    coordinator.close(showMain: false)
   }
 
   @MainActor func testDetachedWindowLeavesTheMainWindowVisible() throws {
