@@ -112,9 +112,9 @@
     {
       "formula": "glib",
       "version": "2.90.1",
-      "source": "/opt/homebrew/Cellar/glib/2.90.1/lib/libglib-2.0.0.dylib",
+      "source": "/opt/homebrew/Cellar/glib/2.90.2/lib/libglib-2.0.0.dylib",
       "library": "libglib-2.0.0.dylib",
-      "sha256": "9ccb24305a227967f6c13eec59c3469228e600236664e3710ab92d6228e938eb"
+      "sha256": "23c474d6801ef61f442727feb8a9720e9b81d9e1d53f1f38d3823dec5f691e46"
     },
     {
       "library": "libgraphite2.3.3.1.dylib",
